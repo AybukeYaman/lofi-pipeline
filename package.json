@@ -1,0 +1,8 @@
+{
+  "name": "lofi-pipeline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Lofi video montaj otomasyonu (ffmpeg tabanlı)",
+  "engines": { "node": ">=18" }
+}
