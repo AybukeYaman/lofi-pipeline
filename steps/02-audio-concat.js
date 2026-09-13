@@ -9,10 +9,12 @@
  */
 
 import { mkdir, readFile } from 'node:fs/promises';
-import { basename, dirname, sep } from 'node:path';
+import { basename, dirname } from 'node:path';
 
 import { ffmpeg } from '../core/ffmpeg.js';
-import { listFiles, findDuplicates, matchOrder, normalizeName } from '../core/files.js';
+import {
+  concatLine, listFiles, findDuplicates, matchOrder, normalizeName,
+} from '../core/files.js';
 import { durationsMatch, probe } from '../core/probe.js';
 
 /**
@@ -329,21 +331,6 @@ function encodeArgs(action, format) {
     '-ar', String(format.sampleRate),
     '-ac', String(format.channels),
   ];
-}
-
-/**
- * concat demuxer satırı: `file '<yol>'`
- *
- * Ayıraçlar ileri eğik çizgiye çevrilir (demuxer ters eğik çizgiyi kaçış
- * karakteri sanabiliyor), tek tırnak kabuk kuralıyla kaçırılır.
- *
- * @param {string} path
- * @returns {string}
- */
-function concatLine(path) {
-  const normalized = path.split(sep).join('/');
-  const escaped = normalized.split("'").join("'\\''");
-  return `file '${escaped}'`;
 }
 
 /**

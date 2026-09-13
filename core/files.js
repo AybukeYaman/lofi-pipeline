@@ -9,11 +9,27 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { readdir } from 'node:fs/promises';
-import { basename, extname, join } from 'node:path';
+import { basename, extname, join, sep } from 'node:path';
 
 /** Varsayılan ses uzantıları. Uzantı yalnızca ön eleme içindir — */
 /** gerçek codec kararı her zaman probe() ölçümüne dayanır (gizli Opus tuzağı). */
 export const AUDIO_EXTENSIONS = ['.m4a', '.mp3', '.wav', '.flac', '.aac', '.opus', '.ogg'];
+
+/**
+ * concat demuxer liste satırı: `file '<yol>'`
+ *
+ * Ayıraçlar ileri eğik çizgiye çevrilir (demuxer ters eğik çizgiyi kaçış
+ * karakteri sanabiliyor), tek tırnak kabuk kuralıyla kaçırılır.
+ * Ses (Aşama 2) ve video (Aşama 4) birleştirmesi aynı satırı kullanır.
+ *
+ * @param {string} path
+ * @returns {string}
+ */
+export function concatLine(path) {
+  const normalized = path.split(sep).join('/');
+  const escaped = normalized.split("'").join("'\\''");
+  return `file '${escaped}'`;
+}
 
 /**
  * Doğal (insan) sıralama: "2" < "10", alfabetikte tersi olurdu.
