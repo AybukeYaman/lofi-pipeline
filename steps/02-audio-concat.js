@@ -12,9 +12,7 @@ import { mkdir, readFile } from 'node:fs/promises';
 import { basename, dirname } from 'node:path';
 
 import { ffmpeg } from '../core/ffmpeg.js';
-import {
-  concatLine, listFiles, findDuplicates, matchOrder, normalizeName,
-} from '../core/files.js';
+import { concatLine, listFiles, findDuplicates, matchOrder } from '../core/files.js';
 import { durationsMatch, probe } from '../core/probe.js';
 
 /**
@@ -30,15 +28,6 @@ const COPY_WHITELIST = { codec: 'aac' };
 /** Varsayılan çıktı hedefi (referans videodaki değerler). */
 const DEFAULTS = { bitrate: '192k', sampleRate: 48000, channels: 2 };
 
-/**
- * Başlıkta küçük kalan kelimeler. Yalnızca ilk kelimeden sonra geçerli:
- * "on the glass" küçük, ama "The Quiet Room" başta olduğu için büyük.
- * Böylece her albümde names eşlemesine elle yazmak gerekmiyor.
- */
-const SMALL_WORDS = new Set([
-  'on', 'the', 'a', 'an', 'of', 'in', 'at', 'to', 'and', 'or', 'for', 'with',
-]);
-
 const NOOP_LOGGER = { info() {}, warn() {} };
 
 /**
@@ -50,7 +39,6 @@ const NOOP_LOGGER = { info() {}, warn() {} };
  * @param {import('../core/workspace.js').createWorkspace extends
  *   (...args: any) => Promise<infer W> ? W : never} options.workspace
  * @param {string} [options.orderFile] order.txt yolu (yoksa alfabetik sıraya düşülür)
- * @param {Record<string, string>} [options.names] dosya adı → görünen ad eşlemesi
  * @param {string} [options.bitrate]
  * @param {number} [options.sampleRate]
  * @param {number} [options.channels]
@@ -64,7 +52,6 @@ export async function concatAudio(options) {
     outputPath,
     workspace,
     orderFile,
-    names = {},
     bitrate = DEFAULTS.bitrate,
     sampleRate = DEFAULTS.sampleRate,
     channels = DEFAULTS.channels,
@@ -139,12 +126,11 @@ export async function concatAudio(options) {
     );
   }
 
-  // 8 — Manifest (Aşama 5 tracklist'i buradan üretecek, dosyaları yeniden ölçmeyecek)
+  // 8 — Manifest (05-tracklist.js damgaları ve adları buradan üretir, dosyaları yeniden ölçmez)
   let elapsed = 0;
   const tracks = probes.map((p) => {
     const track = {
       file: p.path,
-      name: displayName(p.path, names),
       duration: p.duration,
       startSeconds: elapsed,
       codec: p.audioCodec,
@@ -331,41 +317,4 @@ function encodeArgs(action, format) {
     '-ar', String(format.sampleRate),
     '-ac', String(format.channels),
   ];
-}
-
-/**
- * Parçanın görünen adı: names eşlemesi varsa o, yoksa dosya adından türetilir.
- *   "midnight-window [usesuno.com].m4a" → "Midnight Window"
- *
- * @param {string} path
- * @param {Record<string, string>} names
- * @returns {string}
- */
-function displayName(path, names) {
-  const key = normalizeName(basename(path));
-
-  for (const [alias, label] of Object.entries(names)) {
-    if (normalizeName(alias) === key) return label;
-  }
-
-  return titleCase(key);
-}
-
-/**
- * Başlık büyütmesi. İlk kelime her zaman büyür; SMALL_WORDS'teki bağlaç ve
- * edatlar araya düştüklerinde küçük kalır:
- *   "rain on the glass" → "Rain on the Glass"
- *
- * @param {string} text normalizeName çıktısı (küçük harf, boşlukla ayrılmış)
- * @returns {string}
- */
-function titleCase(text) {
-  return text
-    .split(' ')
-    .map((word, index) =>
-      index > 0 && SMALL_WORDS.has(word)
-        ? word
-        : word.charAt(0).toUpperCase() + word.slice(1),
-    )
-    .join(' ');
 }
