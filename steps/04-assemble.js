@@ -193,7 +193,7 @@ export async function assembleVideo(options) {
   }
 
   const elapsedSeconds = Number(((Date.now() - startedAt) / 1000).toFixed(1));
-  logger.info(`Montaj bitti: ${elapsedSeconds} sn, yöntem ${method}.`);
+  logger.info(`Montaj yöntemi: ${method}.`);
 
   return {
     output: outputPath,

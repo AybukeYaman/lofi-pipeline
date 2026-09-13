@@ -38,7 +38,9 @@ const NOOP_LOGGER = { info() {}, warn() {} };
  * @param {string} options.outputPath üretilecek mix dosyası
  * @param {import('../core/workspace.js').createWorkspace extends
  *   (...args: any) => Promise<infer W> ? W : never} options.workspace
- * @param {string} [options.orderFile] order.txt yolu (yoksa alfabetik sıraya düşülür)
+ * @param {string[]} [options.order] parça sırası (sade adlar, ör. "midnight-window");
+ *   verilirse orderFile'dan önce gelir
+ * @param {string} [options.orderFile] order.txt yolu (ikisi de yoksa alfabetik sıraya düşülür)
  * @param {string} [options.bitrate]
  * @param {number} [options.sampleRate]
  * @param {number} [options.channels]
@@ -51,6 +53,7 @@ export async function concatAudio(options) {
     audioDir,
     outputPath,
     workspace,
+    order,
     orderFile,
     bitrate = DEFAULTS.bitrate,
     sampleRate = DEFAULTS.sampleRate,
@@ -85,7 +88,7 @@ export async function concatAudio(options) {
   // 3 — Sırala
   const { ordered, sortSource, orderReport } = await resolveOrder(
     unique,
-    orderFile,
+    { order, orderFile },
     warn,
   );
 
@@ -162,19 +165,25 @@ export async function concatAudio(options) {
 }
 
 /**
- * Sıralamayı belirler: order.txt varsa ondan, yoksa alfabetik sıraya düşer.
- * Alfabetiğe düşüş asla sessiz değildir — bu albümde alfabetik sıra yanlıştı.
+ * Sıralamayı belirler. Öncelik: `order` dizisi (project.json) → order.txt →
+ * alfabetik. Alfabetiğe düşüş asla sessiz değildir — bu albümde alfabetik
+ * sıra yanlıştı — ama build'i de durdurmaz.
  *
  * @param {string[]} paths
- * @param {string|undefined} orderFile
+ * @param {{ order?: string[], orderFile?: string }} source
  * @param {(message: string) => void} warn
  */
-async function resolveOrder(paths, orderFile, warn) {
+async function resolveOrder(paths, { order, orderFile }, warn) {
   let lines = null;
+  let label = null;
 
-  if (orderFile) {
+  if (Array.isArray(order) && order.length > 0) {
+    lines = order;
+    label = 'order';
+  } else if (orderFile) {
     try {
       lines = (await readFile(orderFile, 'utf8')).split(/\r?\n/);
+      label = 'order.txt';
     } catch {
       warn(`order.txt okunamadı: ${orderFile}`);
     }
@@ -182,9 +191,9 @@ async function resolveOrder(paths, orderFile, warn) {
 
   if (lines === null) {
     warn(
-      'order.txt yok — dosyalar alfabetik/doğal sıraya göre dizildi. ' +
-      'Albüm sırası alfabetik DEĞİLDİR (gece → sabah konsepti elle kurulur); ' +
-      'çıktıyı dinlemeden yayınlama.',
+      'Parça sırası verilmedi (project.json "order" / order.txt) — dosyalar ' +
+      'alfabetik/doğal sıraya göre dizildi. Albüm sırası alfabetik DEĞİLDİR ' +
+      '(gece → sabah konsepti elle kurulur); çıktıyı dinlemeden yayınlama.',
     );
     return {
       ordered: paths,
@@ -196,24 +205,24 @@ async function resolveOrder(paths, orderFile, warn) {
   const report = matchOrder(lines, paths);
 
   for (const { line, lineNumber } of report.unmatchedLines) {
-    warn(`order.txt satır ${lineNumber}: "${line}" hiçbir dosyayla eşleşmedi.`);
+    warn(`${label} satır ${lineNumber}: "${line}" hiçbir dosyayla eşleşmedi.`);
   }
   for (const { line, lineNumber, candidates } of report.ambiguousLines) {
     warn(
-      `order.txt satır ${lineNumber}: "${line}" birden fazla dosyaya uyuyor ` +
+      `${label} satır ${lineNumber}: "${line}" birden fazla dosyaya uyuyor ` +
       `(${candidates.map((c) => basename(c)).join(', ')}). Satır atlandı.`,
     );
   }
   if (report.unlistedFiles.length > 0) {
     warn(
-      `order.txt'de geçmeyen ${report.unlistedFiles.length} dosya sona eklendi: ` +
+      `${label} içinde geçmeyen ${report.unlistedFiles.length} dosya sona eklendi: ` +
       `${report.unlistedFiles.map((f) => basename(f)).join(', ')}`,
     );
   }
 
   return {
     ordered: report.ordered,
-    sortSource: 'order.txt',
+    sortSource: label,
     orderReport: {
       unmatchedLines: report.unmatchedLines,
       ambiguousLines: report.ambiguousLines,

@@ -13,8 +13,12 @@
 import { mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
+import { AspectError, parseAspect } from '../core/aspect.js';
 import { ffmpeg } from '../core/ffmpeg.js';
 import { probe } from '../core/probe.js';
+
+// Adımı kullananlar hata tipini buradan da alabilsin.
+export { AspectError, parseAspect };
 
 const DEFAULTS = {
   /** Nihai çıktı her videoda 16:9 isteniyor (kırpma modu). */
@@ -44,26 +48,6 @@ export class CropNotConfirmedError extends Error {
     this.name = 'CropNotConfirmedError';
     this.framePath = framePath;
   }
-}
-
-export class AspectError extends Error {
-  /** @param {string} message */
-  constructor(message) {
-    super(message);
-    this.name = 'AspectError';
-  }
-}
-
-/**
- * `"16:9"` → `{ w: 16, h: 9 }`.
- * @param {string} aspect
- */
-export function parseAspect(aspect) {
-  const match = /^\s*(\d+(?:\.\d+)?)\s*[:/x]\s*(\d+(?:\.\d+)?)\s*$/.exec(String(aspect));
-  if (!match || Number(match[1]) <= 0 || Number(match[2]) <= 0) {
-    throw new AspectError(`Geçersiz en-boy oranı: "${aspect}" (beklenen biçim: 16:9)`);
-  }
-  return { w: Number(match[1]), h: Number(match[2]), label: `${match[1]}:${match[2]}` };
 }
 
 /**

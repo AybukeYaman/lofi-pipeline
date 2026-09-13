@@ -16,6 +16,22 @@ const FFPROBE_PREFIX = ['-hide_banner', '-loglevel', 'error'];
 /** Hata mesajında gösterilecek son stderr satırı sayısı. */
 const STDERR_TAIL_LINES = 40;
 
+/** Çalışan alt süreçler — iptal anında hepsini durdurabilmek için. */
+const activeChildren = new Set();
+
+/**
+ * Çalışan tüm ffmpeg/ffprobe süreçlerini sonlandırır (Ctrl+C).
+ * Bekleyen çağrılar FfmpegError ile reddedilir; çağıranın finally blokları
+ * (workspace temizliği) normal şekilde çalışır.
+ *
+ * @returns {number} sonlandırılan süreç sayısı
+ */
+export function abortAll() {
+  const count = activeChildren.size;
+  for (const child of activeChildren) child.kill();
+  return count;
+}
+
 /**
  * Windows'ta çıkış kodu işaretsiz 32-bit geliyor (-2 yerine 4294967294).
  * Okunabilir olması için işaretli değere çevir.
@@ -74,6 +90,7 @@ export function run(binary, args, options = {}) {
 
   return new Promise((resolve, reject) => {
     const child = spawn(binary, args, { cwd, signal, windowsHide: true });
+    activeChildren.add(child);
 
     let stdout = '';
     const stderrTail = [];
@@ -107,6 +124,7 @@ export function run(binary, args, options = {}) {
     });
 
     child.on('error', (err) => {
+      activeChildren.delete(child);
       if (err.code === 'ENOENT') {
         reject(new FfmpegError(
           `${binary} bulunamadı. PATH'te kurulu olduğundan emin ol (ffmpeg 9.0.1 bekleniyor).`,
@@ -118,6 +136,7 @@ export function run(binary, args, options = {}) {
     });
 
     child.on('close', (rawCode, closeSignal) => {
+      activeChildren.delete(child);
       const code = normalizeExitCode(rawCode);
       if (stderrBuffer !== '') pushStderr(stderrBuffer);
       const stderr = stderrTail.join('\n');

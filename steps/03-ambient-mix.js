@@ -104,7 +104,14 @@ export async function mixAmbient(options) {
   }
 
   // 2 — Müziği ölç, hedefi türet
-  const measureSegment = sample ?? {};
+  const sampleWindow = sample ? fitSample(sample, video.duration) : null;
+  if (sampleWindow && sampleWindow.startSeconds !== sample.startSeconds) {
+    logger.info(
+      `Video ${video.duration} sn — doğrulama kesiti ${sample.startSeconds}. sn'ye sığmıyor, ` +
+      `${sampleWindow.startSeconds}. sn'den ${sampleWindow.duration} sn alınıyor.`,
+    );
+  }
+  const measureSegment = sampleWindow ?? {};
   const music = await measureLoudness(videoPath, measureSegment);
   const targetI = targetLoudnessFor(music.inputI, ambientOffsetDb);
 
@@ -131,13 +138,13 @@ export async function mixAmbient(options) {
   });
 
   // 3 — Kısa örneklerle doğrula (48 dakikayı üretmeden önce)
-  const verification = sample
+  const verification = sampleWindow
     ? await verifyLevels({
       videoPath,
       ambientPath,
       workspace,
       ambientFilter,
-      sample,
+      sample: sampleWindow,
       targetI,
       musicI: music.inputI,
       logger,
@@ -206,6 +213,22 @@ export async function mixAmbient(options) {
     verification,
     warnings,
   };
+}
+
+/**
+ * Doğrulama kesitini videoya sığdırır. Kesit videonun sonunu aşıyorsa (kısa
+ * video) ölçülecek ses kalmaz ve loudnorm NaN döndürür; bu durumda kesit
+ * videonun ortasına alınır, süre de gerekirse videoya indirilir.
+ *
+ * @param {{ startSeconds: number, duration: number }} sample
+ * @param {number} videoDuration
+ * @returns {{ startSeconds: number, duration: number }}
+ */
+export function fitSample(sample, videoDuration) {
+  if (sample.startSeconds + sample.duration <= videoDuration) return sample;
+  const duration = Math.min(sample.duration, videoDuration);
+  const startSeconds = Number(Math.max(0, (videoDuration - duration) / 2).toFixed(3));
+  return { startSeconds, duration };
 }
 
 /**
