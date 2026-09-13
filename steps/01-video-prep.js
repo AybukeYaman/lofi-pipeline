@@ -1,7 +1,9 @@
 /**
  * Aşama 4a — Video hazırlığı.
  *
- * Ham klip → base.mp4: watermark kırpılır, ses atılır, loop kontrol edilir.
+ * Ham klip → base.mp4: watermark kırpılır, en-boy oranına (varsayılan 16:9)
+ * kırpılır, ses atılır, loop kontrol edilir. İki kırpma tek filtre zincirinde,
+ * tek encode'da uygulanır.
  *
  * Girdi 5 saniyelik bir klip; buradaki her işlem saniyeler sürer. Pahalı olan
  * kısım 04-assemble.js'teki 48 dakikalık encode — bu yüzden kırpma değeri
@@ -15,6 +17,8 @@ import { ffmpeg } from '../core/ffmpeg.js';
 import { probe } from '../core/probe.js';
 
 const DEFAULTS = {
+  /** Nihai çıktı her videoda 16:9 isteniyor (kırpma modu). */
+  aspect: '16:9',
   crf: 16,
   preset: 'slow',
   /** Loop testinde kaç tekrar üretilsin (gözle bakmak için). */
@@ -42,6 +46,82 @@ export class CropNotConfirmedError extends Error {
   }
 }
 
+export class AspectError extends Error {
+  /** @param {string} message */
+  constructor(message) {
+    super(message);
+    this.name = 'AspectError';
+  }
+}
+
+/**
+ * `"16:9"` → `{ w: 16, h: 9 }`.
+ * @param {string} aspect
+ */
+export function parseAspect(aspect) {
+  const match = /^\s*(\d+(?:\.\d+)?)\s*[:/x]\s*(\d+(?:\.\d+)?)\s*$/.exec(String(aspect));
+  if (!match || Number(match[1]) <= 0 || Number(match[2]) <= 0) {
+    throw new AspectError(`Geçersiz en-boy oranı: "${aspect}" (beklenen biçim: 16:9)`);
+  }
+  return { w: Number(match[1]), h: Number(match[2]), label: `${match[1]}:${match[2]}` };
+}
+
+/**
+ * Watermark kırpması SONRASI boyuttan en-boy kırpmasını hesaplar.
+ *
+ * Kırpma modu (dolgu değil): yükseklik korunur, genişlik yükseklik × oran olur,
+ * fark soldan ve sağdan eşit kesilir — kadrajın merkezi yerinde kalır.
+ * Sabit piksel değeri yazılmaz; her klibin kendi boyutundan türetilir.
+ *
+ * h264 (yuv420p) çift genişlik istediği için hedef genişlik çifte yuvarlanır.
+ * Kaynak genişliği de çiftse fark çift çıkar ve iki yan tam eşit kesilir.
+ *
+ * @param {{ width: number, height: number, aspect: string }} p
+ * @returns {{
+ *   skipped: boolean, reason: string|null, aspect: string,
+ *   before: { width: number, height: number },
+ *   after: { width: number, height: number },
+ *   left: number, right: number, filter: string|null,
+ * }}
+ */
+export function planAspectCrop({ width, height, aspect }) {
+  const ratio = parseAspect(aspect);
+  const exact = (height * ratio.w) / ratio.h;
+  const targetWidth = 2 * Math.round(exact / 2);
+  const before = { width, height };
+
+  // Çift sayıya yuvarlama en fazla 1 px sapma getirir; o kadarı "zaten bu oranda".
+  if (Math.abs(width - exact) <= 1) {
+    return {
+      skipped: true, reason: `kaynak zaten ${ratio.label}`, aspect: ratio.label,
+      before, after: before, left: 0, right: 0, filter: null,
+    };
+  }
+
+  if (targetWidth > width) {
+    throw new AspectError(
+      `Kaynak ${ratio.label} için fazla dar: ${width}×${height}, hedef genişlik ` +
+      `${targetWidth} px (yükseklik × ${ratio.w}/${ratio.h}). Kırpma modu genişlik ` +
+      'ekleyemez — farklı bir oran ver ya da en-boy adımını kapat.',
+    );
+  }
+
+  const removed = width - targetWidth;
+  const left = Math.floor(removed / 2);
+  const right = removed - left;
+
+  return {
+    skipped: false,
+    reason: null,
+    aspect: ratio.label,
+    before,
+    after: { width: targetWidth, height },
+    left,
+    right,
+    filter: `crop=${targetWidth}:${height}:${left}:0`,
+  };
+}
+
 /**
  * Ham klipten base.mp4 üretir.
  *
@@ -55,6 +135,8 @@ export class CropNotConfirmedError extends Error {
  * @param {boolean} [options.assumeApproved] onayı atla (testler ve otomasyon)
  * @param {(info: { framePath: string, cropBottom: number, before: object, after: object })
  *   => Promise<boolean>} [options.confirm] onay callback'i
+ * @param {string|null} [options.aspect] watermark kırpmasından sonra bu orana
+ *   kırpar (varsayılan '16:9'); null/false verilirse adım kapalı
  * @param {number} [options.scaleWidth] verilirse bu genişliğe ölçekler
  * @param {number} [options.crf]
  * @param {string} [options.preset]
@@ -74,6 +156,7 @@ export async function prepareVideo(options) {
     verifyCrop = false,
     assumeApproved = false,
     confirm,
+    aspect = DEFAULTS.aspect,
     scaleWidth,
     crf = DEFAULTS.crf,
     preset = DEFAULTS.preset,
@@ -102,16 +185,37 @@ export async function prepareVideo(options) {
     );
   }
 
-  // 1 — Kırpma onayı (koşullu, HANDOFF bölüm 14/1)
+  // 1 — En-boy planı: watermark kırpması SONRASI boyuttan hesaplanır.
+  // Onaydan önce, çünkü dar kaynak hatası kimseye kare göstermeden fırlamalı.
+  const aspectPlan = aspect
+    ? planAspectCrop({ width: source.width, height: croppedHeight, aspect })
+    : null;
+
+  const filters = [`crop=iw:ih-${cropBottom}:0:0`];
+  if (aspectPlan && !aspectPlan.skipped) {
+    filters.push(aspectPlan.filter);
+  }
+  const expected = aspectPlan ? aspectPlan.after : { width: source.width, height: croppedHeight };
+
+  if (aspectPlan?.skipped) {
+    logger.info(`En-boy adımı atlandı: ${aspectPlan.reason} (${source.width}×${croppedHeight}).`);
+  } else if (aspectPlan) {
+    logger.info(
+      `En-boy ${aspectPlan.aspect}: ${source.width}×${croppedHeight} → ` +
+      `${expected.width}×${expected.height} (soldan ${aspectPlan.left}, sağdan ${aspectPlan.right} px)`,
+    );
+  }
+
+  // 2 — Kırpma onayı (koşullu, HANDOFF bölüm 14/1)
+  // Kontrol karesi nihai kadrajı gösterir: watermark + en-boy kırpması birlikte.
   const approval = await resolveCropApproval({
-    clipPath, cropBottom, croppedHeight, source,
+    clipPath, cropBottom, cropFilter: filters.join(','), before: source, after: expected,
     workspace, cropFromConfig, verifyCrop, assumeApproved, confirm, logger,
   });
 
-  // 2 — Kırp, sesi at, gerekirse ölçekle
+  // 3 — Kırp, sesi at, gerekirse ölçekle
   await mkdir(dirname(outputPath), { recursive: true });
 
-  const filters = [`crop=iw:ih-${cropBottom}:0:0`];
   if (scaleWidth) {
     // -2: yüksekliği en-boy oranına göre çift sayıya yuvarla (h264 şartı).
     filters.push(`scale=${scaleWidth}:-2`);
@@ -124,7 +228,7 @@ export async function prepareVideo(options) {
   }
 
   logger.info(
-    `Kırpılıyor: ${source.width}×${source.height} → ${source.width}×${croppedHeight}` +
+    `Kırpılıyor: ${source.width}×${source.height} → ${expected.width}×${expected.height}` +
     (scaleWidth ? `, ${scaleWidth} px genişliğe ölçekleniyor` : ''),
   );
 
@@ -145,13 +249,14 @@ export async function prepareVideo(options) {
   if (result.hasAudio) {
     warn('base.mp4 hâlâ ses akışı taşıyor — -an beklendiği gibi çalışmamış.');
   }
-  if (result.height !== croppedHeight && !scaleWidth) {
+  if (!scaleWidth && (result.width !== expected.width || result.height !== expected.height)) {
     throw new Error(
-      `Kırpma tutmadı: ${result.height} px, beklenen ${croppedHeight} px.`,
+      `Kırpma tutmadı: ${result.width}×${result.height}, beklenen ` +
+      `${expected.width}×${expected.height}.`,
     );
   }
 
-  // 3 — Loop kontrolü
+  // 4 — Loop kontrolü
   const loop = await inspectLoop({ path: outputPath, workspace, loopTest, logger });
 
   return {
@@ -164,6 +269,7 @@ export async function prepareVideo(options) {
       hadAudio: source.hasAudio,
     },
     crop: { bottom: cropBottom, approval },
+    aspect: aspectPlan,
     scale: scaleWidth ? { width: scaleWidth, height: result.height } : null,
     result: {
       width: result.width,
@@ -190,7 +296,7 @@ export async function prepareVideo(options) {
  */
 async function resolveCropApproval(params) {
   const {
-    clipPath, cropBottom, croppedHeight, source, workspace,
+    clipPath, cropBottom, cropFilter, before, after, workspace,
     cropFromConfig, verifyCrop, assumeApproved, confirm, logger,
   } = params;
 
@@ -205,7 +311,7 @@ async function resolveCropApproval(params) {
   const framePath = workspace.path('crop-check.png');
   await ffmpeg([
     '-i', clipPath,
-    '-vf', `crop=iw:ih-${cropBottom}:0:0`,
+    '-vf', cropFilter,
     // Tek kare yazarken ffmpeg dosya adını sekans kalıbı sanıyor (tuzak #5).
     '-frames:v', '1', '-update', '1',
     '-y', framePath,
@@ -225,8 +331,8 @@ async function resolveCropApproval(params) {
   const granted = await confirm({
     framePath,
     cropBottom,
-    before: { width: source.width, height: source.height },
-    after: { width: source.width, height: croppedHeight },
+    before: { width: before.width, height: before.height },
+    after,
   });
 
   if (!granted) throw new CropNotConfirmedError(framePath);
