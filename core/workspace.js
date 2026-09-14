@@ -3,12 +3,13 @@
  *
  * Tek sorumluluk: klasör aç, içine güvenli biçimde dosya yaz, sonunda temizle.
  * Dosyaların ne olduğunu bilmez (list.txt mi mix.m4a mi umursamaz),
- * ffmpeg çalıştırmaz.
+ * ffmpeg çalıştırmaz. BOM'a dayanıklı metin/JSON okuma-yazma da burada —
+ * aynı tuzak (bölüm 8) hem build'in hem prep/'in dosyalarında var.
  *
  * Disk dar (≈65 GB boş) — temizlik bu projede isteğe bağlı değil.
  */
 
-import { mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -35,6 +36,21 @@ export async function writeTextFile(path, content) {
 
   await writeFile(path, Buffer.from(clean, 'utf8'));
   return path;
+}
+
+/**
+ * JSON dosyasını okur; baştaki BOM kesilir (PowerShell'in
+ * Set-Content -Encoding UTF8'i BOM ekliyor, bölüm 8).
+ *
+ * Hatalar sarılmaz: okuma hatası `code` taşır (ENOENT…), bozuk JSON
+ * `SyntaxError` fırlatır — mesajı çağıran taraf kendi bağlamıyla kurar.
+ *
+ * @param {string} path
+ * @returns {Promise<unknown>}
+ */
+export async function readJsonFile(path) {
+  const raw = await readFile(path, 'utf8');
+  return JSON.parse(raw.replace(/^\uFEFF/, ''));
 }
 
 /**

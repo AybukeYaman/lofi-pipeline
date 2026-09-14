@@ -1,0 +1,29 @@
+{
+  "name": "cozy-realistic",
+  "styleBlock": {
+    "medium": "Digital photograph shot in natural light; subtle film-emulation post-processing, warm-toned color grading and a light bloom/glow effect.",
+    "lines": "No hard vector lines; soft, gradual edge transitions. Medium-to-high detail sharpness in the foreground, natural bokeh softening in the background; organic, photographic contours.",
+    "palette": [
+      { "hex": "#F5E1B8", "role": "warm cream / gold, main light color" },
+      { "hex": "#E8A87C", "role": "peach / salmon, sunlit surfaces" },
+      { "hex": "#4A6B3A", "role": "dark olive green, leaves" },
+      { "hex": "#7C9A5E", "role": "mid green, mid-tone foliage" },
+      { "hex": "#D97B6C", "role": "coral / pink, flower tones" },
+      { "hex": "#FAF3E0", "role": "off-white, bright highlights" },
+      { "hex": "#2E3B2A", "role": "deep shadow green" }
+    ],
+    "light": "Low-angle, warm golden-hour light; rim light from behind and the side, halo and glow where light passes through fuzzy or feathery surfaces; diffuse, soft light source with no hard shadow edges.",
+    "texture": "Subtle organic film grain; smooth but not sterile-digital; a soft, almost pastel roughness.",
+    "contrast": "Low-to-medium contrast with compressed dynamic range: highlights never blow out and shadows never fully close; overall soft and airy.",
+    "shading": "Soft, diffused shadows with no harsh atmospheric shadow; shadows are tinted (dark greenish tones) and balanced by the warmth of the light; soft-light photographic shading, not chiaroscuro."
+  },
+  "suggestedAmbient": "campfire",
+  "motionHints": [
+    "steam rising slowly from a cup",
+    "fireplace or candle flames flickering gently",
+    "warm light pulsing softly on the walls",
+    "leaves and flowers swaying faintly in a breeze",
+    "dust motes drifting in a sunbeam",
+    "water flowing in a stream outside"
+  ]
+}

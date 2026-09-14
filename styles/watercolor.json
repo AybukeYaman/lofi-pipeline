@@ -1,0 +1,28 @@
+{
+  "name": "watercolor",
+  "styleBlock": {
+    "medium": "Traditional watercolor painting on cold-press paper; transparent washes layered wet-in-wet and wet-on-dry, hand-painted illustration feel.",
+    "lines": "Few or no outlines; forms are defined where washes meet. Soft, bleeding edges in wet areas, occasional crisp dried edges and tide lines; optional sparse, broken pencil linework.",
+    "palette": [
+      { "hex": "#F4EFE4", "role": "paper white, untouched highlights" },
+      { "hex": "#A8C5D6", "role": "soft cerulean wash, sky and water" },
+      { "hex": "#7FA58A", "role": "sage green, foliage" },
+      { "hex": "#E3B58F", "role": "diluted ochre / peach, warm light" },
+      { "hex": "#C98A8A", "role": "faded rose, accents" },
+      { "hex": "#5B6B7A", "role": "blue-grey, shadow washes" },
+      { "hex": "#3D4A52", "role": "deep indigo-grey, darkest accents" }
+    ],
+    "light": "Light comes from the paper itself: highlights are left unpainted; gentle, diffuse illumination with no hard light sources; glow suggested by lifted or blotted pigment.",
+    "texture": "Visible cold-press paper grain, pigment granulation in darker washes, blooms and backruns, uneven pigment pooling along wash edges.",
+    "contrast": "Low-to-medium contrast; values built up in transparent layers, darkest darks used sparingly.",
+    "shading": "Shadows as translucent glazes of cool color over dry washes; soft graded transitions and color shifts instead of black-based shading."
+  },
+  "suggestedAmbient": "gentleRain",
+  "motionHints": [
+    "water surface rippling gently",
+    "light shimmering softly on the water",
+    "grass and leaves swaying faintly",
+    "mist breathing slowly in the background",
+    "steam rising in faint translucent wisps"
+  ]
+}

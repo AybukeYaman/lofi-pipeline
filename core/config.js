@@ -9,10 +9,11 @@
  * döngüsüne düşülmesin.
  */
 
-import { readFile, stat } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve } from 'node:path';
 
 import { AspectError, parseAspect } from './aspect.js';
+import { readJsonFile } from './workspace.js';
 
 export class ConfigError extends Error {
   /**
@@ -53,19 +54,15 @@ const KNOWN_KEYS = {
  */
 export async function loadProject(projectPath, overrides = {}) {
   const path = resolve(projectPath);
-  let raw;
-  try {
-    raw = await readFile(path, 'utf8');
-  } catch (cause) {
-    throw new ConfigError(path, [`dosya okunamadı: ${cause.code ?? cause.message}`]);
-  }
-
   let json;
   try {
-    // PowerShell'in Set-Content -Encoding UTF8'i BOM ekliyor (bölüm 8).
-    json = JSON.parse(raw.replace(/^\uFEFF/, ''));
+    json = await readJsonFile(path);
   } catch (cause) {
-    throw new ConfigError(path, [`JSON ayrıştırılamadı: ${cause.message}`]);
+    throw new ConfigError(path, [
+      cause instanceof SyntaxError
+        ? `JSON ayrıştırılamadı: ${cause.message}`
+        : `dosya okunamadı: ${cause.code ?? cause.message}`,
+    ]);
   }
 
   return resolveProject(json, { projectPath: path, overrides });

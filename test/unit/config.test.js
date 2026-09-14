@@ -39,6 +39,21 @@ describe('project.json', () => {
     assert.equal(c.video.crossfadeSeconds, 1.5);
   });
 
+  test('BOM\'lu project.json okunur', async () => {
+    const path = dir.path('bom.json');
+    await writeFile(path, '\uFEFF' + JSON.stringify({ clip: './in.mp4', audioDir: './audio', video: { cropBottom: 150 } }));
+    assert.equal((await loadProject(path)).video.cropBottom, 150);
+  });
+
+  test('okuma ve ayrıştırma hataları ayrı mesajla', async () => {
+    await assert.rejects(loadProject(dir.path('yok.json')), (e) =>
+      e instanceof ConfigError && e.problems[0] === 'dosya okunamadı: ENOENT');
+    const broken = dir.path('broken.json');
+    await writeFile(broken, '{ "clip": ');
+    await assert.rejects(loadProject(broken), (e) =>
+      e instanceof ConfigError && e.problems[0].startsWith('JSON ayrıştırılamadı:'));
+  });
+
   for (const bad of [-1, '1', 61]) {
     test(`crossfadeSeconds ${JSON.stringify(bad)} → ConfigError`, async () => {
       await assert.rejects(
