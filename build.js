@@ -138,6 +138,7 @@ export async function runBuild(config, options = {}) {
       scaleWidth: config.video.scaleWidth ?? undefined,
       crf: config.video.crf,
       preset: config.video.preset,
+      crossfadeSeconds: config.video.crossfadeSeconds,
       // Loop testi gözle bakmak için; workspace silinecekse üretmenin anlamı yok.
       loopTest: keep,
       logger,
@@ -243,6 +244,7 @@ export async function runBuild(config, options = {}) {
         crf: config.video.crf,
         preset: config.video.preset,
         fadeOut: config.video.fadeOut,
+        crossfadeSeconds: config.video.crossfadeSeconds,
         bitrate: config.audio.bitrate,
         ambientOffsetDb: config.audio.ambientOffsetDb,
       },

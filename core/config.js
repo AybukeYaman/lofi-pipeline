@@ -28,7 +28,7 @@ export class ConfigError extends Error {
 }
 
 const CONFIG_DEFAULTS = {
-  video: { aspect: '16:9', crf: 16, preset: 'slow', fadeOut: 5 },
+  video: { aspect: '16:9', crf: 16, preset: 'slow', fadeOut: 5, crossfadeSeconds: 0 },
   audio: { bitrate: '192k', ambientOffsetDb: -18.8 },
   output: { dir: './out', name: 'final_ambient.mp4', tracklist: 'tracklist.txt' },
 };
@@ -36,7 +36,7 @@ const CONFIG_DEFAULTS = {
 /** Bilinen anahtarlar — yazım hatası ("cropbottom") sessizce yok sayılmasın. */
 const KNOWN_KEYS = {
   root: ['clip', 'audioDir', 'ambient', 'order', 'names', 'video', 'audio', 'output'],
-  video: ['cropBottom', 'aspect', 'crf', 'preset', 'fadeOut', 'scaleWidth'],
+  video: ['cropBottom', 'aspect', 'crf', 'preset', 'fadeOut', 'scaleWidth', 'crossfadeSeconds'],
   audio: ['bitrate', 'ambientOffsetDb'],
   output: ['dir', 'name', 'tracklist'],
 };
@@ -155,6 +155,9 @@ async function resolveProject(json, { projectPath, overrides = {} }) {
   numberInRange(crf, 'video.crf', 0, 51, problems);
   const fadeOut = video.fadeOut ?? CONFIG_DEFAULTS.video.fadeOut;
   numberInRange(fadeOut, 'video.fadeOut', 0, 600, problems);
+  // Üst sınır klibe bağlı (yarısı); o denetim klip ölçülünce 01'de yapılır.
+  const crossfadeSeconds = video.crossfadeSeconds ?? CONFIG_DEFAULTS.video.crossfadeSeconds;
+  numberInRange(crossfadeSeconds, 'video.crossfadeSeconds', 0, 60, problems);
   const scaleWidth = overrides.scaleWidth ?? video.scaleWidth;
   if (scaleWidth !== undefined) {
     if (!Number.isInteger(scaleWidth) || scaleWidth <= 0 || scaleWidth % 2 !== 0) {
@@ -200,6 +203,7 @@ async function resolveProject(json, { projectPath, overrides = {} }) {
       crf,
       preset,
       fadeOut,
+      crossfadeSeconds,
       scaleWidth: scaleWidth ?? null,
     },
     audio: { bitrate, ambientOffsetDb },

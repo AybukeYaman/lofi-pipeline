@@ -28,10 +28,9 @@ const DEFAULTS = {
   /** Loop testinde kaç tekrar üretilsin (gözle bakmak için). */
   loopTestRepeats: 2,
   /**
-   * Loop birleşme noktasını yumuşatan crossfade (sn). 0 = kapalı.
-   *
-   * SINANMAMIŞ: Hailuo klibinin loop'u şans eseri temiz çıktığı için bu dal
-   * hiç çalışmadı. Aşama 6'da yapay veriyle sınanacak (HANDOFF bölüm 13).
+   * Loop birleşme noktasını kapatan crossfade (sn). 0 = kapalı.
+   * Hailuo klibinin loop'u temiz çıktığı için varsayılan kapalı; kapanmayan
+   * klipte project.json → video.crossfadeSeconds ile açılır.
    */
   crossfadeSeconds: 0,
 };
@@ -190,6 +189,11 @@ export async function prepareVideo(options) {
     );
   }
 
+  // Crossfade planı da onaydan önce: klibe sığmayan değer kimseye kare göstermeden dursun.
+  const crossfade = crossfadeSeconds > 0
+    ? planCrossfade({ duration: source.duration, fps: source.fps, crossfadeSeconds })
+    : null;
+
   // 2 — Kırpma onayı (koşullu, HANDOFF bölüm 14/1)
   // Kontrol karesi nihai kadrajı gösterir: watermark + en-boy kırpması birlikte.
   const approval = await resolveCropApproval({
@@ -204,10 +208,10 @@ export async function prepareVideo(options) {
     // -2: yüksekliği en-boy oranına göre çift sayıya yuvarla (h264 şartı).
     filters.push(`scale=${scaleWidth}:-2`);
   }
-  if (crossfadeSeconds > 0) {
-    warn(
-      `Loop crossfade açık (${crossfadeSeconds} sn) — bu dal henüz gerçek ` +
-      'veriyle sınanmadı, çıktıyı gözle kontrol et.',
+  if (crossfade) {
+    logger.info(
+      `Loop crossfade: ${crossfade.fadeFrames} kare (${crossfadeSeconds} sn) — klip ` +
+      `${crossfade.sourceFrames} → ${crossfade.outputFrames} kare.`,
     );
   }
 
@@ -218,13 +222,16 @@ export async function prepareVideo(options) {
 
   await ffmpeg([
     '-i', clipPath,
-    ...(crossfadeSeconds > 0
-      ? ['-filter_complex', buildCrossfadeFilter(source, filters, crossfadeSeconds)]
+    ...(crossfade
+      ? ['-filter_complex', buildCrossfadeFilter(crossfade, filters)]
       : ['-vf', filters.join(',')]),
     '-an',                       // Hailuo'nun 32 kHz sesi kullanılmıyor
     '-c:v', 'libx264',
     '-crf', String(crf),
     '-preset', preset,
+    // Sabit: filtre (xfade) biçimi yuv444p'ye çekebiliyor → High 4:4:4 profili,
+    // çoğu oynatıcı/tarayıcı çözemiyor. base.mp4 her yolda yuv420p.
+    '-pix_fmt', 'yuv420p',
     '-y', outputPath,
   ], { onProgress });
 
@@ -232,6 +239,16 @@ export async function prepareVideo(options) {
 
   if (result.hasAudio) {
     warn('base.mp4 hâlâ ses akışı taşıyor — -an beklendiği gibi çalışmamış.');
+  }
+  if (crossfade) {
+    // Yanlış uzunluk loop'u sessizce bozar: bir kareden fazla sapma hata.
+    const expectedSeconds = crossfade.outputFrames / crossfade.fps;
+    if (Math.abs(result.duration - expectedSeconds) > 1.5 / crossfade.fps) {
+      throw new Error(
+        `Crossfade çıktısı ${result.duration} sn, beklenen ${expectedSeconds.toFixed(3)} sn ` +
+        `(${crossfade.outputFrames} kare).`,
+      );
+    }
   }
   if (!scaleWidth && (result.width !== expected.width || result.height !== expected.height)) {
     throw new Error(
@@ -265,7 +282,7 @@ export async function prepareVideo(options) {
       hasAudio: result.hasAudio,
     },
     loop,
-    crossfadeSeconds,
+    crossfade,
     warnings,
   };
 }
@@ -391,25 +408,70 @@ async function measureSsim(a, b) {
 }
 
 /**
- * Loop'u kapatmak için sonu başına karıştıran filtre zinciri.
+ * Crossfade'i kare cinsinden planlar (saniye yuvarlaması xfade'de kare kaydırır).
  *
- * SINANMAMIŞ DAL — HANDOFF bölüm 13'teki listede. Klibin sonundaki
- * `crossfadeSeconds` saniye, başındaki aynı süreyle çapraz geçişle birleşir;
- * çıktı o kadar kısalır.
+ * Klip N kare, C = crossfadeSeconds × fps. Çıktı, klibin [C, N) kısmının
+ * sonuna [0, C) kısmının çapraz geçişle eklenmesidir:
  *
- * @param {{ duration: number }} source
+ *   çıktı:  orig C … orig N−C | orig N−C+1…N−1 ⨯ orig 0…C−2 | orig C−1
+ *                              └─── C−1 karelik karışım ───┘
+ *
+ * Karışım C−1 kare sürer, çünkü xfade geçişin son karesinde eski görüntüden
+ * 1/C iz bırakır; bir kare kısa tutulunca geçiş bitimindeki kare SAF orig C−1
+ * olur. Çıktı N−C+1 kare: son karesi orig C−1, ilk karesi orig C — loop tekrarında
+ * iki ardışık kare yan yana gelir.
+ *
+ * @param {{ duration: number, fps: number, crossfadeSeconds: number }} p
+ */
+export function planCrossfade({ duration, fps, crossfadeSeconds }) {
+  if (!Number.isFinite(fps) || fps <= 0) {
+    throw new Error('Crossfade için kare hızı okunamadı.');
+  }
+  const sourceFrames = Math.round(duration * fps);
+  const fadeFrames = Math.round(crossfadeSeconds * fps);
+
+  if (fadeFrames < 2) {
+    throw new Error(
+      `crossfadeSeconds (${crossfadeSeconds}) en az iki kare olmalı (${fps} fps'te ${(2 / fps).toFixed(3)} sn).`,
+    );
+  }
+  if (fadeFrames * 2 - 1 > sourceFrames) {
+    throw new Error(
+      `crossfadeSeconds (${crossfadeSeconds} sn = ${fadeFrames} kare) klibin yarısından ` +
+      `uzun (${sourceFrames} kare): geçişin iki ucu üst üste biner.`,
+    );
+  }
+
+  const blendFrames = fadeFrames - 1;
+  const bodyFrames = sourceFrames - fadeFrames;
+
+  return {
+    fps,
+    sourceFrames,
+    fadeFrames,
+    blendFrames,
+    outputFrames: sourceFrames - fadeFrames + 1,
+    /** xfade başlangıcı: gövdenin son blendFrames karesinin başı. */
+    offsetSeconds: (bodyFrames - blendFrames) / fps,
+    blendSeconds: blendFrames / fps,
+  };
+}
+
+/**
+ * Crossfade filtre zinciri. Kırpma/ölçekleme önce uygulanır, sonra bölünür.
+ *
+ * @param {ReturnType<typeof planCrossfade>} plan
  * @param {string[]} filters kırpma/ölçekleme zinciri
- * @param {number} crossfadeSeconds
  * @returns {string}
  */
-function buildCrossfadeFilter(source, filters, crossfadeSeconds) {
-  const chain = filters.join(',');
-  const offset = source.duration - crossfadeSeconds;
+function buildCrossfadeFilter(plan, filters) {
+  const { sourceFrames, fadeFrames, offsetSeconds, blendSeconds } = plan;
 
   return (
-    `[0:v]${chain},split[body][tail];` +
-    `[body]trim=0:${offset},setpts=PTS-STARTPTS[main];` +
-    `[tail]trim=${offset},setpts=PTS-STARTPTS[fade];` +
-    `[main][fade]xfade=transition=fade:duration=${crossfadeSeconds}:offset=${offset - crossfadeSeconds}`
+    // format=yuv420p: xfade'e biçimi seçtirilirse RGB/yuv444'e çevirip renk kaydırıyor.
+    `[0:v]${filters.join(',')},format=yuv420p,split[a][b];` +
+    `[a]trim=start_frame=${fadeFrames}:end_frame=${sourceFrames},setpts=PTS-STARTPTS[body];` +
+    `[b]trim=start_frame=0:end_frame=${fadeFrames},setpts=PTS-STARTPTS[head];` +
+    `[body][head]xfade=transition=fade:duration=${blendSeconds}:offset=${offsetSeconds}`
   );
 }

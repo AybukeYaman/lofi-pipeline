@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "description": "Lofi video montaj otomasyonu (ffmpeg tabanlı)",
-  "engines": { "node": ">=18.15" },
-  "scripts": { "build": "node build.js" }
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "node build.js",
+    "test": "node --test \"test/unit/*.test.js\" \"test/branches/*.test.js\"",
+    "test:unit": "node --test \"test/unit/*.test.js\""
+  }
 }
