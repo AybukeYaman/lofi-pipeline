@@ -63,7 +63,7 @@ export async function newProject(ctx) {
   let name;
   for (;;) {
     name = await prompter.ask('Proje adı (ör. video3-Neo Tokyo Night; boş = geri)');
-    if (name === '') return false;
+    if (!name) return false;
     const problems = validateVideoName(name);
     if (problems.length === 0 && await exists(join(ctx.videosDir, name))) {
       problems.push(`bu isimde klasör zaten var: ${join(ctx.videosDir, name)}`);
@@ -125,7 +125,7 @@ export async function addStyle(ctx) {
   let name;
   for (;;) {
     name = await prompter.ask('Stil adı (küçük harf, rakam, tire — ör. neo-tokyo; boş = geri)');
-    if (name === '') return false;
+    if (!name) return false;
     if (STYLE_NAME.test(name)) break;
     prompter.print('Ad küçük harf, rakam ve tireden oluşmalı (ör. neo-tokyo).');
   }
