@@ -82,33 +82,21 @@ async function header(ctx) {
 
 /** @returns {Promise<number>} 0 · 2 terminal etkileşimli değil */
 export async function main() {
+  // enquirer TTY olmayan stdin'de yakalanamayan hatayla süreci çökertir: önce denetle.
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     console.error('Panel etkileşimli terminal gerektirir — PowerShell\'de "npm start" ile çalıştır.');
     return 2;
   }
 
-  const prompter = createPrompter();
-  const run = async (script, args) => {
-    prompter.suspend();
-    try {
-      return await runScript(script, args);
-    } finally {
-      prompter.resume();
-    }
-  };
-
-  try {
-    return await runPanel({
-      prompter,
-      run,
-      videosDir: DEFAULT_VIDEOS_DIR,
-      ambientDir: DEFAULT_AMBIENT_DIR,
-      stylesDir: STYLES_DIR,
-      session: createSession(),
-    });
-  } finally {
-    prompter.close();
-  }
+  // enquirer okuyucuyu her soruda açıp kapatır; komut çalışırken açık prompt yok.
+  return runPanel({
+    prompter: createPrompter(),
+    run: runScript,
+    videosDir: DEFAULT_VIDEOS_DIR,
+    ambientDir: DEFAULT_AMBIENT_DIR,
+    stylesDir: STYLES_DIR,
+    session: createSession(),
+  });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

@@ -62,7 +62,7 @@ export async function newProject(ctx) {
 
   let name;
   for (;;) {
-    name = await prompter.ask('Proje adı (ör. video3-Neo Tokyo Night; boş = geri)');
+    name = await prompter.ask('Proje adı (ör. video3-Neo Tokyo Night; Esc = geri)');
     if (!name) return false;
     const problems = validateVideoName(name);
     if (problems.length === 0 && await exists(join(ctx.videosDir, name))) {
@@ -116,7 +116,7 @@ export async function addStyle(ctx) {
 
   let image;
   for (;;) {
-    image = cleanPath(await prompter.ask('Stil görseli (dosyayı buraya sürükleyebilirsin; boş = geri)'));
+    image = cleanPath(await prompter.ask('Stil görseli (dosyayı buraya sürükleyebilirsin; Esc = geri)'));
     if (image === '') return false;
     if (await isFile(image)) break;
     prompter.print(`Dosya bulunamadı: ${image}`);
@@ -124,7 +124,7 @@ export async function addStyle(ctx) {
 
   let name;
   for (;;) {
-    name = await prompter.ask('Stil adı (küçük harf, rakam, tire — ör. neo-tokyo; boş = geri)');
+    name = await prompter.ask('Stil adı (küçük harf, rakam, tire — ör. neo-tokyo; Esc = geri)');
     if (!name) return false;
     if (STYLE_NAME.test(name)) break;
     prompter.print('Ad küçük harf, rakam ve tireden oluşmalı (ör. neo-tokyo).');

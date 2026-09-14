@@ -1,15 +1,29 @@
 /**
- * Panelin terminal soruları — soru, numaralı seçim, e/h.
+ * Panelin terminal soruları — enquirer adaptörü (ok tuşlu seçim).
  *
- * Tek sorumluluk: kullanıcıdan satır almak ve biçimlendirilmiş soru basmak.
- * Proje, stil, komut bilmez (onlar ui/actions.js'te).
+ * Tek sorumluluk: prompter arayüzünü (ask / choose / chooseMany / confirm /
+ * print) enquirer'a bağlamak. enquirer yalnızca bu dosyada; ui/actions.js onu
+ * bilmez (paket 2023'ten beri durgun — değişirse yalnızca burası değişir).
  *
- * Satırlar kendi kuyruğumuzda tutulur: readline'ın `question`'ı soru
- * sorulmadan önce gelen satırı kaçırıyor (hızlı yazan kullanıcı, testte baştan
- * yazılan yanıtlar). Akışlar test için enjekte edilir.
+ * enquirer 2.4.1 gerçekleri (kaynak koddan doğrulandı, HANDOFF bölüm 12):
+ *   - TTY olmayan stdin'de keypress.listen yakalanamayan hata fırlatıp süreci
+ *     çökertir → çağıran (lofi.js) TTY'yi önceden denetler.
+ *   - Esc ve Ctrl+C ikisi de "cancel": run() '' ile reddeder; hangi tuş
+ *     olduğu prompt.state.keypress'te. Esc → geri, Ctrl+C → PromptClosedError.
+ *   - Select sonucu seçeneğin `name`'i → sıra numarasıyla adlandırıp değere eşlenir.
+ *   - Confirm yalnızca y/t/1 ve n/f/0 tanır (Türkçe "e" false olur) → onay
+ *     "Evet / Hayır" seçimiyle yapılır.
+ *   - Windows'ta multiselect açık/kapalı yalnızca renkle ayrılıyor → [x] / [ ].
  */
 
-import { createInterface } from 'node:readline';
+import enquirer from 'enquirer';
+
+const { Input, MultiSelect, Select } = enquirer;
+
+/** Uzun listeler kaydırılır; terminal yüksekliğini aşıp çizimi bozmasın. */
+const LIST_LIMIT = 10;
+const ZERO = 'zero';
+const BACK = Symbol('geri');
 
 export class PromptClosedError extends Error {
   constructor() {
@@ -19,138 +33,108 @@ export class PromptClosedError extends Error {
 }
 
 /**
- * @param {{ input?: NodeJS.ReadableStream, output?: NodeJS.WritableStream }} [streams]
+ * @param {{
+ *   stdin?: NodeJS.ReadStream,
+ *   stdout?: NodeJS.WritableStream,
+ *   show?: boolean,
+ *   onPrompt?: (prompt: object) => void,
+ * }} [options] show:false + onPrompt yalnızca test için (tuşlar prompt.keypress ile sürülür)
  */
-export function createPrompter({ input = process.stdin, output = process.stdout } = {}) {
-  const lines = [];
-  let waiter = null;
-  let rl = null;
-  let closed = false;
-  let suspended = false;
+export function createPrompter({ stdin = process.stdin, stdout = process.stdout, show = true, onPrompt } = {}) {
+  const base = { stdin, stdout, show };
 
-  const finish = () => {
-    if (closed) return;
-    closed = true;
-    if (waiter) {
-      const { reject } = waiter;
-      waiter = null;
-      reject(new PromptClosedError());
-    }
-    rl?.close();
+  const print = (text = '') => stdout.write(`${text}\n`);
+
+  /** Çok satırlı başlık: son satır soru, öncekiler düz metin. */
+  const splitTitle = (title) => {
+    const lines = String(title).split('\n');
+    const message = lines.pop();
+    for (const line of lines) print(line);
+    return message;
   };
 
-  const open = () => {
-    rl = createInterface({ input, output, terminal: Boolean(input.isTTY && output.isTTY) });
-    rl.on('line', (line) => {
-      if (waiter) {
-        const { resolve } = waiter;
-        waiter = null;
-        resolve(line);
-      } else {
-        lines.push(line);
+  async function runPrompt(prompt) {
+    onPrompt?.(prompt);
+    try {
+      return await prompt.run();
+    } catch (reason) {
+      if (reason === '' || reason === undefined) {
+        if (prompt.state.keypress?.name === 'escape') return BACK;
+        throw new PromptClosedError();
       }
-    });
-    // Menüde Ctrl+C: readline dinleyici varsa süreç SIGINT'i üretmez.
-    rl.on('SIGINT', finish);
-    rl.on('close', () => {
-      if (!suspended) finish();
-    });
-  };
-
-  /** Soruyu basar, sıradaki satırı bekler. Kuyruktaki satırlar kapanıştan önce teslim edilir. */
-  const nextLine = (question) => {
-    // rl.prompt: terminalde satır yeniden çizilirken soru metni de korunur.
-    // Kapanmış okuyucuda prompt() hata fırlatır; kuyrukta satır kalmış olabilir.
-    if (rl && !closed) {
-      rl.setPrompt(question);
-      rl.prompt();
-    } else {
-      output.write(question);
+      throw reason;
     }
-    if (lines.length > 0) return Promise.resolve(lines.shift());
-    if (closed) return Promise.reject(new PromptClosedError());
-    return new Promise((resolve, reject) => { waiter = { resolve, reject }; });
-  };
+  }
 
-  const print = (text = '') => output.write(`${text}\n`);
-
-  open();
+  const toChoices = (items) => items.map((item, i) => ({
+    name: String(i),
+    message: item.label,
+    disabled: item.disabled ? '(seçilemez)' : false,
+  }));
 
   return {
     print,
 
     /**
      * @param {string} question
-     * @param {{ defaultValue?: string }} [options] boş girişte döner
-     * @returns {Promise<string>}
+     * @param {{ defaultValue?: string }} [options] boş Enter'da döner
+     * @returns {Promise<string | null>} Esc → null
      */
     async ask(question, { defaultValue } = {}) {
-      const hint = defaultValue ? ` [${defaultValue}]` : '';
-      const answer = (await nextLine(`${question}${hint}: `)).trim();
-      return answer === '' && defaultValue !== undefined ? defaultValue : answer;
+      const answer = await runPrompt(new Input({ ...base, message: splitTitle(question), initial: defaultValue }));
+      return answer === BACK ? null : String(answer ?? '').trim();
     },
 
     /**
-     * Numaralı liste. `disabled` öğeler gösterilir ama seçilemez.
-     *
      * @template T
      * @param {string} title
      * @param {{ label: string, value: T, disabled?: boolean }[]} items
-     * @param {{ zeroLabel?: string }} [options] verilirse `0)` satırı → null
-     * @returns {Promise<T | null>}
+     * @param {{ zeroLabel?: string }} [options] listenin sonuna eklenir; seçilirse null
+     * @returns {Promise<T | null>} Esc → null
      */
     async choose(title, items, { zeroLabel } = {}) {
       if (items.length === 0 && !zeroLabel) return null;
-      print(title);
-      items.forEach((item, i) => print(`  ${i + 1}) ${item.label}`));
-      if (zeroLabel) print(`  0) ${zeroLabel}`);
+      const choices = toChoices(items);
+      if (zeroLabel) choices.push({ name: ZERO, message: zeroLabel });
 
-      const range = `${zeroLabel ? 0 : 1}–${items.length}`;
-      for (;;) {
-        const answer = (await nextLine('Seçim: ')).trim();
-        const n = /^\d+$/.test(answer) ? Number(answer) : NaN;
-        if (n === 0 && zeroLabel) return null;
-        if (n >= 1 && n <= items.length) {
-          if (!items[n - 1].disabled) return items[n - 1].value;
-          print(`${n}) seçilemez.`);
-          continue;
-        }
-        print(`${range} arası bir numara gir.`);
-      }
+      const answer = await runPrompt(new Select({ ...base, message: splitTitle(title), choices, limit: LIST_LIMIT }));
+      if (answer === BACK || answer === ZERO) return null;
+      return items[Number(answer)].value;
+    },
+
+    /**
+     * @template T
+     * @param {string} title
+     * @param {{ label: string, value: T, disabled?: boolean }[]} items
+     * @returns {Promise<T[] | null>} liste sırasında; Esc → null
+     */
+    async chooseMany(title, items) {
+      if (items.length === 0) return [];
+      const answer = await runPrompt(new MultiSelect({
+        ...base,
+        message: splitTitle(title),
+        choices: toChoices(items),
+        limit: LIST_LIMIT,
+        hint: '(Boşluk: işaretle · Enter: onayla · Esc: geri)',
+        indicator: (state, choice) => (choice.enabled ? '[x]' : '[ ]'),
+      }));
+      if (answer === BACK) return null;
+      return answer.map(Number).sort((a, b) => a - b).map((i) => items[i].value);
     },
 
     /**
      * @param {string} question
      * @param {{ defaultValue?: boolean }} [options]
-     * @returns {Promise<boolean>}
+     * @returns {Promise<boolean>} Esc → false
      */
     async confirm(question, { defaultValue = false } = {}) {
-      for (;;) {
-        const answer = (await nextLine(`${question} ${defaultValue ? '[E/h]' : '[e/H]'} `)).trim();
-        if (answer === '') return defaultValue;
-        if (/^(e|evet|y|yes)$/i.test(answer)) return true;
-        if (/^(h|hayır|hayir|n|no)$/i.test(answer)) return false;
-        print('e ya da h gir.');
-      }
-    },
-
-    /** Alt süreç stdin'i devralırken okuyucuyu bırakır; kuyruk korunur. */
-    suspend() {
-      if (closed || suspended) return;
-      suspended = true;
-      rl.close();
-      rl = null;
-    },
-
-    resume() {
-      if (closed || !suspended) return;
-      suspended = false;
-      open();
-    },
-
-    close() {
-      suspended = false;
-      finish();
+      const answer = await runPrompt(new Select({
+        ...base,
+        message: splitTitle(question),
+        choices: [{ name: 'yes', message: 'Evet' }, { name: 'no', message: 'Hayır' }],
+        initial: defaultValue ? 0 : 1,
+      }));
+      return answer === 'yes';
     },
   };
 }

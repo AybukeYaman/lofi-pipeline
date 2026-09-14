@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Lofi video montaj otomasyonu (ffmpeg tabanlı)",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "node lofi.js",
     "build": "node build.js",
@@ -12,5 +14,8 @@
     "test:unit": "node --test \"test/unit/*.test.js\"",
     "test:regression": "node --test-reporter=spec test/regression.js",
     "test:regression:update": "node --test-reporter=spec test/regression.js --update"
+  },
+  "dependencies": {
+    "enquirer": "2.4.1"
   }
 }
