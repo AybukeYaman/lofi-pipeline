@@ -53,14 +53,21 @@ export async function makeDriftingClip(path, o = {}) {
 }
 
 /**
- * Sabit frekanslı stereo AAC ses.
+ * Sabit frekanslı stereo ses.
+ *
+ * codec 'pcm': örnek sayısı tam — süresi kare sınırına oturması gereken testler
+ * için (AAC encoder gecikmesi ve 1024'lük çerçeveler süreyi yuvarlar).
+ *
  * @param {string} path
- * @param {{ seconds: number, frequency?: number, sampleRate?: number }} o
+ * @param {{ seconds: number, frequency?: number, sampleRate?: number, codec?: 'aac'|'pcm' }} o
  */
-export async function makeTone(path, { seconds, frequency = 440, sampleRate = 48000 }) {
+export async function makeTone(path, { seconds, frequency = 440, sampleRate = 48000, codec = 'aac' }) {
+  const samples = Math.round(seconds * sampleRate);
   await ffmpeg([
-    '-f', 'lavfi', '-i', `sine=f=${frequency}:d=${seconds}:sample_rate=${sampleRate}`,
-    '-ac', '2', '-c:a', 'aac', '-b:a', '192k',
+    '-f', 'lavfi', '-i', `sine=f=${frequency}:d=${seconds + 1}:sample_rate=${sampleRate}`,
+    '-af', `atrim=end_sample=${samples}`,
+    '-ac', '2',
+    ...(codec === 'pcm' ? ['-c:a', 'pcm_s16le'] : ['-c:a', 'aac', '-b:a', '192k']),
     '-y', path,
   ]);
   return path;

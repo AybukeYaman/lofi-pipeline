@@ -83,10 +83,12 @@ function parseStatsTime(line) {
  * @param {(seconds: number) => void} [options.onProgress] `-stats` ilerleme damgası
  * @param {string} [options.cwd]
  * @param {AbortSignal} [options.signal]
+ * @param {boolean} [options.fullStderr] stderr'in tamamını döndür (bitstream izi gibi
+ *   uzun çıktılar için). Hata mesajı yine son satırlarla sınırlı kalır.
  * @returns {Promise<{ code: number, stdout: string, stderr: string }>}
  */
 export function run(binary, args, options = {}) {
-  const { onProgress, cwd, signal } = options;
+  const { onProgress, cwd, signal, fullStderr = false } = options;
 
   return new Promise((resolve, reject) => {
     const child = spawn(binary, args, { cwd, signal, windowsHide: true });
@@ -94,9 +96,11 @@ export function run(binary, args, options = {}) {
 
     let stdout = '';
     const stderrTail = [];
+    const stderrAll = [];
     let stderrBuffer = '';
 
     const pushStderr = (line) => {
+      if (fullStderr) stderrAll.push(line);
       stderrTail.push(line);
       if (stderrTail.length > STDERR_TAIL_LINES) stderrTail.shift();
     };
@@ -153,7 +157,7 @@ export function run(binary, args, options = {}) {
         return;
       }
 
-      resolve({ code, stdout, stderr });
+      resolve({ code, stdout, stderr: fullStderr ? stderrAll.join('\n') : stderr });
     });
   });
 }

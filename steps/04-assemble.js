@@ -21,6 +21,7 @@ import { dirname } from 'node:path';
 
 import { ffmpeg, ffprobe } from '../core/ffmpeg.js';
 import { concatLine } from '../core/files.js';
+import { parameterSetMismatches, readParameterSets } from '../core/h264.js';
 import { durationsMatch, probe } from '../core/probe.js';
 
 const DEFAULTS = {
@@ -151,6 +152,7 @@ export async function assembleVideo(options) {
       '-map', audioArgs.map,
       '-frames:v', String(plan.totalFrames),
       '-c:v', 'libx264', '-crf', String(crf), '-preset', preset,
+      '-pix_fmt', 'yuv420p',
       ...audioArgs.codec,
       '-t', String(audio.duration),
       '-y', outputPath,
@@ -182,12 +184,12 @@ export async function assembleVideo(options) {
   }
 
   const junctions = method === 'copy-body+encode-tail'
-    ? await checkJunctions({ path: outputPath, plan, fps: video.fps, logger })
+    ? await checkJunctions({ path: outputPath, points: junctionPoints(plan), logger })
     : [];
   const brokenJunctions = junctions.filter((j) => !j.clean);
   if (brokenJunctions.length > 0) {
     throw new Error(
-      'Birleşme noktasında çözme hatası: ' +
+      'Birleşme noktası bozuk: ' +
       brokenJunctions.map((j) => `${j.kind} @ ${j.seconds} sn: ${j.error}`).join('; '),
     );
   }
@@ -354,40 +356,58 @@ async function countVideoPackets(path) {
 }
 
 /**
- * İki tip birleşme noktasının çevresini gerçekten çözer:
- *   - klip→klip (gövde içi, kopya+kopya)
- *   - gövde→kuyruk (kopya+encode)
- * Çözücü hata basarsa (`-xerror`) nokta kirli sayılır.
+ * Birleşme noktaları: klip→klip (kopya+kopya) ve gövde→kuyruk (kopya+encode).
+ * @param {ReturnType<typeof planFrames>} plan
  */
-async function checkJunctions({ path, plan, fps, logger }) {
+export function junctionPoints(plan) {
   const points = [];
   if (plan.copies >= 2) {
-    points.push({ kind: 'klip→klip', seconds: Number((plan.clipFrames / fps).toFixed(3)) });
+    points.push({ kind: 'klip→klip', seconds: Number((plan.clipFrames / plan.fps).toFixed(3)) });
   }
   if (plan.copies >= 1 && plan.tailFrames > 0) {
     points.push({ kind: 'gövde→kuyruk', seconds: plan.tailStartSeconds });
   }
+  return points;
+}
 
+/**
+ * Her birleşme noktasının çevresinde iki kontrol:
+ *
+ *   1. Çözme (`-xerror`): bozuk paket, eksik referans.
+ *   2. Parametre setleri: akış içine gömülen SPS/PPS, konteynerin avcC'siyle
+ *      içerik olarak aynı mı. Uyuşmazlık ffmpeg'de hatasız çözülür (1. kontrol
+ *      geçer, kareler bile doğru görünür) ama avcC'ye güvenen çözücüleri bozar —
+ *      bu yüzden asıl sinyal bu (core/h264.js).
+ *
+ * @param {{ path: string, points: Array<{ kind: string, seconds: number }>, logger?: object }} p
+ */
+export async function checkJunctions({ path, points, logger = NOOP_LOGGER }) {
   const results = [];
   for (const point of points) {
     const start = Math.max(0, point.seconds - DEFAULTS.junctionWindow);
+    const duration = DEFAULTS.junctionWindow * 2;
+    const errors = [];
+
     try {
       const { stderr } = await ffmpeg([
-        '-xerror',
-        '-ss', String(start), '-i', path,
-        '-t', String(DEFAULTS.junctionWindow * 2),
-        '-map', '0:v',
-        '-f', 'null', '-',
+        '-xerror', '-ss', String(start), '-i', path, '-t', String(duration),
+        '-map', '0:v', '-f', 'null', '-',
       ]);
-      const error = stderr.trim();
-      results.push({ ...point, clean: error === '', error: error || null });
+      if (stderr.trim()) errors.push(`çözme: ${stderr.trim().split('\n')[0]}`);
     } catch (cause) {
-      results.push({ ...point, clean: false, error: cause.message.split('\n')[0] });
+      errors.push(`çözme: ${cause.message.split('\n')[0]}`);
     }
+
+    const mismatches = parameterSetMismatches(await readParameterSets(path, { start, duration }));
+    for (const m of mismatches) {
+      errors.push(`${m.type} ${m.id} konteynerden farklı (${m.reason})`);
+    }
+
+    results.push({ ...point, clean: errors.length === 0, error: errors.join('; ') || null });
   }
 
   for (const r of results) {
-    logger.info(`Birleşme noktası ${r.kind} @ ${r.seconds} sn: ${r.clean ? 'temiz' : 'HATA'}`);
+    logger.info(`Birleşme noktası ${r.kind} @ ${r.seconds} sn: ${r.clean ? 'temiz' : `HATA — ${r.error}`}`);
   }
   return results;
 }
