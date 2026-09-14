@@ -66,6 +66,8 @@ export class BuildCancelledError extends Error {
  * @param {boolean} [options.overwrite]
  * @param {boolean} [options.keep] workspace silinmez
  * @param {AbortSignal} [options.signal] adımlar arasında denetlenir
+ * @param {(dir: string) => Promise<number>} [options.diskFree] klasörün bulunduğu
+ *   sürücüdeki boş bayt. Varsayılan fs.statfs; testte dar disk taklidi için.
  * @returns {Promise<object>} rapor
  */
 export async function runBuild(config, options = {}) {
@@ -76,6 +78,7 @@ export async function runBuild(config, options = {}) {
     overwrite = false,
     keep = false,
     signal,
+    diskFree = freeBytesOf,
   } = options;
 
   const log = loggerFor('build');
@@ -168,6 +171,7 @@ export async function runBuild(config, options = {}) {
       baseDuration: video.result.duration,
       targetDuration: audio.duration,
       copies: config.ambient ? 2 : 1,
+      diskFree,
     });
     log.info(
       `Disk: ~${gb(disk.requiredBytes)} GB gerekli, ${gb(disk.freeBytes)} GB boş.`,
@@ -271,12 +275,11 @@ export async function runBuild(config, options = {}) {
  * Montaj çıktısı ≈ base.mp4 × (müzik süresi / klip süresi) — gövde kopyalandığı
  * için tahmin gerçekçi. Ambient varsa zirvede iki video workspace'te aynı anda durur.
  */
-async function checkDiskSpace({ dir, baseSize, baseDuration, targetDuration, copies }) {
+async function checkDiskSpace({ dir, baseSize, baseDuration, targetDuration, copies, diskFree }) {
   const videoBytes = baseSize * (targetDuration / baseDuration);
   const requiredBytes = Math.round(videoBytes * copies * DISK_MARGIN.ratio + DISK_MARGIN.bytes);
 
-  const fs = await statfs(dir);
-  const freeBytes = fs.bavail * fs.bsize;
+  const freeBytes = await diskFree(dir);
   // --overwrite: eski çıktılar ancak rename anında serbest kalır, boş alana sayılmaz.
   if (freeBytes < requiredBytes) {
     throw new BuildError(
@@ -284,6 +287,12 @@ async function checkDiskSpace({ dir, baseSize, baseDuration, targetDuration, cop
     );
   }
   return { requiredBytes, freeBytes, estimatedVideoBytes: Math.round(videoBytes) };
+}
+
+/** @param {string} dir */
+async function freeBytesOf(dir) {
+  const fs = await statfs(dir);
+  return fs.bavail * fs.bsize;
 }
 
 async function exists(path) {
