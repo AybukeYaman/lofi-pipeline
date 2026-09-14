@@ -8,6 +8,8 @@
   "scripts": {
     "build": "node build.js",
     "test": "node --test \"test/unit/*.test.js\" \"test/branches/*.test.js\"",
-    "test:unit": "node --test \"test/unit/*.test.js\""
+    "test:unit": "node --test \"test/unit/*.test.js\"",
+    "test:regression": "node --test-reporter=spec test/regression.js",
+    "test:regression:update": "node --test-reporter=spec test/regression.js --update"
   }
 }

@@ -1,0 +1,331 @@
+{
+  "generated": {
+    "at": "2026-09-14T13:18:54.406Z",
+    "by": "node test/regression.js --update",
+    "commit": "6fee31da4646b265af5b16133bf63eb49e097190",
+    "commitSubject": "Aşama 6 P5: disk yetersizliği — boş alan enjeksiyonu + testler",
+    "uncommitted": [
+      "M package.json",
+      "?? test/regression.js"
+    ],
+    "node": "v24.12.0",
+    "ffmpeg": "ffmpeg version 9.0.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers",
+    "platform": "win32 x64",
+    "reference": {
+      "note": "Kullanıcının kendi terminalindeki tam build (commit 6fee31d, --crop-bottom 150 + onay). Deterministik alanlar bu baseline ile birebir, dosya boyutu bayt bayt aynı — 2026-09-14 çapraz kontrol. Rapor dosyası silindiği için özet buraya kopyalandı.",
+      "finishedAt": "2026-09-14T12:45:20.273Z",
+      "totalSeconds": 181.7,
+      "stepSeconds": {
+        "01": 5.2,
+        "02": 39.9,
+        "04": 47.2,
+        "03": 89.4,
+        "05": 0
+      },
+      "musicDuration": 2885.8825,
+      "frames": 69261,
+      "sizeBytes": 1085220503
+    }
+  },
+  "album": {
+    "clip": {
+      "path": "videolar/in.mp4",
+      "md5": "0c132827dd063669fa4cfa0dfc4b5927"
+    },
+    "ambient": {
+      "path": "ses effektleri/campfire.mp3",
+      "md5": "334c114deed0476dc54caa4adbd5d916"
+    },
+    "audio": [
+      {
+        "name": "2 [usesuno.com].m4a",
+        "md5": "6f80d6034359520ad56599b6407616a6"
+      },
+      {
+        "name": "bittersweet-motif [usesuno.com].m4a",
+        "md5": "b03e6fdea15471395bc5835468bab676"
+      },
+      {
+        "name": "midnight-city-pulse [usesuno.com].m4a",
+        "md5": "fa6f21c87fa31ec910a6dbc96914b966"
+      },
+      {
+        "name": "midnight-comfort [usesuno.com].m4a",
+        "md5": "77ce757b446d2699ef8d4170e465bf6c"
+      },
+      {
+        "name": "midnight-street [usesuno.com].m4a",
+        "md5": "c2677f863d6925545400de9f05655502"
+      },
+      {
+        "name": "midnight-window [usesuno.com].m4a",
+        "md5": "087f1e163d333a7b81f08001888e1ed2"
+      },
+      {
+        "name": "morning-light [usesuno.com].m4a",
+        "md5": "b07551809d4f68f2a7ccbc1ee8a625e9"
+      },
+      {
+        "name": "nocturnal-groove [usesuno.com].m4a",
+        "md5": "f165b985cad217df3dd400572b9fe0e1"
+      },
+      {
+        "name": "nocturnal-isolation [usesuno.com].m4a",
+        "md5": "aa0739d46d12367ea7ff67c469bed350"
+      },
+      {
+        "name": "quiet-nightfall [usesuno.com].m4a",
+        "md5": "db8acfd8176dc9998fb8ad7e300eab01"
+      },
+      {
+        "name": "quiet-room-echoes [usesuno.com].m4a",
+        "md5": "118828ee9a3e5e7f99f6b66b1b9d75d7"
+      },
+      {
+        "name": "rain-on-the-glass [usesuno.com].m4a",
+        "md5": "97888581e5fa8a55cd22f8bacf33f0b3"
+      },
+      {
+        "name": "silent-space [usesuno.com].m4a",
+        "md5": "d090b0d9ed5e08a7bb932715a3c605d3"
+      },
+      {
+        "name": "somnambule [usesuno.com].m4a",
+        "md5": "1a71ac217618065cdceec08ad10e968e"
+      },
+      {
+        "name": "sunrise-quiet [usesuno.com].m4a",
+        "md5": "e92197d427ada3ecc35d74460564dde0"
+      }
+    ]
+  },
+  "config": {
+    "clip": "videolar/in.mp4",
+    "audioDir": "audio",
+    "ambient": "ses effektleri/campfire.mp3",
+    "order": [
+      "midnight-window",
+      "midnight-street",
+      "midnight-city-pulse",
+      "nocturnal-groove",
+      "nocturnal-isolation",
+      "rain-on-the-glass",
+      "quiet-room-echoes",
+      "silent-space",
+      "somnambule",
+      "midnight-comfort",
+      "quiet-nightfall",
+      "bittersweet-motif",
+      "2",
+      "sunrise-quiet",
+      "morning-light"
+    ],
+    "names": {
+      "2": "Before Light"
+    },
+    "video": {
+      "cropBottom": 150,
+      "aspect": "16:9",
+      "crf": 16,
+      "preset": "slow",
+      "fadeOut": 5,
+      "crossfadeSeconds": 0
+    },
+    "audio": {
+      "bitrate": "192k",
+      "ambientOffsetDb": -18.8
+    }
+  },
+  "tolerance": {
+    "durationSeconds": 0.05,
+    "trackSeconds": 0.001,
+    "sizeRatio": 0.02,
+    "lufs": 0.5,
+    "truePeakDb": 0.5,
+    "ambientLufs": 0.5,
+    "frameAverage": 1.5,
+    "loopSsim": 0.01
+  },
+  "expect": {
+    "outputs": [
+      "final_ambient.mp4",
+      "final_ambient.report.json",
+      "tracklist.txt"
+    ],
+    "report": {
+      "stepOrder": [
+        "01",
+        "02",
+        "04",
+        "03",
+        "05"
+      ],
+      "warnings": [],
+      "sortSource": "order",
+      "ambient": "mixed",
+      "musicDuration": 2885.8825,
+      "tracks": [
+        {
+          "file": "midnight-window [usesuno.com].m4a",
+          "duration": 199.1335,
+          "startSeconds": 0
+        },
+        {
+          "file": "midnight-street [usesuno.com].m4a",
+          "duration": 251.7735,
+          "startSeconds": 199.1335
+        },
+        {
+          "file": "midnight-city-pulse [usesuno.com].m4a",
+          "duration": 179.8135,
+          "startSeconds": 450.90700000000004
+        },
+        {
+          "file": "nocturnal-groove [usesuno.com].m4a",
+          "duration": 185.2135,
+          "startSeconds": 630.7205
+        },
+        {
+          "file": "nocturnal-isolation [usesuno.com].m4a",
+          "duration": 218.4135,
+          "startSeconds": 815.934
+        },
+        {
+          "file": "rain-on-the-glass [usesuno.com].m4a",
+          "duration": 169.9735,
+          "startSeconds": 1034.3474999999999
+        },
+        {
+          "file": "quiet-room-echoes [usesuno.com].m4a",
+          "duration": 179.9735,
+          "startSeconds": 1204.321
+        },
+        {
+          "file": "silent-space [usesuno.com].m4a",
+          "duration": 227.8135,
+          "startSeconds": 1384.2945
+        },
+        {
+          "file": "somnambule [usesuno.com].m4a",
+          "duration": 179.9335,
+          "startSeconds": 1612.108
+        },
+        {
+          "file": "midnight-comfort [usesuno.com].m4a",
+          "duration": 194.8135,
+          "startSeconds": 1792.0415
+        },
+        {
+          "file": "quiet-nightfall [usesuno.com].m4a",
+          "duration": 179.5735,
+          "startSeconds": 1986.855
+        },
+        {
+          "file": "bittersweet-motif [usesuno.com].m4a",
+          "duration": 177.9335,
+          "startSeconds": 2166.4285
+        },
+        {
+          "file": "2 [usesuno.com].m4a",
+          "duration": 169.1735,
+          "startSeconds": 2344.362
+        },
+        {
+          "file": "sunrise-quiet [usesuno.com].m4a",
+          "duration": 180.0135,
+          "startSeconds": 2513.5355
+        },
+        {
+          "file": "morning-light [usesuno.com].m4a",
+          "duration": 192.3335,
+          "startSeconds": 2693.549
+        }
+      ],
+      "cropFilter": "crop=1952:1098:496:0",
+      "base": {
+        "width": 1952,
+        "height": 1098,
+        "frames": 124
+      },
+      "loopSsim": 0.94807,
+      "assemble": {
+        "method": "copy-body+encode-tail",
+        "plan": {
+          "fps": 24,
+          "clipFrames": 124,
+          "totalFrames": 69261,
+          "fadeFrames": 120,
+          "copies": 557,
+          "tailFrames": 193,
+          "tailStartSeconds": 2877.833
+        },
+        "tailCompatible": true,
+        "junctions": [
+          {
+            "kind": "klip→klip",
+            "clean": true
+          },
+          {
+            "kind": "gövde→kuyruk",
+            "clean": true
+          }
+        ]
+      },
+      "ambientMix": {
+        "musicI": -14.78,
+        "targetI": -33.6,
+        "verificationAmbientI": -33.72,
+        "verificationMixI": -14.75
+      },
+      "tracklist": {
+        "count": 15,
+        "youtubeChapters": true
+      }
+    },
+    "tracklistText": "0:00  Midnight Window\n3:19  Midnight Street\n7:30  Midnight City Pulse\n10:30  Nocturnal Groove\n13:35  Nocturnal Isolation\n17:14  Rain on the Glass\n20:04  Quiet Room Echoes\n23:04  Silent Space\n26:52  Somnambule\n29:52  Midnight Comfort\n33:06  Quiet Nightfall\n36:06  Bittersweet Motif\n39:04  Before Light\n41:53  Sunrise Quiet\n44:53  Morning Light\n",
+    "output": {
+      "width": 1952,
+      "height": 1098,
+      "fps": 24,
+      "videoCodec": "h264",
+      "audioCodec": "aac",
+      "sampleRate": 48000,
+      "channels": 2,
+      "duration": 2885.8825,
+      "frames": 69261,
+      "sizeBytes": 1085220503
+    },
+    "loudness": {
+      "integratedLufs": -14.6,
+      "rangeLu": 5.6,
+      "truePeakDb": 1.1
+    },
+    "ambientIsolatedLufs": {
+      "600": -33.7,
+      "1612": -33.6
+    },
+    "frameAverages": {
+      "300": {
+        "Y": 110.64,
+        "U": 112.008,
+        "V": 145.139
+      },
+      "2884": {
+        "Y": 51.6474,
+        "U": 122.007,
+        "V": 134.514
+      }
+    }
+  },
+  "timing": {
+    "stepSeconds": {
+      "01": 2.6,
+      "02": 116.3,
+      "04": 134.9,
+      "03": 278.9,
+      "05": 0
+    },
+    "totalSeconds": 532.8,
+    "note": "bilgi amaçlı, karşılaştırılmaz — bu değerler arka plan işi olarak yük altında ölçüldü; kullanıcının terminalinde aynı build generated.reference.totalSeconds"
+  }
+}
