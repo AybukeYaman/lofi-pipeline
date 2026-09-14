@@ -1,0 +1,120 @@
+/**
+ * Aşama 8a — inspectProject gerçek klasörde (boş dosyalar; medya ölçülmez).
+ * Taze new-video projesinden montaja kadar kanıtlar tek tek eklenir.
+ */
+
+import assert from 'node:assert/strict';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { after, before, describe, test } from 'node:test';
+
+import { runNewVideo } from '../../new-video.js';
+import { setProjectClip } from '../../prep/project-file.js';
+import { inspectProject, nextStep } from '../../prep/project-status.js';
+import { tempDir } from '../helpers/fixtures.js';
+
+describe('inspectProject — taze projeden montaja', () => {
+  let root;
+  let dir;
+
+  before(async () => {
+    root = await tempDir('project-status');
+    await mkdir(root.path('videolar'));
+    await mkdir(root.path('ambient'));
+    await writeFile(root.path('ambient/campfire.mp3'), '');
+    ({ dir } = await runNewVideo({
+      videoName: 'video3-Durum & Test',
+      styleName: 'cozy-realistic',
+      ambientName: 'campfire',
+      videosDir: root.path('videolar'),
+      ambientDir: root.path('ambient'),
+    }));
+  });
+  after(() => root?.cleanup());
+
+  test('taze proje: faz1, yollar ve varsayılan çıktı', async () => {
+    const s = await inspectProject(dir);
+    assert.equal(s.projectJson.ok, true);
+    assert.equal(s.master, null);
+    assert.equal(s.styleRef, null);
+    assert.deepEqual(s.clips, []);
+    assert.deepEqual(s.clip, { value: '', path: null, exists: false });
+    assert.equal(s.audioDir, join(dir, 'audio'));
+    assert.equal(s.audioCount, 0);
+    assert.deepEqual(s.output, { path: join(dir, 'out', 'final_ambient.mp4'), exists: false });
+    assert.equal(s.promptsPath, join(dir, 'prompts.md'));
+    assert.equal(nextStep(s).id, 'faz1');
+  });
+
+  test('açı varyantı MASTER sayılmaz; MASTER.PNG sayılır → faz3', async () => {
+    await writeFile(join(dir, 'resimler', 'Master1.jpg'), '');
+    assert.equal(nextStep(await inspectProject(dir)).id, 'faz1');
+
+    await writeFile(join(dir, 'resimler', 'MASTER.PNG'), '');
+    const s = await inspectProject(dir);
+    assert.equal(s.master, join(dir, 'resimler', 'MASTER.PNG'));
+    assert.equal(nextStep(s).id, 'faz3');
+  });
+
+  test('klip konunca → clip; yazılınca → audio; parça konunca → build', async () => {
+    await writeFile(join(dir, 'videolar', 'in.mp4'), '');
+    await writeFile(join(dir, 'videolar', 'notlar.txt'), '');
+    let s = await inspectProject(dir);
+    assert.deepEqual(s.clips, [join(dir, 'videolar', 'in.mp4')]);
+    assert.equal(nextStep(s).id, 'clip');
+
+    await setProjectClip(s.projectPath, s.clips[0]);
+    s = await inspectProject(dir);
+    assert.deepEqual(s.clip, { value: './videolar/in.mp4', path: join(dir, 'videolar', 'in.mp4'), exists: true });
+    assert.equal(nextStep(s).id, 'audio');
+
+    await writeFile(join(dir, 'audio', 'a [usesuno.com].m4a'), '');
+    await writeFile(join(dir, 'audio', 'kapak.jpg'), '');
+    s = await inspectProject(dir);
+    assert.equal(s.audioCount, 1);
+    assert.equal(nextStep(s).id, 'build');
+  });
+
+  test('çıktı dosyası konunca → done', async () => {
+    await mkdir(join(dir, 'out'));
+    await writeFile(join(dir, 'out', 'final_ambient.mp4'), '');
+    assert.equal(nextStep(await inspectProject(dir)).id, 'done');
+  });
+});
+
+describe('inspectProject — kenar durumlar', () => {
+  let root;
+  before(async () => { root = await tempDir('project-status-edge'); });
+  after(() => root?.cleanup());
+
+  test('project.json yok ya da bozuk → fix-project; klasörler yoksa boş sayılır', async () => {
+    const empty = root.path('bos');
+    await mkdir(empty);
+    let s = await inspectProject(empty);
+    assert.deepEqual(s.projectJson, { ok: false, data: null, error: 'dosya yok' });
+    assert.deepEqual([s.clips, s.audioCount, s.master], [[], 0, null]);
+    assert.equal(nextStep(s).id, 'fix-project');
+
+    await writeFile(join(empty, 'project.json'), '{ "clip": ');
+    s = await inspectProject(empty);
+    assert.ok(s.projectJson.error.startsWith('JSON ayrıştırılamadı'));
+
+    await writeFile(join(empty, 'project.json'), '[]');
+    assert.equal((await inspectProject(empty)).projectJson.error, 'kök bir nesne olmalı');
+  });
+
+  test('özel audioDir, output.dir ve output.name okunur; BOM\'lu project.json', async () => {
+    const dir = root.path('ozel');
+    await mkdir(join(dir, 'muzik'), { recursive: true });
+    await writeFile(join(dir, 'muzik', 'x.mp3'), '');
+    await writeFile(join(dir, 'project.json'), '\uFEFF' + JSON.stringify({
+      clip: './yok.mp4', audioDir: './muzik', output: { dir: './cikti', name: 'son.mp4' },
+    }));
+    const s = await inspectProject(dir);
+    assert.equal(s.audioCount, 1);
+    assert.equal(s.output.path, join(dir, 'cikti', 'son.mp4'));
+    assert.deepEqual(s.clip, { value: './yok.mp4', path: join(dir, 'yok.mp4'), exists: false });
+    assert.equal(nextStep(s).id, 'faz1');
+    assert.ok(nextStep(s).detail.startsWith("clip'teki dosya bulunamadı"));
+  });
+});

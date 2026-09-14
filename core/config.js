@@ -28,7 +28,8 @@ export class ConfigError extends Error {
   }
 }
 
-const CONFIG_DEFAULTS = {
+/** Varsayılanlar — prep/project-status.js çıktı yolunu aynı değerlerle bulur. */
+export const CONFIG_DEFAULTS = {
   video: { aspect: '16:9', crf: 16, preset: 'slow', fadeOut: 5, crossfadeSeconds: 0 },
   audio: { bitrate: '192k', ambientOffsetDb: -18.8 },
   output: { dir: './out', name: 'final_ambient.mp4', tracklist: 'tracklist.txt' },
