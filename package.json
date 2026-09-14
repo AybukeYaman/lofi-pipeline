@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "node lofi.js",
+    "tty-check": "node scripts/tty-check.js",
     "build": "node build.js",
     "test": "node --test \"test/unit/*.test.js\" \"test/branches/*.test.js\"",
     "test:unit": "node --test \"test/unit/*.test.js\"",

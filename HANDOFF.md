@@ -1,8 +1,10 @@
-# Lofi Video Pipeline — Devir ve Mimari Dokümanı (Aşama 7–8)
+# Lofi Video Pipeline — Devir ve Mimari Dokümanı (Aşama 7–9)
 
 > **Durum (2026-09-14):** Pipeline Katman 1 (Montaj Otomasyonu: Aşama 1–6) ve Katman 2 (Hazırlık Otomasyonu: Aşama 7a, 7b, 7c, 7d-1, 7d-2) başarıyla tamamlandı. `npm test` 164/164 test geçiyor. Gerçek Gemini API kabul testi doğrulandı.
 >
 > **Durum (2026-09-15):** Aşama 8 (`npm start` paneli: 8a, 8b, 8c) tamamlandı — bölüm 11. `npm test` 228/228. Panelin gerçek terminalde kabul testi kullanıcıda (bölüm 11.5).
+>
+> **Durum (2026-09-15):** Aşama 9 (enquirer ile ok tuşlu panel + toplu montaj: 9a–9d) tamamlandı — bölüm 12. `npm test` 248/248. Gerçek terminallerde `npm run tty-check` sonuçları kullanıcıda (bölüm 12.6).
 
 ---
 
@@ -88,7 +90,7 @@ GEMINI_MODEL=gemini-3.6-flash
 
 ## 7. Test Durumu
 
-- **Toplam Test Sayısı:** 228 unit ve branch testi (`npm test`, 2026-09-15; Aşama 7 kapanışında 164).
+- **Toplam Test Sayısı:** 248 unit ve branch testi (`npm test`, 2026-09-15; Aşama 7 kapanışında 164, Aşama 8'de 228).
 - **Network Bağımlılığı:** Bütün unit/branch testleri sahte `fetch` ve `sleep` (mock) kullanır.
 - **Kabul Testi (Acceptance Test):** Gerçek Gemini API (`gemini-3.6-flash`) ile uçtan uca `add-style` ve `new-video` entegrasyonu gerçek görsel ile test edilmiş ve PASS almıştır.
 
@@ -116,8 +118,8 @@ GEMINI_MODEL=gemini-3.6-flash
 
 ## 10. Projeyi Devralan Geliştirici İçin Notlar
 
-1. Bağımlılık eklemeyin; proje Node.js dahili modülleri (`node:fs`, `node:path`, `node:util`, `node:test`) ile tasarlanmıştır.
-2. Bir dosya değiştirdiğinizde `npm test` komutunu çalıştırarak 228 testin yeşil kaldığını doğrulayın.
+1. Tek bağımlılık `enquirer` 2.4.1 (sabit sürüm, Aşama 9 kararı — bölüm 12). Başka bağımlılık eklemeden önce konuşun; geri kalan her şey Node.js dahili modülleriyle (`node:fs`, `node:path`, `node:util`, `node:test`) yazılmıştır.
+2. Bir dosya değiştirdiğinizde `npm test` komutunu çalıştırarak 248 testin yeşil kaldığını doğrulayın.
 3. Yeni bir CLI veya modül eklerken `StyleError`, `AddStyleError`, `GeminiError` gibi özel sınıf hatalarını kullanın.
 4. Panele yeni bir adım eklerken: iş kuralı `prep/`'e (saf ve test edilebilir), soru/komut akışı `ui/actions.js`'e, menü satırı `lofi.js`'e. CLI'yı panelden aynı süreçte çağırmayın (bölüm 11.3).
 
@@ -131,7 +133,7 @@ GEMINI_MODEL=gemini-3.6-flash
 |---|---|
 | "Hepsi sırayla" arada elle yapılan işler varken nasıl çalışsın? | **Kaldığı yerden devam:** panel proje klasörüne bakıp sıradaki adımı bulur. Durum hiçbir yere kaydedilmez. |
 | `clip` alanını kim yazsın? | **Panel** (klip listeden seçilir). `build.js`'in "konfigi değiştirmez" kuralı aynen geçerli. |
-| Menü tipi | Numaralı menü (`node:readline`, bağımlılık yok). |
+| Menü tipi | Numaralı menü (`node:readline`, bağımlılık yok). **Aşama 9'da değişti:** ok tuşlu enquirer menüsü (bölüm 12). |
 | Açılış komutu | Repo içinde `npm start` (`node lofi.js`). Global kurulum yok. |
 
 ### 11.2 Sıradaki adımın belirlenmesi (`prep/project-status.js → nextStep`)
@@ -150,13 +152,13 @@ Kanıta göre **sondan başa** bakılır; elle yapılmış ama işaretlenmemiş 
 |---|---|
 | `prep/project-status.js` | `inspectProject` (yalnızca okur), `nextStep` (saf), `listProjects` (son değişen en üstte) |
 | `prep/project-file.js` | `setProjectClip` — yalnızca `clip`; proje dışı ya da olmayan dosya reddedilir; `./videolar/x.mp4` biçimi |
-| `ui/prompt.js` | `createPrompter` (kendi satır kuyruğu, `ask`/`choose`/`confirm`, `suspend`/`resume`, EOF ve menüde Ctrl+C → `PromptClosedError`), `cleanPath` |
+| `ui/prompt.js` | `createPrompter` + `cleanPath`. Aşama 8'de readline (satır kuyruğu, `suspend`/`resume`); **Aşama 9'da enquirer adaptörüyle değiştirildi** (bölüm 12.3) |
 | `ui/runner.js` | `runScript` — CLI'yı ayrı süreçte, `stdio: 'inherit'`, `cwd` = repo kökü |
 | `ui/actions.js` | Menü akışları; klasör bayrakları (`--videos-dir`, `--ambient-dir`, `--styles-dir`) komutlara her zaman açıkça verilir |
 | `lofi.js` | `runPanel` (menü döngüsü, akış hatası paneli düşürmez), `main` (TTY değilse kod 2) |
 
 - **Neden ayrı süreç:** `build.js` çift Ctrl+C'de `process.exit(130)` çağırıyor ve kırpma onayı için stdin'de kendi readline'ını açıyor; `add-style.js` `.env`'i `process.cwd()`'den okuyup `process.env`'i değiştiriyor.
-- **Ayrı süreç çalışırken:** panel readline'ı bırakır (`suspend`), SIGINT'i yok sayar. Komut bitince ikisi de geri alınır.
+- **Ayrı süreç çalışırken:** panel SIGINT'i yok sayar, komut bitince geri alır. (Aşama 8'de readline ayrıca `suspend` ediliyordu; Aşama 9'da enquirer okuyucuyu her soruda kendisi açıp kapattığı için gerek kalmadı.)
 - **Aşama 8'de `new-video.js`'e eklenen:** `--styles-dir` bayrağı.
 
 ### 11.4 Bilinen sınırlar
@@ -177,3 +179,65 @@ Kanıta göre **sondan başa** bakılır; elle yapılmış ama işaretlenmemiş 
 
 ### 11.6 Kapsam dışı (not edildi, dokunulmadı)
 - `prep/gemini.js`: `DEFAULT_GEMINI_MODEL = 'gemini-1.5-flash'` tahminle yazılmış bir varsayılan; `.env`'de `GEMINI_MODEL` yoksa bu model istenir (`listModels` doğrulaması bulamazsa hata). `MAX_RETRIES = 3` (Aşama 7 planında 5 idi).
+
+---
+
+## 12. Aşama 9 — enquirer ile ok tuşlu panel + toplu montaj
+
+### 12.1 Kararlar (kullanıcıyla netleşti)
+
+| Soru | Karar |
+|---|---|
+| Menü | **Ok tuşlu seçim** (Claude Code'daki gibi). Aşama 8'deki "bağımlılık yok" kararından **vazgeçildi**. |
+| Kütüphane | `enquirer`, **2.4.1 sabit** (`^` yok). Son sürüm 2023-07-28; paket durgun → yalnızca `ui/prompt.js`'in arkasında. |
+| Çoklu seçim nerede? | **Toplu montaj:** montaja hazır projeler işaretlenir, `build.js` sırayla çalışır. ("Hangi adımları atlayayım" seçeneği değeri düşük bulundu; mevcut "atla" yeterli.) |
+| Onay soruları | "Evet / Hayır" seçimi (enquirer `Confirm` Türkçe `e`'yi false sayıyor). |
+
+### 12.2 enquirer 2.4.1 — kaynak koddan doğrulanan davranışlar
+- **Hazır test yardımcısı yok** (pakette yalnızca `index.js`, `index.d.ts`, `lib/`).
+- **TTY olmayan stdin** (`PassThrough`, boru): `keypress.listen` "Invalid stream passed" fırlatır. Hata `run()`'ın async executor'ında oluştuğu için **yakalanamaz, süreç çöker**. → `lofi.js` ve `tty-check` enquirer'a gitmeden TTY'yi denetler (`test/branches/tty-guard.test.js`).
+- **`show: false`:** klavye dinlenmez; `prompt.once('run')` içinde `prompt.keypress(...)` + `submit()` ile sürülebilir. İmleç gizle/göster kodları yine de `stdout`'a yazılır.
+- **Esc ve Ctrl+C ikisi de "cancel":** `run()` Error değil `''` ile reddeder. Tuş `prompt.state.keypress`'te. Adaptör: Esc → geri (`null`), Ctrl+C → `PromptClosedError`.
+- **`Select` sonucu seçeneğin `name`'i**, değer değil. `MultiSelect` sonucu `name` dizisi. Adaptör seçenekleri sıra numarasıyla adlandırıp değere eşler.
+- **Devre dışı seçenek:** `disabled` metni `hint`'e taşınır; varsayılan ipucu İngilizce `(disabled)` → adaptör `(seçilemez)` verir. Ok tuşları devre dışı öğeyi atlar.
+- **`Confirm`** yalnızca `^[ty1]` / `^[fn0]` tanır.
+- **Windows** (`process.platform === 'win32'`): simgeler `>`, `√`, `»`; genişlik `sütun − 1`. Multiselect'te açık/kapalı yalnızca renkle ayrılıyor ([enquirer #424](https://github.com/enquirer/enquirer/issues/424)) → gösterge `[x]` / `[ ]`.
+- İmleç gizliyken süreç düzeyinde `SIGINT`/`SIGTERM`/`exit` dinleyicisi takılır, prompt kapanınca kaldırılır. Raw modda Ctrl+C sinyal değil tuş olarak gelir.
+
+### 12.3 Mimari
+| Dosya | Sorumluluk |
+|---|---|
+| `ui/prompt.js` | enquirer adaptörü. Arayüz: `ask` (Input), `choose` (Select, `limit: 10`), `chooseMany` (MultiSelect), `confirm` (Evet/Hayır Select), `print`. Esc → `null`/`false`, Ctrl+C → `PromptClosedError`. `cleanPath`. enquirer yalnızca burada. |
+| `ui/actions.js` | enquirer'ı bilmez. Yeni: `batchBuild` (toplu montaj). |
+| `lofi.js` | Menüye "Toplu montaj". `run` doğrudan `runScript`. TTY denetimi (çökme önlemi). |
+| `scripts/tty-check.js` (+ `tty-check-child.js`) | Elle terminal doğrulaması (`npm run tty-check`). |
+
+**Toplu montaj (`batchBuild`):**
+- Liste yalnızca `nextStep` = `build` olan projeleri seçilebilir gösterir. `done` projeler listede ama seçilemez; hazır olmayanların yalnızca sayısı basılır.
+- Her build'den hemen önce durum yeniden okunur; adım artık `build` değilse proje atlanır.
+- Bir projenin hatası diğerlerini durdurmaz. Kod 130 (Ctrl+C) sonrası, kalan proje varsa "kalanlar iptal edilsin mi?" diye sorulur.
+- Sonda özet: başarılı / başarısız (kod) / atlandı / iptal.
+
+### 12.4 Test stratejisi
+- **Akışlar** (`test/branches/ui-actions.test.js`): `test/helpers/fake-prompter.js` — değer yanıtları (`pick`, `picks`, `BACK`, boolean, metin, fonksiyon). Yanıt bitince, tür uyuşmazsa, seçenek yoksa ya da devre dışıysa anlaşılır hata verir; asılı kalmaz. Prompter uygulamasından bağımsız.
+- **Adaptör** (`test/unit/ui-prompt.test.js`): gerçek enquirer, `show: false`, tuşlar `prompt.keypress` ile.
+- **TTY koruması** (`test/branches/tty-guard.test.js`): `lofi.js` ve `tty-check` boruya bağlı stdio'da kod 2, stack trace yok.
+- **Sınanamayan:** gerçek raw mode ve tuş okuma. `node-pty` yerel derleme isteyen ikinci bir bağımlılık olacağı için bilinçli olarak eklenmedi → `npm run tty-check` ile elle.
+
+### 12.5 Bilinen sınırlar
+- Git Bash (mintty) gibi TTY olmayan terminallerde panel açılmaz (kod 2).
+- Windows'ta enquirer'ın ASCII simgeleri kullanılır; görünüm farkıdır.
+- "Ambient seç" ekranında Esc, "Ambient yok" ile aynı sonucu verir (`choose` ikisinde de `null` döndürüyor).
+- Toplu montaj yalnızca nihai videonun varlığına bakar; video yok ama `tracklist.txt` duruyorsa `build.js` `--overwrite` ister ve kod 1 döner (bölüm 11.4 ile aynı sınır). Özette "başarısız (kod 1)" görünür.
+
+### 12.6 Terminal doğrulama (kullanıcı dolduracak — asistan TTY'siz ortamda süremez)
+Her ortamda `npm run tty-check`; betiğin sonunda bastığı satır buraya.
+
+| Ortam | Select + kaydırma | MultiSelect | Input (Türkçe) | Esc | Alt süreç devri | Ctrl+C | Çıkıştan sonra echo/imleç |
+|---|---|---|---|---|---|---|---|
+| Windows PowerShell 5.1 (konsol penceresi) | | | | | | | |
+| Windows Terminal (PowerShell) | | | | | | | |
+| VS Code entegre terminali (PowerShell) | | | | | | | |
+| Git Bash (varsa) — beklenen: "Terminal etkileşimli değil", kod 2 | — | — | — | — | — | — | — |
+
+Ardından panel kabulü: `npm start` → ok tuşlarıyla yeni proje → devam et → Faz 1 → Esc ile geri → Toplu montaj ekranında Boşluk ile işaretleme (gerçek build istenmiyorsa Esc) → menüde Ctrl+C.
