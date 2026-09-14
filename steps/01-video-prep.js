@@ -49,6 +49,47 @@ export class CropNotConfirmedError extends Error {
   }
 }
 
+export class CropSizeError extends Error {
+  /**
+   * @param {string} message
+   * @param {{ cropBottom: number, suggestions: number[] }} detail
+   */
+  constructor(message, detail) {
+    super(message);
+    this.name = 'CropSizeError';
+    this.cropBottom = detail.cropBottom;
+    this.suggestions = detail.suggestions;
+  }
+}
+
+/**
+ * Kırpma sonrası boyutların h264/yuv420p'ye uyduğunu denetler.
+ *
+ * yuv420p tek sayılı boyutu taşıyamaz ve ffmpeg crop filtresi HATA VERMEZ —
+ * boyutu sessizce bir aşağı yuvarlar (ölçüldü: ih−151 → 1096, 1097 değil). Yani
+ * kullanıcının verdiği 151 fiilen 152 olurdu. Değer değiştirilmez; komşu geçerli
+ * değerler önerilip durulur (HANDOFF bölüm 15, Aşama 6 karar 1).
+ *
+ * Konfig doğrulamasında değil burada: yükseklik ancak klip ölçülünce bilinir.
+ * prepareVideo bunu onaydan ve encode'dan önce çağırır.
+ *
+ * @param {{ height: number, cropBottom: number }} p height: ham klip
+ */
+export function checkCropHeight({ height, cropBottom }) {
+  const croppedHeight = height - cropBottom;
+
+  if (croppedHeight % 2 !== 0) {
+    const suggestions = [cropBottom - 1, cropBottom + 1]
+      .filter((v) => v >= 0 && height - v > 0);
+    throw new CropSizeError(
+      `cropBottom ${cropBottom} kırpılmış yüksekliği tek sayı yapıyor (${height} − ${cropBottom} = ` +
+      `${croppedHeight}); h264/yuv420p çift sayı ister ve ffmpeg bunu sessizce bir piksel ` +
+      `daha kırparak "düzeltirdi". Değer değiştirilmedi — ${suggestions.join(' ya da ')} kullan.`,
+      { cropBottom, suggestions },
+    );
+  }
+}
+
 /**
  * Watermark kırpması SONRASI boyuttan en-boy kırpmasını hesaplar.
  *
@@ -90,7 +131,11 @@ export function planAspectCrop({ width, height, aspect }) {
   }
 
   const removed = width - targetWidth;
-  const left = Math.floor(removed / 2);
+  // yuv420p'de ffmpeg crop x ofsetini çift sayıya İNDİRİR (ölçüldü: x=496 ve
+  // x=497 aynı kareyi verir). Tek sayı yazılırsa rapor gerçeği söylemez; bu
+  // yüzden sol kesim baştan çifte indirilir. Kesilen fark tek-çift ise iki yan
+  // arasında en fazla 2 px fark kalır — merkez en fazla 1 px kayar.
+  const left = Math.floor(removed / 4) * 2;
   const right = removed - left;
 
   return {
@@ -167,6 +212,8 @@ export async function prepareVideo(options) {
       `cropBottom (${cropBottom}) klip yüksekliğinden (${source.height}) büyük.`,
     );
   }
+  // Onaydan ve encode'dan önce: tek sayılı yükseklik sessizce bir piksel daha kırpılırdı.
+  checkCropHeight({ height: source.height, cropBottom });
 
   // 1 — En-boy planı: watermark kırpması SONRASI boyuttan hesaplanır.
   // Onaydan önce, çünkü dar kaynak hatası kimseye kare göstermeden fırlamalı.
@@ -179,6 +226,17 @@ export async function prepareVideo(options) {
     filters.push(aspectPlan.filter);
   }
   const expected = aspectPlan ? aspectPlan.after : { width: source.width, height: croppedHeight };
+
+  // Genişlik yalnızca en-boy adımı KIRPMADIĞINDA tek kalabilir (adım kapalı ya da
+  // kaynak ±1 px ile zaten bu oranda). Kırpan plan her zaman çift genişlik verir.
+  if (expected.width % 2 !== 0 && !scaleWidth) {
+    throw new CropSizeError(
+      `Çıktı genişliği tek sayı (${expected.width}): kaynak genişliği kırpılmadan kalıyor ve ` +
+      'h264/yuv420p çift sayı ister — ffmpeg sessizce bir piksel kırpardı. ' +
+      (aspect ? '' : 'En-boy adımını aç (--aspect 16:9) ya da ') + '--scale ile çift genişlik ver.',
+      { cropBottom, suggestions: [] },
+    );
+  }
 
   if (aspectPlan?.skipped) {
     logger.info(`En-boy adımı atlandı: ${aspectPlan.reason} (${source.width}×${croppedHeight}).`);

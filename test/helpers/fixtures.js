@@ -105,6 +105,43 @@ export async function ssim(a, b) {
 }
 
 /**
+ * İki görüntünün PSNR'ı (dB, yüksek = benzer; aynıysa `inf` → Infinity).
+ * Piksel kayması SSIM'den daha keskin ayırt edilir.
+ * @param {string} a
+ * @param {string} b
+ * @returns {Promise<number>}
+ */
+export async function psnr(a, b) {
+  const { stderr } = await ffmpeg([
+    '-loglevel', 'info', '-i', a, '-i', b, '-lavfi', 'psnr', '-f', 'null', '-',
+  ]);
+  const match = /average:(inf|[\d.]+)/.exec(stderr);
+  if (!match) throw new Error(`PSNR okunamadı: ${a} / ${b}`);
+  return match[1] === 'inf' ? Infinity : Number(match[1]);
+}
+
+/**
+ * Kayıpsız (ffv1/mkv) yuv420p test kaynağı — h264'ün kabul etmediği tek sayılı
+ * boyutlar için.
+ *
+ * Tuzak: testsrc2 boyutu kendi içinde çifte yuvarlıyor (2945 → 2944) ve yuv420p
+ * crop da öyle. Bu yüzden çift boyutta üretilip RGB'de kırpılır, sonra yuv420p'ye
+ * çevrilir — ffprobe'da gerçekten 2945 görünür.
+ *
+ * @param {string} path .mkv
+ * @param {{ width: number, height: number, frames?: number, fps?: number }} o
+ */
+export async function makeLosslessClip(path, { width, height, frames = 24, fps = 24 }) {
+  const even = (n) => n + (n % 2);
+  await ffmpeg([
+    '-f', 'lavfi', '-i', `testsrc2=s=${even(width)}x${even(height)}:r=${fps}`,
+    '-vf', `format=rgb24,crop=${width}:${height}:0:0,format=yuv420p`,
+    '-frames:v', String(frames), '-c:v', 'ffv1', '-y', path,
+  ]);
+  return path;
+}
+
+/**
  * Video akışındaki kare (paket) sayısı.
  * @param {string} path
  */
