@@ -45,6 +45,16 @@ describe('project.json', () => {
     assert.equal((await loadProject(path)).video.cropBottom, 150);
   });
 
+  test('boş yol metinleri tek problem verir, klasöre çözülmez', async () => {
+    await assert.rejects(loadProject(await write('empty', { clip: '', audioDir: ' ', ambient: '' })), (e) =>
+      e instanceof ConfigError &&
+      assert.deepEqual(e.problems, [
+        'clip: boş olmayan bir metin olmalı',
+        'audioDir: boş olmayan bir metin olmalı',
+        'ambient: boş olmayan bir metin olmalı',
+      ]) === undefined);
+  });
+
   test('okuma ve ayrıştırma hataları ayrı mesajla', async () => {
     await assert.rejects(loadProject(dir.path('yok.json')), (e) =>
       e instanceof ConfigError && e.problems[0] === 'dosya okunamadı: ENOENT');

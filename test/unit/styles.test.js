@@ -3,11 +3,11 @@
  */
 
 import assert from 'node:assert/strict';
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { after, before, describe, test } from 'node:test';
 
 import {
-  STYLE_FIELDS, STYLES_DIR, StyleError, listStyles, loadStyle, renderStyleBlock, validateStyle,
+  STYLE_FIELDS, STYLES_DIR, StyleError, findStyleRef, listStyles, loadStyle, renderStyleBlock, validateStyle,
 } from '../../prep/styles.js';
 import { tempDir } from '../helpers/fixtures.js';
 
@@ -162,6 +162,35 @@ describe('loadStyle', () => {
         e instanceof StyleError && e.problems[0].startsWith('stil adı küçük harf kebab-case'));
     });
   }
+});
+
+describe('findStyleRef', () => {
+  let dir;
+  before(async () => {
+    dir = await tempDir('style-refs');
+  });
+  after(() => dir?.cleanup());
+
+  test('refs/ klasörü yok → null', async () => {
+    assert.deepEqual(await findStyleRef('anime-cel', { dir: dir.dir }), { path: null, warnings: [] });
+  });
+
+  test('tek görsel bulunur; ad önekine ya da desteklenmeyen uzantıya takılmaz', async () => {
+    await mkdir(dir.path('refs'));
+    for (const file of ['neo-tokyo.PNG', 'neo-tokyo-2.jpg', 'neo.jpg', 'watercolor.gif']) {
+      await writeFile(dir.path(`refs/${file}`), '');
+    }
+    assert.deepEqual(await findStyleRef('neo-tokyo', { dir: dir.dir }), { path: dir.path('refs/neo-tokyo.PNG'), warnings: [] });
+    assert.deepEqual(await findStyleRef('watercolor', { dir: dir.dir }), { path: null, warnings: [] });
+  });
+
+  test('iki uzantı → ilki + uyarı', async () => {
+    await writeFile(dir.path('refs/neo.webp'), '');
+    const { path, warnings } = await findStyleRef('neo', { dir: dir.dir });
+    assert.equal(path, dir.path('refs/neo.jpg'));
+    assert.equal(warnings.length, 1);
+    assert.ok(warnings[0].includes('neo.jpg, neo.webp'));
+  });
 });
 
 describe('renderStyleBlock', () => {

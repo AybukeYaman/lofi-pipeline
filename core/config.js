@@ -94,13 +94,13 @@ async function resolveProject(json, { projectPath, overrides = {} }) {
   unknownKeys(output, KNOWN_KEYS.output, 'output.', warnings);
 
   // --- yollar
-  requireString(json.clip, 'clip', problems);
-  requireString(json.audioDir, 'audioDir', problems);
-  if (json.ambient !== undefined) requireString(json.ambient, 'ambient', problems);
-
-  const clip = typeof json.clip === 'string' ? at(json.clip) : null;
-  const audioDir = typeof json.audioDir === 'string' ? at(json.audioDir) : null;
-  const ambient = typeof json.ambient === 'string' ? at(json.ambient) : null;
+  // Boş metin çözülmez: "" proje klasörüne çözülüp ikinci, yanıltıcı bir
+  // "dosya değil" hatası üretiyordu (new-video.js clip'i boş yazar).
+  const clip = requireString(json.clip, 'clip', problems) ? at(json.clip) : null;
+  const audioDir = requireString(json.audioDir, 'audioDir', problems) ? at(json.audioDir) : null;
+  const ambient = json.ambient !== undefined && requireString(json.ambient, 'ambient', problems)
+    ? at(json.ambient)
+    : null;
 
   if (clip) await expectKind(clip, 'file', 'clip', problems);
   if (audioDir) await expectKind(audioDir, 'directory', 'audioDir', problems);

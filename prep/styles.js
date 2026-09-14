@@ -9,7 +9,7 @@
  * (STYLE_FIELDS) kurulacak. Hatalar config.js'teki gibi TEK seferde raporlanır.
  */
 
-import { basename, join } from 'node:path';
+import { basename, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { listFiles } from '../core/files.js';
@@ -18,6 +18,9 @@ import { findAmbient } from './ambients.js';
 
 /** Repodaki stil klasörü. */
 export const STYLES_DIR = fileURLToPath(new URL('../styles/', import.meta.url));
+
+/** Stil görselleri (Faz 1'in "Image 2"si) — styles/refs/<ad>.<uzantı>. */
+export const STYLE_REF_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
 
 /** Stil adı = dosya adı: küçük harf kebab-case ("neo-tokyo"). */
 const NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -66,6 +69,30 @@ export class StyleError extends Error {
 export async function listStyles({ dir = STYLES_DIR } = {}) {
   const paths = await listFiles(dir, ['.json']);
   return paths.map((path) => basename(path, '.json'));
+}
+
+/**
+ * Stilin referans görseli. Klasör ya da görsel yoksa `path: null` —
+ * elle eklenen stillerin (başlangıç seti) görseli yok.
+ *
+ * @param {string} name doğrulanmış stil adı
+ * @param {{ dir?: string }} [options] stil klasörü; görseller `<dir>/refs/`
+ * @returns {Promise<{ path: string | null, warnings: string[] }>}
+ */
+export async function findStyleRef(name, { dir = STYLES_DIR } = {}) {
+  let paths;
+  try {
+    paths = await listFiles(join(dir, 'refs'), STYLE_REF_EXTENSIONS);
+  } catch (cause) {
+    if (cause.code === 'ENOENT') return { path: null, warnings: [] };
+    throw cause;
+  }
+
+  const matches = paths.filter((path) => basename(path, extname(path)) === name);
+  const warnings = matches.length > 1
+    ? [`"${name}" için birden fazla referans görseli var, ilki kullanıldı: ${matches.map((p) => basename(p)).join(', ')}`]
+    : [];
+  return { path: matches[0] ?? null, warnings };
 }
 
 /**
