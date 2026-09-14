@@ -1,32 +1,38 @@
 /**
  * Aşama 2 — Ses zinciri.
  *
- * 15 parçayı tek bir mix dosyasına çevirir:
- *   topla → duplike ele → sırala → codec kararı → birleştir → doğrula → manifest
+ * Parçaları tek bir mix dosyasına çevirir:
+ *   topla → duplike ele → sırala → ölç → birleştir → doğrula → manifest
+ *
+ * TEK YOL: concat filtresi + AAC/48 kHz/stereo encode (2026-09-14, Aşama 6 P4).
+ * Önceki concat demuxer yolu (ve AAC için `-c copy` beyaz listesi) ilk dosyadan
+ * sonraki her dosyanın encoder priming / pre-skip örneklerini atmıyordu — ölçüldü:
+ * 15 parçada AAC kopyada +373 ms, Opus encode'da +206 ms kayma. Filtre her girdiyi
+ * kendi çözücüsünde açtığı için kayma sıfır. Süre de aynı (gerçek albümde 106 vs
+ * 104 sn).
  *
  * Bu katman "ne yapılacağını" bilir; süreç yönetimi core/ffmpeg.js'in,
- * ölçüm core/probe.js'in, dosya sistemi core/files.js ve core/workspace.js'in işi.
+ * ölçüm core/probe.js'in, dosya sistemi core/files.js'in işi.
  */
 
 import { mkdir, readFile } from 'node:fs/promises';
 import { basename, dirname } from 'node:path';
 
 import { ffmpeg } from '../core/ffmpeg.js';
-import { concatLine, listFiles, findDuplicates, matchOrder } from '../core/files.js';
-import { durationsMatch, probe } from '../core/probe.js';
+import { listFiles, findDuplicates, matchOrder } from '../core/files.js';
+import { durationsMatch, measureDecodedDuration, probe } from '../core/probe.js';
+
+/** Çıktı her zaman bu biçimde (referans videodaki değerler). */
+const TARGET = { codec: 'aac', sampleRate: 48000, channels: 2 };
+
+const DEFAULTS = { bitrate: '192k' };
 
 /**
- * Yeniden encode edilmeden doğrudan kopyalanabilecek girdinin tarifi.
- *
- * Bilinçli olarak BEYAZ liste: "Opus ise encode et" gibi bir kara liste,
- * yarın ALAC veya Vorbis geldiğinde sessizce yanlış yola sapar.
- * Burada listede olmayan her şey encode edilir — bilinmeyen girdi güvenli
- * tarafa düşer.
+ * Bir dosyanın başlık süresi ile çözülen süresi arasında kabul edilen en büyük
+ * fark (sn). Normali encoder gecikmesi: Opus +13.5 ms, AAC +21–27 ms. Yarısı
+ * kesilmiş dosyada fark 10 sn ölçüldü.
  */
-const COPY_WHITELIST = { codec: 'aac' };
-
-/** Varsayılan çıktı hedefi (referans videodaki değerler). */
-const DEFAULTS = { bitrate: '192k', sampleRate: 48000, channels: 2 };
+const DAMAGED_FILE_GAP = 0.5;
 
 const NOOP_LOGGER = { info() {}, warn() {} };
 
@@ -36,14 +42,10 @@ const NOOP_LOGGER = { info() {}, warn() {} };
  * @param {object} options
  * @param {string} options.audioDir parçaların bulunduğu klasör
  * @param {string} options.outputPath üretilecek mix dosyası
- * @param {import('../core/workspace.js').createWorkspace extends
- *   (...args: any) => Promise<infer W> ? W : never} options.workspace
  * @param {string[]} [options.order] parça sırası (sade adlar, ör. "midnight-window");
  *   verilirse orderFile'dan önce gelir
  * @param {string} [options.orderFile] order.txt yolu (ikisi de yoksa alfabetik sıraya düşülür)
  * @param {string} [options.bitrate]
- * @param {number} [options.sampleRate]
- * @param {number} [options.channels]
  * @param {{ info: Function, warn: Function }} [options.logger]
  * @param {(seconds: number) => void} [options.onProgress]
  * @returns {Promise<object>} manifest
@@ -52,12 +54,9 @@ export async function concatAudio(options) {
   const {
     audioDir,
     outputPath,
-    workspace,
     order,
     orderFile,
     bitrate = DEFAULTS.bitrate,
-    sampleRate = DEFAULTS.sampleRate,
-    channels = DEFAULTS.channels,
     logger = NOOP_LOGGER,
     onProgress,
   } = options;
@@ -92,7 +91,8 @@ export async function concatAudio(options) {
     warn,
   );
 
-  // 4 — Ölç (gerçek codec burada öğrenilir, uzantıya güvenilmez)
+  // 4 — Ölç: biçim probe'dan, SÜRE çözülen örnek sayısından (probe süresi
+  // encoder gecikmesi yüzünden dosya başına ~13 ms sapıyor, damgalar kayıyordu).
   const probes = [];
   for (const path of ordered) {
     probes.push(await probe(path));
@@ -105,42 +105,59 @@ export async function concatAudio(options) {
     );
   }
 
-  // 5 — Codec kararı
-  const decision = decideCodec(probes, { sampleRate, channels });
-  logger.info(`Codec kararı: ${decision.action} (${decision.reason})`);
+  const decoded = [];
+  for (const p of probes) {
+    const seconds = await measureDecodedDuration(p.path);
+    // Başlık ile gerçek ses arasındaki normal fark encoder gecikmesi kadar (13–27 ms).
+    // Saniyeler mertebesinde fark: dosya kesik ya da bozuk — yarım parça albüme girmesin.
+    if (p.duration !== null && Math.abs(seconds - p.duration) > DAMAGED_FILE_GAP) {
+      throw new Error(
+        `"${basename(p.path)}" bozuk ya da kesik olabilir: başlık ${p.duration.toFixed(2)} sn ` +
+        `diyor, çözülebilen ses ${seconds.toFixed(2)} sn. Dosyayı yeniden indir/dışa aktar.`,
+      );
+    }
+    decoded.push(seconds);
+  }
 
-  // 6 — Birleştir
+  const kinds = [...new Set(probes.map((p) => `${p.audioCodec}/${p.sampleRate}/${p.channels}`))];
+  logger.info(
+    `Girdiler: ${kinds.join(', ')} → concat filtresi, ${TARGET.codec}/${TARGET.sampleRate}/` +
+    `${TARGET.channels} (her durumda encode).`,
+  );
+
+  // 5 — Birleştir
   await mkdir(dirname(outputPath), { recursive: true });
+  await ffmpeg(buildFilterArgs(probes, outputPath, { bitrate }), { onProgress });
 
-  const args = decision.method === 'demuxer'
-    ? await buildDemuxerArgs(ordered, workspace, outputPath, decision, { bitrate, sampleRate, channels })
-    : buildFilterArgs(ordered, outputPath, { bitrate, sampleRate, channels });
-
-  await ffmpeg(args, { onProgress });
-
-  // 7 — Doğrula
+  // 6 — Doğrula (beklenen: çözülen sürelerin toplamı)
   const result = await probe(outputPath);
-  const expectedDuration = probes.reduce((sum, p) => sum + (p.duration ?? 0), 0);
+  const expectedDuration = decoded.reduce((sum, d) => sum + d, 0);
 
   if (!durationsMatch(result.duration, expectedDuration)) {
     throw new Error(
       `Mix süresi beklenenden farklı: ${result.duration} sn üretildi, ` +
-      `${expectedDuration.toFixed(2)} sn bekleniyordu. Çıktı güvenilir değil.`,
+      `${expectedDuration.toFixed(3)} sn bekleniyordu. Çıktı güvenilir değil.`,
+    );
+  }
+  if (result.sampleRate !== TARGET.sampleRate || result.channels !== TARGET.channels) {
+    throw new Error(
+      `Mix biçimi hedeften farklı: ${result.sampleRate} Hz / ${result.channels} kanal.`,
     );
   }
 
-  // 8 — Manifest (05-tracklist.js damgaları ve adları buradan üretir, dosyaları yeniden ölçmez)
+  // 7 — Manifest (05-tracklist.js damgaları ve adları buradan üretir, dosyaları yeniden ölçmez)
   let elapsed = 0;
-  const tracks = probes.map((p) => {
+  const tracks = probes.map((p, i) => {
     const track = {
       file: p.path,
-      duration: p.duration,
+      duration: decoded[i],
+      probeDuration: p.duration,
       startSeconds: elapsed,
       codec: p.audioCodec,
       sampleRate: p.sampleRate,
       channels: p.channels,
     };
-    elapsed += p.duration ?? 0;
+    elapsed += decoded[i];
     return track;
   });
 
@@ -159,7 +176,7 @@ export async function concatAudio(options) {
     duplicates,
     sortSource,
     orderReport,
-    codec: decision,
+    codec: { action: 'encode', method: 'filter', inputs: kinds },
     warnings,
   };
 }
@@ -232,98 +249,51 @@ async function resolveOrder(paths, { order, orderFile }, warn) {
 }
 
 /**
- * Kopyalanacak mı encode edilecek mi, hangi yöntemle birleştirilecek.
+ * Bir girdiyi ortak biçime çeken filtre dalı.
  *
- * concat demuxer tüm girdilerin aynı parametrelerde olmasını şart koşar, bu
- * yüzden karar dosya başına değil TOPLU verilir: tek dosya bile uymuyorsa
- * hepsi encode edilir.
+ * Neden her girdi ayrı: concat filtresi karışık girdilerde ortak kanal düzenini
+ * KENDİSİ seçiyor ve mono + stereo'da mono seçiyor — stereo parça sessizce
+ * mono'ya iniyordu (ölçüldü: L 500 / R 900 Hz → 896 / 896).
  *
- * @param {Array<{ audioCodec: string|null, sampleRate: number|null, channels: number|null }>} probes
- * @param {{ sampleRate: number, channels: number }} target
+ * Mono için `pan`, `aformat` değil: aformat mono→stereo çoğaltırken merkez
+ * karışımıyla 3 dB düşürüyor (ölçüldü: −21.07 → −24.08 dB); pan seviyeyi korur.
+ * İkiden fazla kanal standart stereo downmix'e iner.
+ *
+ * @param {number} index
+ * @param {{ channels: number|null }} input
  */
-function decideCodec(probes, target) {
-  const signature = (p) => `${p.audioCodec}/${p.sampleRate}/${p.channels}`;
-  const uniform = probes.every((p) => signature(p) === signature(probes[0]));
-
-  if (!uniform) {
-    const kinds = [...new Set(probes.map(signature))].join(', ');
-    return {
-      action: 'encode',
-      method: 'filter',
-      reason: `girdiler tek biçimli değil (${kinds}); concat filtresi yeniden örnekleme yapar`,
-    };
-  }
-
-  const [first] = probes;
-  const matchesWhitelist =
-    first.audioCodec === COPY_WHITELIST.codec &&
-    first.sampleRate === target.sampleRate &&
-    first.channels === target.channels;
-
-  if (matchesWhitelist) {
-    return {
-      action: 'copy',
-      method: 'demuxer',
-      reason: `${probes.length}/${probes.length} girdi beyaz listeye uyuyor (${signature(first)})`,
-    };
-  }
-
-  return {
-    action: 'encode',
-    method: 'demuxer',
-    reason: `girdiler beyaz liste dışı (${signature(first)}), hedef ` +
-      `${COPY_WHITELIST.codec}/${target.sampleRate}/${target.channels}`,
-  };
+export function normalizeBranch(index, input) {
+  const layout = input.channels === 1
+    ? 'pan=stereo|c0=c0|c1=c0,'
+    : '';
+  return (
+    `[${index}:a]aresample=${TARGET.sampleRate},${layout}` +
+    `aformat=sample_fmts=fltp:sample_rates=${TARGET.sampleRate}:channel_layouts=stereo[a${index}]`
+  );
 }
 
 /**
- * concat demuxer yolu: list.txt + tek geçiş.
+ * concat filtresi argümanları: her girdi ayrı açılır (priming doğru atılır),
+ * ortak biçime çekilir, tek geçişte AAC'ye encode edilir.
  *
- * Her dosyayı ayrı ayrı AAC'ye çevirip sonra `-c copy` ile eklemek, her
- * birleşme noktasında encoder priming boşluğu bırakır. Tek geçiş referans
- * çıktının üretildiği yöntemdir.
+ * @param {Array<{ path: string, channels: number|null }>} inputs
+ * @param {string} outputPath
+ * @param {{ bitrate: string }} format
  */
-async function buildDemuxerArgs(paths, workspace, outputPath, decision, format) {
-  const listContent = paths.map(concatLine).join('\n') + '\n';
-  const listPath = await workspace.writeText('list.txt', listContent);
+function buildFilterArgs(inputs, outputPath, { bitrate }) {
+  const branches = inputs.map((input, i) => normalizeBranch(i, input));
+  const labels = inputs.map((_, i) => `[a${i}]`).join('');
 
   return [
-    '-f', 'concat',
-    '-safe', '0',
-    '-i', listPath,
-    '-vn',
-    ...encodeArgs(decision.action, format),
-    '-y', outputPath,
-  ];
-}
-
-/**
- * concat filtresi yolu: karışık sample rate / kanal sayısında demuxer
- * yeniden örnekleme yapmaz ve pitch kayması üretir; filtre yapar.
- */
-function buildFilterArgs(paths, outputPath, format) {
-  const inputs = paths.flatMap((path) => ['-i', path]);
-  const streams = paths.map((_, i) => `[${i}:a]`).join('');
-
-  return [
-    ...inputs,
-    '-filter_complex', `${streams}concat=n=${paths.length}:v=0:a=1[out]`,
+    ...inputs.flatMap((input) => ['-i', input.path]),
+    '-filter_complex',
+    `${branches.join(';')};${labels}concat=n=${inputs.length}:v=0:a=1[out]`,
     '-map', '[out]',
-    ...encodeArgs('encode', format),
+    '-vn',
+    '-c:a', TARGET.codec,
+    '-b:a', bitrate,
+    '-ar', String(TARGET.sampleRate),
+    '-ac', String(TARGET.channels),
     '-y', outputPath,
-  ];
-}
-
-/**
- * @param {'copy'|'encode'} action
- * @param {{ bitrate: string, sampleRate: number, channels: number }} format
- */
-function encodeArgs(action, format) {
-  if (action === 'copy') return ['-c:a', 'copy'];
-  return [
-    '-c:a', 'aac',
-    '-b:a', format.bitrate,
-    '-ar', String(format.sampleRate),
-    '-ac', String(format.channels),
   ];
 }

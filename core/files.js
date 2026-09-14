@@ -20,7 +20,8 @@ export const AUDIO_EXTENSIONS = ['.m4a', '.mp3', '.wav', '.flac', '.aac', '.opus
  *
  * Ayıraçlar ileri eğik çizgiye çevrilir (demuxer ters eğik çizgiyi kaçış
  * karakteri sanabiliyor), tek tırnak kabuk kuralıyla kaçırılır.
- * Ses (Aşama 2) ve video (Aşama 4) birleştirmesi aynı satırı kullanır.
+ * Video birleştirmesi (Aşama 4, gövde kopyası) kullanır. Ses artık concat
+ * filtresiyle birleştiriliyor (Aşama 6 P4) — demuxer priming'i atmıyordu.
  *
  * @param {string} path
  * @returns {string}

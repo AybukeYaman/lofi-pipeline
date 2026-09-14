@@ -6,7 +6,7 @@
  * yerine "doğru çalıştı" diyebilmesi için.
  */
 
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -139,6 +139,54 @@ export async function makeLosslessClip(path, { width, height, frames = 24, fps =
     '-frames:v', String(frames), '-c:v', 'ffv1', '-y', path,
   ]);
   return path;
+}
+
+/**
+ * Ses tıklarının başlangıç anları (sn): mono'ya indirilip 48 kHz float olarak
+ * çözülür, eşiği aşan ilk örnek bir tıkın başı sayılır; aynı tıkın devamı
+ * `minGapSeconds` içinde yok sayılır. Örnek düzeyinde (~0.02 ms) hassas.
+ *
+ * @param {string} path
+ * @param {{ dir: { path: (f: string) => string }, threshold?: number, minGapSeconds?: number }} o
+ * @returns {Promise<{ onsets: number[], seconds: number }>}
+ */
+export async function findOnsets(path, { dir, threshold = 0.1, minGapSeconds = 1 }) {
+  const rate = 48000;
+  const raw = dir.path(`onsets-${Math.random().toString(36).slice(2, 8)}.f32`);
+  await ffmpeg(['-i', path, '-ac', '1', '-ar', String(rate), '-f', 'f32le', '-c:a', 'pcm_f32le', '-y', raw]);
+  const buf = await readFile(raw);
+
+  const onsets = [];
+  let lastLoud = -Infinity;
+  for (let i = 0; i < buf.length / 4; i++) {
+    if (Math.abs(buf.readFloatLE(i * 4)) <= threshold) continue;
+    if (i - lastLoud > minGapSeconds * rate) onsets.push(i / rate);
+    lastLoud = i;
+  }
+  return { onsets, seconds: buf.length / 4 / rate };
+}
+
+/**
+ * Kanal başına RMS seviyesi (dB) ve baskın frekans (sıfır geçiş oranından, saf
+ * sinüste doğru). İsteğe bağlı kesit.
+ *
+ * @param {string} path
+ * @param {{ start?: number, duration?: number }} [segment]
+ * @returns {Promise<Array<{ rmsDb: number, hz: number }>>}
+ */
+export async function channelStats(path, segment = {}) {
+  const seek = [];
+  if (segment.start !== undefined) seek.push('-ss', String(segment.start));
+  if (segment.duration !== undefined) seek.push('-t', String(segment.duration));
+  const { stderr } = await ffmpeg([
+    '-loglevel', 'info', ...seek, '-i', path, '-map', '0:a:0',
+    '-af', 'aresample=48000,astats=measure_perchannel=RMS_level+Zero_crossings_rate:measure_overall=none',
+    '-f', 'null', '-',
+  ], { fullStderr: true });
+
+  const rms = [...stderr.matchAll(/RMS level dB:\s*(-?[\d.]+|-inf)/g)].map((m) => Number(m[1]));
+  const zcr = [...stderr.matchAll(/Zero crossings rate:\s*([\d.]+)/g)].map((m) => Number(m[1]));
+  return rms.map((rmsDb, i) => ({ rmsDb, hz: (zcr[i] * 48000) / 2 }));
 }
 
 /**

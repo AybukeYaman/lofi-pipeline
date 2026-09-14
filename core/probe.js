@@ -6,14 +6,19 @@
  */
 
 import { access, constants } from 'node:fs/promises';
-import { ffprobe } from './ffmpeg.js';
+import { ffmpeg, ffprobe } from './ffmpeg.js';
 
 /**
  * Süre karşılaştırmalarında kullanılacak tolerans (saniye).
  * ffprobe format/video/audio akışları için farklı ondalık döndürüyor;
  * tam eşitlik beklemek yanlış negatif üretir. (HANDOFF bölüm 14, madde 5)
+ *
+ * 0.5 → 0.05 (2026-09-14, Aşama 6 P4): ±0.5 sn, parça başına ~14–27 ms biriken
+ * priming kaymasını (15 parçada 0.2–0.37 sn) gizliyordu. 0.05 sn: bir AAC
+ * çerçevesinin (1024 örnek ≈ 21 ms) iki katından biraz fazla, bir video karesinden
+ * (24 fps ≈ 42 ms) büyük.
  */
-export const DURATION_TOLERANCE = 0.5;
+export const DURATION_TOLERANCE = 0.05;
 
 export class ProbeError extends Error {
   /**
@@ -151,4 +156,37 @@ export async function probe(path) {
     channels: toNumber(audio?.channels),
     audioBitrate: toNumber(audio?.bit_rate),
   };
+}
+
+/**
+ * Ses akışının ÇÖZÜLEN süresi — örnek sayısı / örnekleme hızı.
+ *
+ * Neden probe süresi yetmiyor: kapsayıcı başlığı encoder gecikmesini (AAC priming,
+ * Opus pre-skip) tutarsız hesaba katıyor. Ölçüldü: 15 Opus dosyasının probe
+ * toplamı 2885.680 sn, çözülen toplamı 2885.8825 sn (dosya başına +13.5 ms);
+ * demuxer ile kopyalanmış bir AAC mix'in başlığı 150.02 sn derken sesi 150.39 sn.
+ * Tracklist damgaları ve süre doğrulaması çözülen süreye dayanmalı.
+ *
+ * Dosyanın tamamı çözülür (yazılmaz): 48 dk'lık 15 Opus dosyası ≈ 7 sn.
+ *
+ * @param {string} path
+ * @returns {Promise<number>} saniye
+ */
+export async function measureDecodedDuration(path) {
+  const info = await probe(path);
+  if (!info.hasAudio || !info.sampleRate) {
+    throw new ProbeError(`Ses akışı ya da örnekleme hızı yok: ${path}`, { path });
+  }
+
+  const { stderr } = await ffmpeg([
+    '-loglevel', 'info',
+    '-i', path,
+    '-map', '0:a:0',
+    '-af', 'astats=metadata=0:measure_overall=Number_of_samples:measure_perchannel=none',
+    '-f', 'null', '-',
+  ], { fullStderr: true });
+
+  const match = /Number of samples:\s*(\d+)/.exec(stderr);
+  if (!match) throw new ProbeError(`Çözülen örnek sayısı okunamadı: ${path}`, { path });
+  return Number(match[1]) / info.sampleRate;
 }

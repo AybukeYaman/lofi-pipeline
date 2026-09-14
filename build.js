@@ -156,7 +156,6 @@ export async function runBuild(config, options = {}) {
     const audio = await step('02', 'Ses birleştirme', (logger) => concatAudio({
       audioDir: config.audioDir,
       outputPath: workspace.path('mix.m4a'),
-      workspace,
       order: config.order ?? undefined,
       bitrate: config.audio.bitrate,
       logger,
