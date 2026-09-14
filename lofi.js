@@ -17,7 +17,7 @@ import { inspectProject, nextStep } from './prep/project-status.js';
 import { DEFAULT_VIDEOS_DIR } from './prep/scaffold.js';
 import { STYLES_DIR } from './prep/styles.js';
 import {
-  addStyle, buildProject, chooseClip, continueProject, createSession, newProject,
+  addStyle, batchBuild, buildProject, chooseClip, continueProject, createSession, newProject,
   selectProject, showLibrary, showStatus,
 } from './ui/actions.js';
 import { PromptClosedError, createPrompter } from './ui/prompt.js';
@@ -35,6 +35,7 @@ const MENU = [
   { label: 'Stil ekle (görselden, Gemini)', run: addStyle },
   { label: 'Klibi seç (project.json → clip)', run: withProject(chooseClip) },
   { label: 'Montaj (build)', run: withProject(buildProject) },
+  { label: 'Toplu montaj (birden fazla proje)', run: batchBuild },
   { label: 'Proje durumu', run: withProject(showStatus) },
   { label: "Stiller ve ambient'ler", run: showLibrary },
   { label: 'Başka proje seç', run: (ctx) => selectProject(ctx, { force: true }) },

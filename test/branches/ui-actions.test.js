@@ -14,9 +14,9 @@ import { runPanel } from '../../lofi.js';
 import { parseCli as parseNewVideoCli, runNewVideo } from '../../new-video.js';
 import { STYLES_DIR } from '../../prep/styles.js';
 import {
-  addStyle, buildProject, chooseClip, continueProject, createSession, newProject,
+  addStyle, batchBuild, buildProject, chooseClip, continueProject, createSession, newProject,
 } from '../../ui/actions.js';
-import { BACK, createFakePrompter, pick } from '../helpers/fake-prompter.js';
+import { BACK, createFakePrompter, pick, picks } from '../helpers/fake-prompter.js';
 import { tempDir } from '../helpers/fixtures.js';
 
 let root;
@@ -39,14 +39,17 @@ after(() => root?.cleanup());
 
 /**
  * @param {unknown[]} [answers]
- * @param {{ code?: number, closeWhenEmpty?: boolean }} [options]
+ * @param {{ code?: number, codes?: number[], closeWhenEmpty?: boolean }} [options]
+ *   codes: build.js çağrılarına sırayla dönen kodlar (bitince `code`)
  */
-function makeCtx(answers = [], { code = 0, closeWhenEmpty = false } = {}) {
+function makeCtx(answers = [], { code = 0, codes = [], closeWhenEmpty = false } = {}) {
   const prompter = createFakePrompter(answers, { closeWhenEmpty });
   const calls = [];
+  const buildCodes = [...codes];
   const run = async (script, args) => {
     calls.push([script, ...args]);
     if (script === 'new-video.js') await runNewVideo(parseNewVideoCli(args));
+    if (script === 'build.js' && buildCodes.length > 0) return buildCodes.shift();
     return code;
   };
   const ctx = { prompter, run, session: createSession(), ...env };
@@ -244,6 +247,127 @@ describe('continueProject', () => {
     await continueProject(ctx);
     assert.deepEqual(itemsOf(prompter, 'Proje seç'), ['yeni — Faz 1 — Master frame', 'eski — Faz 1 — Master frame', 'Geri']);
     assert.equal(ctx.session.project, join(env.videosDir, 'yeni'));
+  });
+});
+
+describe('batchBuild', () => {
+  /** Montaja hazır proje: klip yazılı, bir parça var. */
+  const readyProject = async (name) => {
+    const { dir } = await project(name);
+    await writeFile(join(dir, 'videolar', 'in.mp4'), '');
+    await writeFile(join(dir, 'audio', 'a.m4a'), '');
+    await writeFile(join(dir, 'project.json'), JSON.stringify({ ...(await readProject(dir)), clip: './videolar/in.mp4' }));
+    return dir;
+  };
+  const doneProject = async (name) => {
+    const dir = await readyProject(name);
+    await mkdir(join(dir, 'out'));
+    await writeFile(join(dir, 'out', 'final_ambient.mp4'), '');
+    return dir;
+  };
+  const buildCall = (dir) => ['build.js', '--project', join(dir, 'project.json')];
+
+  test('yalnızca hazır projeler seçilebilir; seçilenler liste sırasında derlenir; özet', async () => {
+    const a = await readyProject('hazir-a');
+    const b = await readyProject('hazir-b');
+    await project('faz1-proje');
+
+    const { ctx, calls, prompter, out } = makeCtx([picks('hazir-a', 'hazir-b'), true]);
+    assert.equal(await batchBuild(ctx), true);
+
+    const labels = itemsOf(prompter, 'Montaja hazır projeleri seç');
+    assert.equal(labels.length, 2);
+    for (const label of labels) assert.match(label, /^hazir-[ab] — Klip: \.\/videolar\/in\.mp4 · 1 parça$/);
+    const order = labels.map((l) => (l.startsWith('hazir-a') ? a : b));
+    assert.deepEqual(calls, order.map(buildCall));
+
+    const text = out();
+    assert.ok(text.includes('Montaja hazır olmayan 1 proje listelenmedi'));
+    assert.ok(text.includes('2 proje sırayla derlenecek'));
+    assert.ok(text.includes(`[1/2] ${labels[0].split(' — ')[0]}`));
+    assert.ok(text.includes(`[başarılı]  hazir-a — ${join(a, 'out', 'final_ambient.mp4')}`));
+    assert.ok(text.includes(`[başarılı]  hazir-b — ${join(b, 'out', 'final_ambient.mp4')}`));
+  });
+
+  test('çıktısı olan proje listede devre dışı, seçilemez', async () => {
+    await readyProject('hazir');
+    await doneProject('bitmis');
+    const { ctx, prompter } = makeCtx([picks('bitmis')]);
+    await assert.rejects(batchBuild(ctx), /devre dışı seçeneği gösteriyor: bitmis — çıktı var/);
+    const question = prompter.questions.find((q) => q.kind === 'chooseMany');
+    assert.equal(question.items.find((i) => i.label.startsWith('bitmis')).disabled, true);
+  });
+
+  test('bir projenin hatası diğerini durdurmaz', async () => {
+    await readyProject('p1');
+    await readyProject('p2');
+    const { ctx, calls, out } = makeCtx([picks('p1', 'p2'), true], { codes: [1, 0] });
+    assert.equal(await batchBuild(ctx), false);
+    assert.equal(calls.length, 2);
+    assert.match(out(), /\[başarısız\] p[12] — çıkış kodu 1/);
+    assert.match(out(), /\[başarılı\]  p[12] — /);
+  });
+
+  test('Ctrl+C (130): "kalanları iptal et" evet → sonraki çalışmaz; hayır → çalışır', async () => {
+    await readyProject('p1');
+    await readyProject('p2');
+
+    const stop = makeCtx([picks('p1', 'p2'), true, true], { codes: [130] });
+    assert.equal(await batchBuild(stop.ctx), false);
+    assert.equal(stop.calls.length, 1);
+    assert.match(stop.out(), /\[başarısız\] p[12] — çıkış kodu 130/);
+    assert.match(stop.out(), /\[iptal\]     p[12]/);
+
+    const go = makeCtx([picks('p1', 'p2'), true, false], { codes: [130, 0] });
+    assert.equal(await batchBuild(go.ctx), false);
+    assert.equal(go.calls.length, 2);
+  });
+
+  test('son projede 130 → kalan yok, soru sorulmaz', async () => {
+    await readyProject('tek');
+    const { ctx, prompter } = makeCtx([picks('tek'), true], { codes: [130] });
+    assert.equal(await batchBuild(ctx), false);
+    assert.equal(prompter.questions.filter((q) => q.kind === 'confirm').length, 1);
+  });
+
+  test('seçimden sonra çıktısı oluşan proje atlanır', async () => {
+    const a = await readyProject('p1');
+    await readyProject('p2');
+    const { ctx, calls, out } = makeCtx([
+      picks('p1', 'p2'),
+      async () => {
+        await mkdir(join(a, 'out'));
+        await writeFile(join(a, 'out', 'final_ambient.mp4'), '');
+        return true;
+      },
+    ]);
+    assert.equal(await batchBuild(ctx), false);
+    assert.equal(calls.length, 1);
+    assert.ok(!calls.some((c) => c.includes(join(a, 'project.json'))));
+    assert.ok(out().includes('[atlandı]   p1 — Video hazır'));
+  });
+
+  test('hazır proje yoksa soru sorulmaz; Esc ya da boş seçim → komut yok', async () => {
+    await project('faz1');
+    const none = makeCtx();
+    assert.equal(await batchBuild(none.ctx), false);
+    assert.ok(none.out().includes('Montaja hazır proje yok.'));
+    assert.equal(none.prompter.questions.length, 0);
+
+    await readyProject('hazir');
+    for (const answer of [BACK, picks()]) {
+      const { ctx, calls, out } = makeCtx([answer]);
+      assert.equal(await batchBuild(ctx), false);
+      assert.deepEqual(calls, []);
+      assert.ok(out().includes('Vazgeçildi.'));
+    }
+  });
+
+  test('onay hayır → komut yok', async () => {
+    await readyProject('hazir');
+    const { ctx, calls } = makeCtx([picks('hazir'), false]);
+    assert.equal(await batchBuild(ctx), false);
+    assert.deepEqual(calls, []);
   });
 });
 

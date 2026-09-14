@@ -194,6 +194,82 @@ export async function buildProject(ctx, dir) {
   return code === 0;
 }
 
+/**
+ * Toplu montaj: montaja hazır projeleri işaretle → build.js sırayla.
+ * Bir projenin hatası diğerlerini durdurmaz; Ctrl+C (kod 130) sonrası kalanlar
+ * için sorulur. Her build başlamadan durum yeniden okunur.
+ *
+ * @returns {Promise<boolean>} seçilenlerin hepsi başarılıysa true
+ */
+export async function batchBuild(ctx) {
+  const { prompter } = ctx;
+  const projects = await listProjects(ctx.videosDir);
+  const ready = projects.filter((p) => p.step.id === 'build');
+  const done = projects.filter((p) => p.step.id === 'done');
+  const notReady = projects.length - ready.length - done.length;
+
+  if (notReady > 0) {
+    prompter.print(`Montaja hazır olmayan ${notReady} proje listelenmedi (sıradaki adımları için: Proje durumu).`);
+  }
+  if (ready.length === 0) {
+    prompter.print('Montaja hazır proje yok.');
+    return false;
+  }
+
+  const selected = await prompter.chooseMany('Montaja hazır projeleri seç:', [
+    ...ready.map((p) => ({ label: `${p.name} — ${p.step.detail.split('\n')[0]}`, value: p })),
+    ...done.map((p) => ({ label: `${p.name} — çıktı var (yeniden yapmak için: Montaj)`, value: p, disabled: true })),
+  ]);
+  if (!selected || selected.length === 0) {
+    prompter.print('Vazgeçildi.');
+    return false;
+  }
+  if (!await prompter.confirm(`${selected.length} proje sırayla derlenecek. Başlasın mı?`, { defaultValue: true })) {
+    prompter.print('Vazgeçildi.');
+    return false;
+  }
+
+  const results = [];
+  for (let i = 0; i < selected.length; i++) {
+    const project = selected[i];
+    prompter.print(`\n[${i + 1}/${selected.length}] ${project.name}`);
+
+    // Seçimden bu yana değişmiş olabilir (ör. çıktı başka yerden üretildi).
+    const status = await inspectProject(project.dir);
+    const step = nextStep(status);
+    if (step.id !== 'build') {
+      prompter.print(`Atlandı: ${step.title}`);
+      results.push({ project, result: 'skipped', reason: step.title });
+      continue;
+    }
+
+    const code = await ctx.run('build.js', ['--project', status.projectPath]);
+    if (code === 0) {
+      results.push({ project, result: 'ok', output: status.output.path });
+      continue;
+    }
+    results.push({ project, result: 'failed', code });
+
+    const remaining = selected.slice(i + 1);
+    if (code === 130 && remaining.length > 0
+      && await prompter.confirm('Montaj durduruldu. Kalan projeler iptal edilsin mi?', { defaultValue: true })) {
+      for (const rest of remaining) results.push({ project: rest, result: 'cancelled' });
+      break;
+    }
+  }
+
+  const line = (r) => {
+    switch (r.result) {
+      case 'ok': return `  [başarılı]  ${r.project.name} — ${r.output}`;
+      case 'failed': return `  [başarısız] ${r.project.name} — çıkış kodu ${r.code}`;
+      case 'skipped': return `  [atlandı]   ${r.project.name} — ${r.reason}`;
+      default: return `  [iptal]     ${r.project.name}`;
+    }
+  };
+  prompter.print(['', 'Toplu montaj özeti:', ...results.map(line)].join('\n'));
+  return results.every((r) => r.result === 'ok');
+}
+
 /** 6) Proje durumu — kontrol listesi + sıradaki adım. */
 export async function showStatus(ctx, dir) {
   const s = await inspectProject(dir);
