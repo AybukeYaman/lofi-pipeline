@@ -29,13 +29,22 @@ const PREFIX = 'lofi-build-';
  * @returns {Promise<string>} yazılan yol
  */
 export async function writeTextFile(path, content) {
-  const clean = content
+  await writeFile(path, Buffer.from(normalizeText(content), 'utf8'));
+  return path;
+}
+
+/**
+ * BOM'u keser, satır sonlarını LF yapar. Diskten okunan şablonlar da
+ * bundan geçer: core.autocrlf=true ile checkout CRLF getiriyor.
+ *
+ * @param {string} content
+ * @returns {string}
+ */
+export function normalizeText(content) {
+  return content
     .replace(/^\uFEFF/, '')
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n');
-
-  await writeFile(path, Buffer.from(clean, 'utf8'));
-  return path;
 }
 
 /**
@@ -49,8 +58,7 @@ export async function writeTextFile(path, content) {
  * @returns {Promise<unknown>}
  */
 export async function readJsonFile(path) {
-  const raw = await readFile(path, 'utf8');
-  return JSON.parse(raw.replace(/^\uFEFF/, ''));
+  return JSON.parse(normalizeText(await readFile(path, 'utf8')));
 }
 
 /**

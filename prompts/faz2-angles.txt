@@ -1,0 +1,70 @@
+## Faz 2 — Kamera açısı varyantları
+
+> ⚠ **Her varyant MASTER'dan türetilir, varyantın varyantından değil.** Zincirleme
+> gidilirse stil her adımda kayar. Her prompt için yeni bir sohbet aç ve ek olarak
+> yalnızca `resimler/MASTER.png` ver.
+
+**Çıktı:** `resimler/Master1.jpg` … `resimler/Master5.jpg`
+
+Başka bir açı denemek için ikinci satırdaki açı tarifini değiştir. Tarifte açılı
+parantez kullanma — model onu doldurulacak yer sanıyor.
+
+### 1 — Extreme low angle
+
+```text
+Image 1 = master frame, the only reference.
+Show the exact same scene from a new camera angle: extreme low angle, worm's eye view.
+KEEP from Image 1: every subject and object, their identity, colors, lighting and rendering style.
+CHANGE only the camera position and lens. Output a single still image.
+
+Style description:
+{{STYLE_BLOCK}}
+```
+
+### 2 — High angle
+
+```text
+Image 1 = master frame, the only reference.
+Show the exact same scene from a new camera angle: high angle, three-quarter view from above.
+KEEP from Image 1: every subject and object, their identity, colors, lighting and rendering style.
+CHANGE only the camera position and lens. Output a single still image.
+
+Style description:
+{{STYLE_BLOCK}}
+```
+
+### 3 — Dutch angle
+
+```text
+Image 1 = master frame, the only reference.
+Show the exact same scene from a new camera angle: dutch angle, 15 degree tilt.
+KEEP from Image 1: every subject and object, their identity, colors, lighting and rendering style.
+CHANGE only the camera position and lens. Output a single still image.
+
+Style description:
+{{STYLE_BLOCK}}
+```
+
+### 4 — Close-up
+
+```text
+Image 1 = master frame, the only reference.
+Show the exact same scene from a new camera angle: close-up, 85mm, shallow depth of field.
+KEEP from Image 1: every subject and object, their identity, colors, lighting and rendering style.
+CHANGE only the camera position and lens. Output a single still image.
+
+Style description:
+{{STYLE_BLOCK}}
+```
+
+### 5 — Wide establishing shot
+
+```text
+Image 1 = master frame, the only reference.
+Show the exact same scene from a new camera angle: wide establishing shot, 24mm.
+KEEP from Image 1: every subject and object, their identity, colors, lighting and rendering style.
+CHANGE only the camera position and lens. Output a single still image.
+
+Style description:
+{{STYLE_BLOCK}}
+```

@@ -1,0 +1,22 @@
+## Faz 1 — Master frame
+
+**Araç:** Google AI Studio, Gemini image (Nano Banana)
+**Ekler (sıra önemli):** Image 1 = kompozisyon referansı (sahne) · Image 2 = stil referansı (stil görseli)
+**Çıktı:** `resimler/MASTER.png`
+
+```text
+Image 1 = composition reference. Image 2 = style reference.
+Redraw the scene from Image 1 entirely in the visual style of Image 2.
+KEEP from Image 1: subject identity, object placement, framing, layout.
+TAKE from Image 2: rendering technique, color palette, lighting, line quality, texture.
+Output a single still image. Do not change the camera angle.
+
+Style description:
+{{STYLE_BLOCK}}
+```
+
+> **Not — doğrulanmadı (HANDOFF §4, çift kırpma):** Master 16:9'dan daha uzun
+> üretilirse (ör. 1952×1248, ≈1.56:1) alttan 150 px watermark kırpması kareyi tek
+> başına 16:9'a indirir, yanlardan kayıp olmaz. Bu yalnızca video aracı master'ın
+> en-boy oranını koruyorsa işe yarar — Hailuo için doğrulanmadı. Prompta ekleme;
+> denemek istersen oranı aracın ayarından seç.

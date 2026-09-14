@@ -50,11 +50,11 @@ describe('repodaki stiller', () => {
     );
   });
 
-  test('stil dosyaları BOM\'suz ve LF', async () => {
+  // CR denetlenmez: core.autocrlf=true ile checkout CRLF getiriyor, JSON'a zararı yok.
+  test('stil dosyaları BOM\'suz', async () => {
     for (const name of await listStyles()) {
       const bytes = await readFile(`${STYLES_DIR}${name}.json`);
       assert.notEqual(bytes[0], 0xef, `${name}: BOM`);
-      assert.ok(!bytes.includes(0x0d), `${name}: CR`);
     }
   });
 });

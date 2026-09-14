@@ -1,0 +1,23 @@
+## Faz 3 — Image-to-video
+
+**Girdi:** `resimler/MASTER.png` (ya da seçilen varyant)
+**Çıktı:** ham klip `videolar/` altına → yolunu `project.json` içindeki `clip` alanına yaz (ör. `./videolar/in.mp4`)
+
+**Ayarlar**
+- Süre **5 saniye** — uzun klipte model hareketi "geliştiriyor", bozulma birikiyor
+- Motion strength **düşük** — detaylı karelerde özellikle
+- Destekleniyorsa **first frame = last frame** = aynı görsel (Kling gibi) — loop kendiliğinden kapanır; sonradan crossfade ile yamamaktan kat kat temiz
+- Motion Brush varsa yalnızca hareket etmesi istenen alanları boya
+
+**Kurallar**
+- ✅ Döngüsel: flames flickering gently, steam rising, water flowing, flowers swaying, breathing slowly, light pulsing
+- ❌ Yönlü: pan, zoom, walks forward, camera moves — loop'ta asla kapanmaz
+- Uyuyan/durgun özneyi hareket ettirme — durum değişikliği loop'u bozar, model hayvan anatomisini bozuyor. Promptta açıkça "perfectly still" de.
+
+Aşağıdaki hareket listesi `{{STYLE_NAME}}` stilinin önerisi — **sahneye göre düzenle:**
+sahnede olmayan öğeyi sil, sahnedeki durgun özneyi ör. "Sleeping cat perfectly still." diye ekle.
+
+```text
+Subtle looping motion: {{MOTION_HINTS}}.
+Everything else perfectly still. Camera static.
+```
