@@ -29,8 +29,10 @@ const makeStyle = (patch = {}) => ({
 });
 
 describe('repodaki stiller', () => {
-  test('başlangıç seti: 3 stil', async () => {
-    assert.deepEqual(await listStyles(), ['anime-cel', 'cozy-realistic', 'watercolor']);
+  // Tam eşitlik değil: kullanıcı add-style ile stil ekledikçe liste büyür.
+  test('başlangıç setindeki 3 stil mevcut', async () => {
+    const styles = await listStyles();
+    for (const name of ['anime-cel', 'cozy-realistic', 'watercolor']) assert.ok(styles.includes(name), name);
   });
 
   for (const name of ['anime-cel', 'cozy-realistic', 'watercolor']) {

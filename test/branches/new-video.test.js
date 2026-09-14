@@ -102,8 +102,14 @@ describe('runNewVideo', () => {
   });
 
   test('isim, stil ve ambient hataları tek seferde; hiçbir şey oluşmaz', async () => {
+    // "mevcut:" listesi repodaki styles/'a değil (kullanıcı stil ekleyebilir) sabit bir kopyaya bağlı.
+    const stylesDir = join(env.base, 'styles');
+    await mkdir(stylesDir);
+    for (const style of ['anime-cel', 'cozy-realistic', 'watercolor']) {
+      await copyFile(join(STYLES_DIR, `${style}.json`), join(stylesDir, `${style}.json`));
+    }
     await assert.rejects(
-      runNewVideo({ ...env, videoName: 'video:3.', styleName: 'neo-tokyo', ambientName: 'ocean' }),
+      runNewVideo({ ...env, stylesDir, videoName: 'video:3.', styleName: 'neo-tokyo', ambientName: 'ocean' }),
       (e) => {
         assert.ok(e instanceof NewVideoError);
         assert.equal(e.problems.length, 4, e.problems.join('\n'));
