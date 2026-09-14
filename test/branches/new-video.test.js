@@ -214,6 +214,20 @@ describe('main (CLI)', () => {
     assert.ok(help.out.startsWith('Kullanım:'));
   });
 
+  test('--styles-dir: liste ve kurulum o klasörden', async (t) => {
+    const stylesDir = join(env.base, 'styles');
+    await mkdir(stylesDir);
+    await copyFile(join(STYLES_DIR, 'watercolor.json'), join(stylesDir, 'watercolor.json'));
+
+    const list = await runMain(t, ['v', ...flags(), '--styles-dir', stylesDir]);
+    assert.equal(list.code, 2);
+    assert.match(list.err, /watercolor\s+öneri/);
+    assert.ok(!list.err.includes('anime-cel'));
+
+    assert.equal((await runMain(t, ['v', '--style', 'anime-cel', ...flags(), '--styles-dir', stylesDir])).code, 2);
+    assert.equal((await runMain(t, ['v', '--style', 'watercolor', ...flags(), '--styles-dir', stylesDir])).code, 0);
+  });
+
   test('doğrulama hatası → 2', async (t) => {
     const { code, err } = await runMain(t, ['v', '--style', 'neo-tokyo', ...flags()]);
     assert.equal(code, 2);

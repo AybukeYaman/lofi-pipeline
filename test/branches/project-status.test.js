@@ -4,13 +4,13 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
 
 import { runNewVideo } from '../../new-video.js';
 import { setProjectClip } from '../../prep/project-file.js';
-import { inspectProject, nextStep } from '../../prep/project-status.js';
+import { inspectProject, listProjects, nextStep } from '../../prep/project-status.js';
 import { tempDir } from '../helpers/fixtures.js';
 
 describe('inspectProject — taze projeden montaja', () => {
@@ -79,6 +79,32 @@ describe('inspectProject — taze projeden montaja', () => {
     await mkdir(join(dir, 'out'));
     await writeFile(join(dir, 'out', 'final_ambient.mp4'), '');
     assert.equal(nextStep(await inspectProject(dir)).id, 'done');
+  });
+});
+
+describe('listProjects', () => {
+  let root;
+  before(async () => { root = await tempDir('list-projects'); });
+  after(() => root?.cleanup());
+
+  test('project.json\'lu klasörler, son değişen en üstte; dosyalar ve json\'suz klasör atlanır', async () => {
+    const videos = root.path('videolar');
+    for (const name of ['eski', 'yeni', 'bos-klasor']) await mkdir(join(videos, name), { recursive: true });
+    await writeFile(join(videos, 'eski', 'project.json'), '{}');
+    await writeFile(join(videos, 'yeni', 'project.json'), '{}');
+    await writeFile(join(videos, 'notlar.txt'), '');
+    const old = new Date(Date.now() - 60_000);
+    await utimes(join(videos, 'eski'), old, old);
+    await utimes(join(videos, 'eski', 'project.json'), old, old);
+
+    const projects = await listProjects(videos);
+    assert.deepEqual(projects.map((p) => p.name), ['yeni', 'eski']);
+    assert.equal(projects[0].dir, join(videos, 'yeni'));
+    assert.equal(projects[0].step.id, 'faz1');
+  });
+
+  test('videolar kökü yoksa boş liste', async () => {
+    assert.deepEqual(await listProjects(root.path('yok')), []);
   });
 });
 

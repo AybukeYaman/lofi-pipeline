@@ -137,6 +137,7 @@ const USAGE = `Kullanım:
   --ambient <ad>       ortak ses efekti (ör. heavyRain) — verilmezse project.json'da ambient olmaz
   --videos-dir <yol>   videolar kökü (varsayılan: ${DEFAULT_VIDEOS_DIR})
   --ambient-dir <yol>  ambient klasörü (varsayılan: ${DEFAULT_AMBIENT_DIR})
+  --styles-dir <yol>   stil klasörü (varsayılan: repodaki styles/)
   -h, --help           bu metin`;
 
 /** @param {string[]} argv */
@@ -150,6 +151,7 @@ export function parseCli(argv) {
       ambient: { type: 'string' },
       'videos-dir': { type: 'string' },
       'ambient-dir': { type: 'string' },
+      'styles-dir': { type: 'string' },
       help: { type: 'boolean', short: 'h', default: false },
     },
   });
@@ -168,11 +170,12 @@ export function parseCli(argv) {
     ambientName: values.ambient,
     videosDir: values['videos-dir'],
     ambientDir: values['ambient-dir'],
+    stylesDir: values['styles-dir'],
   };
 }
 
 /** --style verilmediğinde basılan kütüphane özeti. */
-async function describeLibrary({ ambientDir }) {
+async function describeLibrary({ ambientDir, stylesDir = STYLES_DIR }) {
   const lines = ['Stil seçilmedi (--style). Mevcut stiller:'];
 
   let ambients;
@@ -182,12 +185,12 @@ async function describeLibrary({ ambientDir }) {
     if (!(error instanceof AmbientError)) throw error;
   }
 
-  const names = await listStyles();
+  const names = await listStyles({ dir: stylesDir });
   const width = Math.max(0, ...names.map((n) => n.length));
   for (const name of names) {
-    const ref = (await findStyleRef(name)).path ? 'referans görseli var' : 'referans görseli yok';
+    const ref = (await findStyleRef(name, { dir: stylesDir })).path ? 'referans görseli var' : 'referans görseli yok';
     try {
-      const { style } = await loadStyle(name, { ambients });
+      const { style } = await loadStyle(name, { dir: stylesDir, ambients });
       lines.push(`  ${name.padEnd(width)}  öneri: --ambient ${style.suggestedAmbient} · ${ref}`);
     } catch (error) {
       if (!(error instanceof StyleError)) throw error;
@@ -257,7 +260,7 @@ export async function main(argv) {
     return 0;
   }
   if (cli.styleName === undefined) {
-    console.error(await describeLibrary({ ambientDir: cli.ambientDir }));
+    console.error(await describeLibrary({ ambientDir: cli.ambientDir, stylesDir: cli.stylesDir }));
     return 2;
   }
   if (cli.videoName === undefined) {
@@ -272,6 +275,7 @@ export async function main(argv) {
       ambientName: cli.ambientName,
       videosDir: cli.videosDir,
       ambientDir: cli.ambientDir,
+      stylesDir: cli.stylesDir,
     });
     console.log(describeResult(result));
     return 0;

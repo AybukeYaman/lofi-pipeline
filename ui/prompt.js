@@ -59,7 +59,14 @@ export function createPrompter({ input = process.stdin, output = process.stdout 
 
   /** Soruyu basar, sıradaki satırı bekler. Kuyruktaki satırlar kapanıştan önce teslim edilir. */
   const nextLine = (question) => {
-    output.write(question);
+    // rl.prompt: terminalde satır yeniden çizilirken soru metni de korunur.
+    // Kapanmış okuyucuda prompt() hata fırlatır; kuyrukta satır kalmış olabilir.
+    if (rl && !closed) {
+      rl.setPrompt(question);
+      rl.prompt();
+    } else {
+      output.write(question);
+    }
     if (lines.length > 0) return Promise.resolve(lines.shift());
     if (closed) return Promise.reject(new PromptClosedError());
     return new Promise((resolve, reject) => { waiter = { resolve, reject }; });

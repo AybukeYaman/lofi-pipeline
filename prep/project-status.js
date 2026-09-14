@@ -111,6 +111,40 @@ export function nextStep(s, { skipped = new Set() } = {}) {
   return step('clip', 'manual', 'Klip bekleniyor', `${missingClip}videolar\\ altına klibi (.mp4) koy: ${join(s.dir, 'videolar')}`);
 }
 
+/**
+ * Videolar kökündeki projeler (içinde project.json olan klasörler), son
+ * değiştirilen en üstte. Değişim zamanı: klasör ya da project.json, hangisi
+ * yeniyse (dosya eklemek klasörü, clip yazmak project.json'u günceller).
+ *
+ * @param {string} videosDir
+ * @returns {Promise<{ name: string, dir: string, mtimeMs: number, step: ReturnType<typeof nextStep> }[]>}
+ */
+export async function listProjects(videosDir) {
+  let entries;
+  try {
+    entries = await readdir(videosDir, { withFileTypes: true });
+  } catch (cause) {
+    if (cause.code === 'ENOENT') return [];
+    throw cause;
+  }
+
+  const projects = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const dir = join(videosDir, entry.name);
+    const projectInfo = await stat(join(dir, 'project.json')).catch(() => null);
+    if (!projectInfo?.isFile()) continue;
+    const dirInfo = await stat(dir);
+    projects.push({
+      name: entry.name,
+      dir,
+      mtimeMs: Math.max(dirInfo.mtimeMs, projectInfo.mtimeMs),
+      step: nextStep(await inspectProject(dir)),
+    });
+  }
+  return projects.sort((a, b) => b.mtimeMs - a.mtimeMs);
+}
+
 // ---------------------------------------------------------------- yardımcılar
 
 async function readProjectJson(path) {
