@@ -65,7 +65,7 @@ export function validateVideoName(name) {
  * @returns {{
  *   dir: string,
  *   subdirs: string[],
- *   files: { name: string, path: string, content: string }[],
+ *   files: { name: string, path: string, content: string, bom: boolean }[],
  *   copies: { from: string, path: string }[],
  * }}
  */
@@ -82,10 +82,13 @@ export function planProject({ videosDir, videoName, style, ambient, styleRef, te
     output: { dir: './out' },
   };
 
+  // bom: insanın okuduğu metinler BOM'lu — PowerShell 5.1 Get-Content BOM'suz
+  // UTF-8'i cp1254 sanıyor. project.json BOM'suz: JSON'da BOM standart dışı
+  // (readJsonFile iki biçimi de okur).
   const files = [
-    { name: 'STYLE_BLOCK.txt', content: renderStyleBlock(style) + '\n' },
-    { name: 'project.json', content: JSON.stringify(project, null, 2) + '\n' },
-    { name: 'prompts.md', content: buildPromptsMd({ videoName, style, templates }) },
+    { name: 'STYLE_BLOCK.txt', content: renderStyleBlock(style) + '\n', bom: true },
+    { name: 'project.json', content: JSON.stringify(project, null, 2) + '\n', bom: false },
+    { name: 'prompts.md', content: buildPromptsMd({ videoName, style, templates }), bom: true },
   ];
 
   return {
@@ -105,7 +108,7 @@ export function planProject({ videosDir, videoName, style, ambient, styleRef, te
  *
  * @param {ReturnType<typeof planProject>} plan
  * @param {{
- *   writeText?: (path: string, content: string) => Promise<unknown>,
+ *   writeText?: (path: string, content: string, options: { bom: boolean }) => Promise<unknown>,
  *   copy?: (from: string, to: string) => Promise<unknown>,
  * }} [options] testte yazım/kopya hatası taklidi için
  * @returns {Promise<string>} proje klasörü
@@ -124,7 +127,7 @@ export async function writeProject(plan, { writeText = writeTextFile, copy = cop
   try {
     for (const subdir of plan.subdirs) await mkdir(subdir);
     for (const { from, path } of plan.copies) await copy(from, path);
-    for (const file of plan.files) await writeText(file.path, file.content);
+    for (const file of plan.files) await writeText(file.path, file.content, { bom: file.bom });
   } catch (error) {
     await rm(plan.dir, { recursive: true, force: true });
     throw error;

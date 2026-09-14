@@ -105,7 +105,8 @@ GEMINI_MODEL=gemini-3.6-flash
 
 ## 9. Bilinen Sınırlar ve Tasarım Kararları
 
-- **FFmpeg BOM Tuzağı:** `writeTextFile` metinleri her zaman BOM'suz UTF-8 olarak yazar (`ffmpeg` concat demuxer BOM'lu dosyada hata verir).
+- **FFmpeg BOM Tuzağı:** `writeTextFile` varsayılan olarak BOM'suz UTF-8 yazar (`ffmpeg` concat demuxer BOM'lu dosyada hata verir). `tracklist.txt`, rapor ve `project.json` BOM'suzdur.
+- **PowerShell okuma sorunu → insan okuduğu dosyalar BOM'lu:** Windows PowerShell 5.1'in `Get-Content`'i BOM'suz UTF-8'i ANSI kod sayfasıyla (cp1254) okuyup `â€”`, `Ã¼` gösterir. Bu yüzden `new-video.js` `prompts.md` ve `STYLE_BLOCK.txt`'yi `writeTextFile(..., { bom: true })` ile yazar. Eski (BOM'suz) dosyaları okumak için: `Get-Content <dosya> -Encoding UTF8`.
 - **CRLF Temizliği:** Git `core.autocrlf=true` olsa dahi şablon okumalarda `\r\n` satır sonları `\n` olarak normalize edilir.
 - **Tek Kırpma / Aspect Crop:** Watermark kırpması (alttan 150px) ve 16:9 oran kesimi hesaplanarak piksel kayıpları raporlanır.
 

@@ -45,7 +45,7 @@ async function runMain(t, argv) {
 }
 
 describe('runNewVideo', () => {
-  test('klasör ağacı, dosyalar BOM\'suz ve LF, ambient tam yol', async () => {
+  test('klasör ağacı, metinler BOM\'lu / project.json BOM\'suz, LF, ambient tam yol', async () => {
     const result = await runNewVideo({
       ...env, videoName: 'video3-Neo Tokyo & Night', styleName: 'cozy-realistic', ambientName: 'HEAVYRAIN',
     });
@@ -54,11 +54,16 @@ describe('runNewVideo', () => {
     assert.deepEqual((await readdir(dir)).sort(), ['STYLE_BLOCK.txt', 'audio', 'project.json', 'prompts.md', 'resimler', 'videolar']);
     for (const sub of ['audio', 'resimler', 'videolar']) assert.deepEqual(await readdir(join(dir, sub)), []);
 
-    for (const name of ['STYLE_BLOCK.txt', 'project.json', 'prompts.md']) {
+    // PowerShell 5.1 Get-Content BOM'suz UTF-8'i cp1254 okuyor ("â€”") — insan okuduğu dosyalar BOM'lu.
+    const bom = Buffer.from([0xef, 0xbb, 0xbf]);
+    for (const [name, withBom] of [['STYLE_BLOCK.txt', true], ['project.json', false], ['prompts.md', true]]) {
       const bytes = await readFile(join(dir, name));
-      assert.notEqual(bytes[0], 0xef, `${name}: BOM`);
+      assert.equal(bytes.subarray(0, 3).equals(bom), withBom, `${name}: BOM`);
+      if (withBom) assert.notEqual(bytes[3], 0xef, `${name}: çift BOM`);
       assert.ok(!bytes.includes(0x0d), `${name}: CR`);
     }
+    const prompts = new TextDecoder('utf-8', { fatal: true }).decode(await readFile(join(dir, 'prompts.md')));
+    assert.ok(prompts.startsWith('# video3-Neo Tokyo & Night — Üretim promptları\n'));
 
     const project = JSON.parse(await readFile(join(dir, 'project.json'), 'utf8'));
     assert.equal(project.ambient, join(env.ambientDir, 'heavyRain.mp3'));

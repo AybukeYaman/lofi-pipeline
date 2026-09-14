@@ -52,7 +52,9 @@ describe('planProject', async () => {
     const dir = join('X:\\videolar', 'video3-Test');
     assert.equal(plan.dir, dir);
     assert.deepEqual(plan.subdirs, PROJECT_SUBDIRS.map((d) => join(dir, d)));
-    assert.deepEqual(plan.files.map((f) => f.name), ['STYLE_BLOCK.txt', 'project.json', 'prompts.md']);
+    assert.deepEqual(plan.files.map((f) => [f.name, f.bom]), [
+      ['STYLE_BLOCK.txt', true], ['project.json', false], ['prompts.md', true],
+    ]);
     assert.deepEqual(plan.copies, []);
     for (const f of plan.files) {
       assert.equal(f.path, join(dir, f.name));

@@ -16,6 +16,8 @@ import { join } from 'node:path';
 /** Geçici klasör adının ön eki. */
 const PREFIX = 'lofi-build-';
 
+const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
+
 /**
  * Metni BOM'suz, LF satır sonlu UTF-8 olarak yazar.
  *
@@ -24,12 +26,18 @@ const PREFIX = 'lofi-build-';
  * yazmaz ama çağıran taraftan gelen BOM'u da burada kesiyoruz.
  * CRLF de temizleniyor — satır sonundaki \r yol adının parçası sayılıyor.
  *
+ * `bom: true` yalnızca insanın okuduğu dosyalar için (prompts.md): Windows
+ * PowerShell 5.1'in Get-Content'i BOM'suz UTF-8'i ANSI kod sayfasıyla
+ * (cp1254) okuyup "â€”" gösteriyor. Makinenin okuduğu dosyalarda kullanma.
+ *
  * @param {string} path
  * @param {string} content
+ * @param {{ bom?: boolean }} [options]
  * @returns {Promise<string>} yazılan yol
  */
-export async function writeTextFile(path, content) {
-  await writeFile(path, Buffer.from(normalizeText(content), 'utf8'));
+export async function writeTextFile(path, content, { bom = false } = {}) {
+  const body = Buffer.from(normalizeText(content), 'utf8');
+  await writeFile(path, bom ? Buffer.concat([UTF8_BOM, body]) : body);
   return path;
 }
 
