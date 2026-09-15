@@ -184,6 +184,10 @@ describe('chooseClip ve buildProject', () => {
 describe('continueProject', () => {
   test('tam senaryo: Faz 1 → (dosyalar konur) → klip yazılır → otomatik build', async () => {
     const { dir } = await project();
+    const data = await readProject(dir);
+    delete data.music;
+    await writeFile(join(dir, 'project.json'), JSON.stringify(data, null, 2));
+
     const { ctx } = makeCtx([
       async () => {
         await writeFile(join(dir, 'resimler', 'MASTER.png'), '');
@@ -192,7 +196,7 @@ describe('continueProject', () => {
       async () => {
         await writeFile(join(dir, 'videolar', 'in.mp4'), '');
         await writeFile(join(dir, 'audio', 'a.m4a'), '');
-        return pick('watch');
+        return pick('Default music');
       },
       pick('no'),
       pick('Ana Menüye Dön'),
