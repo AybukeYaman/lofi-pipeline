@@ -14,11 +14,48 @@
  *   - Confirm yalnızca y/t/1 ve n/f/0 tanır (Türkçe "e" false olur) → onay
  *     "Evet / Hayır" seçimiyle yapılır.
  *   - Windows'ta multiselect açık/kapalı yalnızca renkle ayrılıyor → [x] / [ ].
+ *   - Node 24+ Ctrl+C çökmesi (enquirer #483) → guardStart, aşağıda.
  */
 
 import enquirer from 'enquirer';
+import keypress from 'enquirer/lib/keypress.js';
 
 const { Input, MultiSelect, Select } = enquirer;
+
+/**
+ * enquirer #483 (açık; düzeltme PR #485 birleştirilmedi, paket 2023'ten beri
+ * sürüm çıkarmıyor): Ctrl+C'de enquirer'ın açtığı readline — SIGINT dinleyicisi
+ * olmadığı için — kendini kapatır; enquirer'ın temizleyicisi kapalı arayüzde
+ * rl.pause() çağırır ve Node 24+ ERR_USE_AFTER_CLOSE fırlatır. Hata iptal
+ * zincirinin dışında yükselir: run() sonuçlanmaz, süreç çöker.
+ *
+ * İkinci kusur: enquirer "önceki raw mode"u readline raw mode'u AÇTIKTAN sonra
+ * kaydediyor; çökme yolunda terminal raw modda kalıyor.
+ *
+ * start() aynı mantıkla yeniden tanımlanır: kapalı readline'dan kaynaklanan
+ * ERR_USE_AFTER_CLOSE yutulur (PR #485'in `if (!rl.closed)` korumasının
+ * eşdeğeri) ve raw mode, dinleyici açılmadan ÖNCE okunan değere döndürülür.
+ */
+function guardStart(prompt) {
+  prompt.start = function start() {
+    if (this.stop || this.options.show === false) return;
+    const { stdin } = this;
+    const wasRaw = Boolean(stdin.isRaw);
+    const off = keypress.listen(this, this.keypress.bind(this));
+
+    this.stop = () => {
+      try {
+        off();
+      } catch (error) {
+        if (error?.code !== 'ERR_USE_AFTER_CLOSE') throw error;
+      } finally {
+        if (stdin.isTTY && Boolean(stdin.isRaw) !== wasRaw) stdin.setRawMode(wasRaw);
+      }
+    };
+    this.once('close', this.stop);
+    this.emit('start', this);
+  };
+}
 
 /** Uzun listeler kaydırılır; terminal yüksekliğini aşıp çizimi bozmasın. */
 const LIST_LIMIT = 10;
@@ -54,6 +91,7 @@ export function createPrompter({ stdin = process.stdin, stdout = process.stdout,
   };
 
   async function runPrompt(prompt) {
+    guardStart(prompt);
     onPrompt?.(prompt);
     try {
       return await prompt.run();

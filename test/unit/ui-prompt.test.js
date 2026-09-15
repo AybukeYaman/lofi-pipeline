@@ -153,6 +153,81 @@ describe('chooseMany (MultiSelect)', () => {
   });
 });
 
+describe('gerçek klavye yolu (sahte TTY) — enquirer #483 Ctrl+C çökmesi', () => {
+  const ESC = String.fromCharCode(27);
+  const CTRL_C = String.fromCharCode(3);
+  const DOWN = `${ESC}[B`;
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  /** show:true — enquirer keypress.listen ile gerçek readline açar; raw mode izlenir. */
+  function ttyPrompter() {
+    const stdin = new PassThrough();
+    stdin.isTTY = true;
+    stdin.isRaw = false;
+    stdin.setRawMode = (on) => { stdin.isRaw = Boolean(on); return stdin; };
+    const stdout = new PassThrough();
+    stdout.resume();
+    return { stdin, prompter: createPrompter({ stdin, stdout }) };
+  }
+
+  /** Test süresince işlenmemiş reddetmeleri toplar (Node varsayılanı süreci çökertir). */
+  function watchUnhandled(t) {
+    const seen = [];
+    const onUnhandled = (reason) => seen.push(reason?.code ?? String(reason));
+    process.on('unhandledRejection', onUnhandled);
+    t.after(() => process.off('unhandledRejection', onUnhandled));
+    return seen;
+  }
+
+  test('Select + Ctrl+C → PromptClosedError; ERR_USE_AFTER_CLOSE yok; raw mode kapalı', async (t) => {
+    const unhandled = watchUnhandled(t);
+    const { stdin, prompter } = ttyPrompter();
+    const answer = prompter.choose('Menü:', items);
+    const rejected = assert.rejects(answer, PromptClosedError);
+    await wait(50);
+    assert.equal(stdin.isRaw, true, 'prompt açıkken raw mode');
+    stdin.write(CTRL_C);
+    await rejected;
+    await wait(50);
+    assert.deepEqual(unhandled, []);
+    assert.equal(stdin.isRaw, false, 'Ctrl+C sonrası terminal raw modda kalmamalı');
+  });
+
+  test('Input + Ctrl+C → PromptClosedError, çökme yok', async (t) => {
+    const unhandled = watchUnhandled(t);
+    const { stdin, prompter } = ttyPrompter();
+    const rejected = assert.rejects(prompter.ask('Ad'), PromptClosedError);
+    await wait(50);
+    stdin.write('ab');
+    stdin.write(CTRL_C);
+    await rejected;
+    await wait(50);
+    assert.deepEqual(unhandled, []);
+    assert.equal(stdin.isRaw, false);
+  });
+
+  test('Esc → geri, sonra aynı stdin\'de yeni soru çalışır (↓ Enter), raw mode her seferinde kapanır', async (t) => {
+    const unhandled = watchUnhandled(t);
+    const { stdin, prompter } = ttyPrompter();
+
+    const first = prompter.choose('X', items);
+    await wait(50);
+    stdin.write(ESC); // tek ESC: readline kaçış dizisi zaman aşımını bekler
+    assert.equal(await first, null);
+    assert.equal(stdin.isRaw, false);
+
+    const second = prompter.choose('Y', items);
+    await wait(50);
+    stdin.write(DOWN);
+    await wait(20);
+    stdin.write('\r');
+    assert.deepEqual(await second, { id: 'C' });
+    await wait(20);
+    assert.equal(stdin.isRaw, false);
+    assert.deepEqual(unhandled, []);
+  });
+});
+
 describe('cleanPath', () => {
   for (const [raw, expected] of [
     ['"C:\\Users\\a b\\x.jpg"', 'C:\\Users\\a b\\x.jpg'],
