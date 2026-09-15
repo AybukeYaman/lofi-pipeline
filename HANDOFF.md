@@ -1,10 +1,12 @@
-# Lofi Video Pipeline — Devir ve Mimari Dokümanı (Aşama 7–9)
-
+# Lofi Video Pipeline — Devir ve Mimari Dokümanı (Aşama 7–11)
+> **Durum (2026-09-15):** Aşama 11 (Suno prompt motoru + ingest: 11a, 11b, 11c, 11d) tamamlandı — bölüm 14. `npm test` 310/310 geçiyor.
 > **Durum (2026-09-14):** Pipeline Katman 1 (Montaj Otomasyonu: Aşama 1–6) ve Katman 2 (Hazırlık Otomasyonu: Aşama 7a, 7b, 7c, 7d-1, 7d-2) başarıyla tamamlandı. `npm test` 164/164 test geçiyor. Gerçek Gemini API kabul testi doğrulandı.
 >
 > **Durum (2026-09-15):** Aşama 8 (`npm start` paneli: 8a, 8b, 8c) tamamlandı — bölüm 11. `npm test` 228/228. Panelin gerçek terminalde kabul testi kullanıcıda (bölüm 11.5).
 >
 > **Durum (2026-09-15):** Aşama 9 (enquirer ile ok tuşlu panel + toplu montaj: 9a–9d) tamamlandı — bölüm 12. `npm test` 248/248. Gerçek terminallerde `npm run tty-check` sonuçları kullanıcıda (bölüm 12.6).
+>
+> **Durum (2026-09-15):** **Aşama 10 (görsel TUI, ink) BEKLEMEDE** — bölüm 13. 10a commit'li ve korunuyor; 10b başlamadı. Gerçek video üretimi Aşama 9 paneliyle (`npm start`, enquirer) yapılıyor.
 
 ---
 
@@ -118,7 +120,7 @@ GEMINI_MODEL=gemini-3.6-flash
 
 ## 10. Projeyi Devralan Geliştirici İçin Notlar
 
-1. Tek bağımlılık `enquirer` 2.4.1 (sabit sürüm, Aşama 9 kararı — bölüm 12). Başka bağımlılık eklemeden önce konuşun; geri kalan her şey Node.js dahili modülleriyle (`node:fs`, `node:path`, `node:util`, `node:test`) yazılmıştır.
+1. Panelin kullandığı tek bağımlılık `enquirer` 2.4.1 (sabit sürüm, Aşama 9 kararı — bölüm 12). `ink` 7.1.1 / `react` 19.3.0 (+ dev `ink-testing-library` 4.0.0) Aşama 10a'dan kaldı; yalnızca `ui/tui/` ve `tui-check` kullanıyor, Aşama 10 beklemede (bölüm 13). Başka bağımlılık eklemeden önce konuşun; geri kalan her şey Node.js dahili modülleriyle (`node:fs`, `node:path`, `node:util`, `node:test`) yazılmıştır.
 2. Bir dosya değiştirdiğinizde `npm test` komutunu çalıştırarak 248 testin yeşil kaldığını doğrulayın.
 3. Yeni bir CLI veya modül eklerken `StyleError`, `AddStyleError`, `GeminiError` gibi özel sınıf hatalarını kullanın.
 4. Panele yeni bir adım eklerken: iş kuralı `prep/`'e (saf ve test edilebilir), soru/komut akışı `ui/actions.js`'e, menü satırı `lofi.js`'e. CLI'yı panelden aynı süreçte çağırmayın (bölüm 11.3).
@@ -244,3 +246,65 @@ Her ortamda `npm run tty-check`; betiğin sonunda bastığı satır buraya.
 | Git Bash (varsa) — beklenen: "Terminal etkileşimli değil", kod 2 | — | — | — | — | — | — | — |
 
 Ardından panel kabulü: `npm start` → ok tuşlarıyla yeni proje → devam et → Faz 1 → Esc ile geri → Toplu montaj ekranında Boşluk ile işaretleme (gerçek build istenmiyorsa Esc) → menüde Ctrl+C.
+
+**Durum (2026-09-15, kullanıcı bildirimi):** 3 terminalden yalnızca **Windows Terminal** tam test edildi. **Klasik Windows PowerShell 5.1 konsolu** ve **Git Bash** hâlâ eksik. Hücre bazında sonuç satırları henüz tabloya işlenmedi. (6. adımda yakalanan Ctrl+C çökmesi `ff6b0df` ile düzeltildi — bölüm 12.2.)
+
+---
+
+## 13. Aşama 10 — Görsel TUI (ink) · ⏸ BEKLEMEDE
+
+**Karar (2026-09-15, kullanıcı):** Aşama 10 askıya alındı. **Sebep:** görsel cila, işlevsel gereklilik değil — Aşama 9 paneli üretim için yeterli. Kullanıcı devam etmek isterse kendisi yeniden açacak; o zamana kadar **10b'ye başlanmaz, Aşama 10 kodu yazılmaz.**
+
+| Parça | Durum |
+|---|---|
+| 10a — ink prototipi + `npm run tui-check` (`78e015c`) | Commit'li, korunuyor. `ui/tui/` (h, keys, widgets, store, screen), `scripts/tui-check.js` (+ child), testleri `npm test` içinde |
+| 10a kapısı — 3 terminalde `tui-check` | Tamamlanmadı (10a commit mesajı: "geçmeden 10b başlamaz") |
+| 10b — build.js IPC ilerleme protokolü | Başlamadı |
+| 10c — panelin Dashboard'u `ui/tui/screen.js` üzerine | Başlamadı |
+
+**Yeniden açılırsa:** önce 10a kapısı (tui-check, 3 terminal), sonra 10b planı kullanıcıyla konuşulur. `ink` / `react` sürümleri o gün tekrar kontrol edilmeli.
+
+**Etkisi:** `npm start` enquirer panelini açar; ink hiçbir üretim akışında kullanılmıyor.
+## 14. Aşama 11 — Suno Entegrasyonu (Prompt Motoru + Ingest) · ⏸ PLANLANDI, BAŞLAMADI
+
+**Karar (2026-09-15):** Aşama 10 (ink TUI) beklemede kaldığı sürece üretim akışı `npm start` (enquirer, Aşama 9) üzerinden devam ediyor. Bu doğrultuda, üretim öncesi manuel adımların (albüm konsepti, Suno prompt yazımı, şarkı indirme) otomasyonu **Aşama 10'un önüne alınarak Aşama 11 olarak** planlandı — TUI görsel cila, bu üretim darboğazını çözmüyor.
+
+Araştırma dokümanı: `docs/research/suno-integration.md` (tam mekanizma analizi, karar tabloları, risk notları orada; burada yalnızca bu projeye uygulanan tasarım kararları var).
+
+### 14.1 Kapsam
+
+Üç alt-aşamaya bölünür, her biri bağımsız commit edilebilir:
+
+| Alt-aşama | İş | Bağımlılık |
+|---|---|---|
+| 11a | `prep/style-builder.js`, `prep/style-cleaner.js`, `prep/style-exclude.js` — saf fonksiyonlar, mevcut `styles/<ad>.json` şemasını Suno Style/Exclude string'ine çevirir | Yok |
+| 11b | `prep/album-planner.js` — Gemini (mevcut `prep/gemini.js` client'ı, `x-goog-api-key`) ile konsept → track listesi → atmosfer arkı; çıktı 11a'dan geçirilir | 11a, `prep/gemini.js` |
+| 11c | `prep/suno-ingest.js` — public playlist/song linkinden clip listesi + metadata + mp3 indirme | Yok (bağımsız yazılabilir) |
+
+### 14.2 Mimari kararları (mevcut projeyle tutarlılık)
+
+- Katman aynı: iş mantığı `prep/` altında, saf ve test edilebilir (Aşama 7 kuralı — bölüm 9, not 4 ile aynı).
+- Hata sınıfları: `StyleBuildError`, `AlbumPlanError`, `SunoIngestError` — mevcut `StyleError`/`AddStyleError`/`GeminiError` deseniyle aynı satırda (bölüm 10, not 3).
+- `prep/suno-ingest.js` HTTP için `node:https`/`fetch` kullanır, ek paket eklenmez (bölüm 10, not 1 — yeni bağımlılık önce konuşulur).
+- Panel entegrasyonu: yeni menü adımları `ui/actions.js`'e, enquirer soruları `ui/prompt.js` adaptörü üzerinden — Aşama 9 mimarisine ek dosya değil, mevcut dosyalara fonksiyon eklenir (bölüm 12.3).
+- `.env`'e yeni anahtar **eklenmez** — Suno ingest login gerektirmiyor (yalnızca public link), Gemini zaten `GEMINI_API_KEY` kullanıyor.
+
+### 14.3 Ingest tasarımı (11c detay)
+
+- Kabul edilen linkler: `suno.com/song/…`, `suno.com/s/…`, `suno.com/playlist/…`
+- Akış: link → public sayfa fetch → embedded JSON'dan clip ID + metadata (title, style, süre) çıkar → `https://cdn1.suno.ai/{clipId}.mp3` indir → proje klasörüne (`audio/`) mevcut isimlendirme kuralına göre yaz
+- Rate limit: ardışık indirmeler arası 1-2 sn bekleme
+- Kısmi hata: bir track indirilemezse diğerleri devam eder, özet raporda "atlandı (sebep)" olarak listelenir — Aşama 9'daki toplu montaj hata toleransıyla aynı desen (bölüm 12.3, "bir projenin hatası diğerlerini durdurmaz")
+- **Ön koşul:** albüm Suno'da public/paylaşılmış olmalı. Değilse bu aşama atlanır, mevcut manuel indirme yolu kullanılır — private şarkı ingest'i (oturum tabanlı kayıt) kapsam dışı bırakıldı, gerek görülürse ayrı doküman edilir.
+
+### 14.4 Test stratejisi
+
+- 11a: saf fonksiyon testleri, mevcut `test/unit/` desenine uyar
+- 11b: `prep/gemini.js` testlerindeki gibi sahte `fetch`, network bağımsız
+- 11c: sahte HTTP response'larla test edilir; gerçek Suno erişimi yalnızca elle kabul testinde (bölüm 11.5 / 12.6 desenindeki gibi kullanıcı terminalinde doğrulanır, çünkü asistan gerçek Suno hesabına erişemez)
+
+### 14.5 Kapsam dışı (bilinçli olarak ertelendi)
+
+- Suno üretimini API ile tetikleme (resmi API yok, üçüncü parti ücretli/riskli — araştırma dokümanı Bölüm 6)
+- Private şarkı ingest / oturum tabanlı kayıt (araştırma dokümanı Bölüm 2.2 / 14.3 ön koşul notu)
+- Websocket — gerek yok, HTTP GET yeterli (araştırma dokümanı Bölüm 7)
