@@ -266,6 +266,9 @@ Ardından panel kabulü: `npm start` → ok tuşlarıyla yeni proje → devam et
 **Yeniden açılırsa:** önce 10a kapısı (tui-check, 3 terminal), sonra 10b planı kullanıcıyla konuşulur. `ink` / `react` sürümleri o gün tekrar kontrol edilmeli.
 
 **Etkisi:** `npm start` enquirer panelini açar; ink hiçbir üretim akışında kullanılmıyor.
+
+**Not (2026-09-16, kullanıcı):** ink TUI yerine web/localhost tabanlı bir panel (ACE-Step UI'nin React+Vite yapısına benzer) daha iyi olabilirdi düşüncesi belirtildi. Aşama 10 yeniden açılırsa bu alternatif de değerlendirilecek — henüz karar verilmedi, yalnızca not düşüldü.
+
 ## 14. Aşama 11 — Suno Entegrasyonu (Prompt Motoru + Ingest + Üretim) · 11a–11d ✅ · 11e ✅ · 11f ✅
 
 **Karar (2026-09-15):** Aşama 10 (ink TUI) beklemede kaldığı sürece üretim akışı `npm start` (enquirer, Aşama 9) üzerinden devam ediyor. Bu doğrultuda, üretim öncesi manuel adımların (albüm konsepti, Suno prompt yazımı, şarkı indirme) otomasyonu **Aşama 10'un önüne alınarak Aşama 11 olarak** planlandı — TUI görsel cila, bu üretim darboğazını çözmüyor.
@@ -377,3 +380,16 @@ Dört paralel oturum HANDOFF'u güncelleyemedi (dosya hep başka oturumdaydı); 
 | 3 | Suno limit doğrulaması tek kaynak | ✅ Tek kaynak: `prep/album-prompt.js` (`SUNO_LIMITS`, `assertSunoLimits`). Paralel oturumun yazacağı `prep/suno-limits.js` repoda hiç oluşmadı (hiçbir branch/worktree/commit'te yok) — silinecek ikinci kopya olmadı. Dosya ileride gelirse esas o olacak, `album-prompt.js` onu import edecek |
 | 4 | `prep/style-builder.js` ölü kod + `describe-style.js`'teki `buildStylePrompt` ile isim çakışması | ✅ `style-builder.js` ve `test/unit/style-builder.test.js` silindi (import eden yer yoktu). `style-cleaner.js` / `style-exclude.js` / `style-errors.js` kullanımda, kaldı |
 | 5 | env/secret yardımcılarının tekrarı (env-secrets dedupe) | ⚠ **AÇIK** — bu işin çıktısı repoda bulunamadı. Tekrar hâlâ duruyor: `loadEnv` ve key maskeleme `prep/gemini.js` ile `prep/suno-generate.js` / `prep/suno-generate-errors.js`'te ayrı ayrı. Ortak bir modüle indirilmesi ayrı iş olarak bekliyor |
+
+---
+
+## 16. Yerel Müzik Üretimi Denemesi — ACE-Step-1.5 · ⏹ SONLANDIRILDI (2026-09-16)
+
+ACE-Step-1.5 yerel üretim denendi (2026-09-16), 4GB VRAM'de INT8 sıkıştırma ile kalite ve hız kullanıcı tarafından yetersiz bulundu. Kod tabanına entegre edilmedi, provider yazılmadı. Kurulum `C:\AI\`'de duruyor, tekrar denenmek istenirse hazır.
+
+Tekrar denenecekse bilinmesi gerekenler:
+- **Konum:** `C:\AI\ACE-Step-1.5` (motor, commit `ca1e85f`, modeller `checkpoints\` altında ~10 GB) ve `C:\AI\ace-step-ui` (UI, commit `a1fdf91`). Lisans: motor ve model ağırlıkları MIT; UI reposunda LICENSE yok.
+- **Başlatma:** `C:\AI\ACE-Step-1.5\.venv\Scripts\acestep.exe --port 8001 --enable-api --server-name 127.0.0.1` (`uv run` kilit kontrolünde takılabiliyor; `setup.bat`'taki `acestep-api` Gradio uçlarını açmadığı için UI ile çalışmaz). UI: `server\` ve kökte `npm run dev`.
+- **Ölçüm (RTX 3050 Laptop 4GB, sürücü 566.07):** 60 sn parça ≈ 4.7 dk; bunun ~129 sn'si CPU↔GPU model taşıma, 65 sn diffusion (8 adım), ~20 sn tiled VAE decode. Dil modeli (LM) VRAM yüzünden otomatik kapalı.
+- **Bilinen uyumsuzluk:** UI (Haziran) `/generation_wrapper`'a 51 parametre gönderiyor, motor (Ağustos) 72 bekliyor — panelden üretim çalışmıyor. Test motorun REST API'siyle (`/release_task`, `/query_result`) yapıldı.
+- **UI'de yapılan yerel değişiklikler (commit'lenmedi):** backend ve Vite `127.0.0.1`'e kısıtlandı (`/api/auth/auto` parolasız token veriyor), `server\.env`'de rastgele `JWT_SECRET` + `ACESTEP_PATH`, `better-sqlite3` 11.10 → 12.11.1 (Node 24 hazır paketi).
