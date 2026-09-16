@@ -1,5 +1,5 @@
 /**
- * project.json'a hedefli yazım — şimdilik yalnızca `clip`.
+ * project.json'a hedefli yazım — `clip`, müzik durumu, watermark kırpması.
  *
  * build.js konfigi hiç değiştirmez (Aşama 5 kararı 2); clip'i yazan panel.
  * Diğer anahtarların değeri ve sırası korunur, dosya 2 boşluk girintiyle
@@ -10,6 +10,9 @@ import { stat } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
 import { readJsonFile, writeTextFile } from '../core/workspace.js';
+
+/** Watermark kırpması — Hailuo'da ölçülen değer (HANDOFF bölüm 4). */
+export const DEFAULT_CROP_BOTTOM = 150;
 
 export class ProjectFileError extends Error {
   /** @param {string} message */
@@ -38,23 +41,25 @@ export async function setProjectClip(projectPath, clipPath) {
   const info = await stat(target).catch(() => null);
   if (!info?.isFile()) throw new ProjectFileError(`klip dosyası bulunamadı: ${target}`);
 
-  let json;
-  try {
-    json = await readJsonFile(projectPath);
-  } catch (cause) {
-    throw new ProjectFileError(
-      cause instanceof SyntaxError
-        ? `project.json ayrıştırılamadı: ${cause.message}`
-        : `project.json okunamadı: ${cause.code ?? cause.message}`,
-    );
-  }
-  if (json === null || typeof json !== 'object' || Array.isArray(json)) {
-    throw new ProjectFileError('project.json kökü bir nesne olmalı');
-  }
-
+  const json = await readProjectObject(projectPath);
   json.clip = `./${rel.split(sep).join('/')}`;
   await writeTextFile(projectPath, JSON.stringify(json, null, 2) + '\n');
   return json.clip;
+}
+
+/**
+ * "Müziği bitir ve devam et": eksik parçalar olsa da müzik aşaması kullanıcı
+ * tarafından tamamlanmış sayılır. Parça planı (`music.tracks`) olan projeler
+ * içindir; `musicData` yerinde güncellenir (panel ekranı aynı nesneyi kullanır).
+ *
+ * @param {string} projectPath
+ * @param {{ tracks: { status: string }[], status?: string, completedCount?: number }} musicData
+ * @returns {Promise<object>} yazılan music
+ */
+export async function completeMusicByUser(projectPath, musicData) {
+  musicData.status = 'completed_by_user';
+  musicData.completedCount = musicData.tracks.filter((t) => t.status === 'completed').length;
+  return setProjectField(projectPath, 'music', musicData);
 }
 
 /**
@@ -65,6 +70,49 @@ export async function setProjectClip(projectPath, clipPath) {
  * @param {any} value
  */
 export async function setProjectField(projectPath, key, value) {
+  const json = await readProjectObject(projectPath);
+  json[key] = value;
+  await writeTextFile(projectPath, JSON.stringify(json, null, 2) + '\n');
+  return json[key];
+}
+
+/**
+ * Watermark kararı → `video.cropBottom`. Kapalı: 0. Açık: geçerli pozitif
+ * değer korunur, yoksa ölçülen varsayılan.
+ *
+ * @param {boolean} watermark
+ * @param {unknown} currentCrop project.json'daki mevcut değer
+ * @returns {number}
+ */
+export function cropForWatermark(watermark, currentCrop) {
+  if (!watermark) return 0;
+  return Number.isSafeInteger(currentCrop) && currentCrop > 0 ? currentCrop : DEFAULT_CROP_BOTTOM;
+}
+
+/**
+ * `video.cropBottom` yazar; `video` bloğunun diğer alanları korunur. Konfigden
+ * gelen değer build.js'te onay istemez (core/config.js → cropFromConfig).
+ *
+ * @param {string} projectPath
+ * @param {number} cropBottom sıfır ya da pozitif tam sayı
+ * @returns {Promise<number>}
+ */
+export async function setProjectCropBottom(projectPath, cropBottom) {
+  if (!Number.isSafeInteger(cropBottom) || cropBottom < 0) {
+    throw new ProjectFileError(`video.cropBottom sıfır ya da pozitif tam sayı olmalı: ${JSON.stringify(cropBottom)}`);
+  }
+  const json = await readProjectObject(projectPath);
+  const video = json.video === undefined ? {} : json.video;
+  if (video === null || typeof video !== 'object' || Array.isArray(video)) {
+    throw new ProjectFileError('project.json "video" bir nesne olmalı');
+  }
+  json.video = { ...video, cropBottom };
+  await writeTextFile(projectPath, JSON.stringify(json, null, 2) + '\n');
+  return cropBottom;
+}
+
+/** project.json'u okur; kök nesne değilse ProjectFileError. */
+async function readProjectObject(projectPath) {
   let json;
   try {
     json = await readJsonFile(projectPath);
@@ -78,8 +126,5 @@ export async function setProjectField(projectPath, key, value) {
   if (json === null || typeof json !== 'object' || Array.isArray(json)) {
     throw new ProjectFileError('project.json kökü bir nesne olmalı');
   }
-
-  json[key] = value;
-  await writeTextFile(projectPath, JSON.stringify(json, null, 2) + '\n');
-  return json[key];
+  return json;
 }

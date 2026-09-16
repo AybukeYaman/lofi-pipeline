@@ -20,7 +20,9 @@ import {
   toStyle,
 } from './prep/describe-style.js';
 import { generateContent, getApiKey, getModel, listModels, loadEnv } from './prep/gemini.js';
-import { STYLES_DIR, findStyleRef, renderStyleBlock } from './prep/styles.js';
+import {
+  CUSTOM_STYLE_NAME, STYLES_DIR, STYLE_NAME_PATTERN, findStyleRef, renderStyleBlock,
+} from './prep/styles.js';
 
 export class AddStyleError extends Error {
   /** @param {string} message */
@@ -29,8 +31,6 @@ export class AddStyleError extends Error {
     this.name = 'AddStyleError';
   }
 }
-
-const NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 const USAGE = `Kullanım:
   node add-style.js <görsel-yolu> --name <stil-adı> [--overwrite]
@@ -87,8 +87,12 @@ export async function runAddStyle({
   options = {},
 } = {}) {
   // 1. name kontrolü
-  if (!name || typeof name !== 'string' || !NAME_PATTERN.test(name)) {
+  if (!name || typeof name !== 'string' || !STYLE_NAME_PATTERN.test(name)) {
     throw new AddStyleError(`geçersiz stil adı "${name}" — küçük harf kebab-case olmalı (ör. "cozy-realistic")`);
+  }
+
+  if (name === CUSTOM_STYLE_NAME) {
+    throw new AddStyleError(`"${CUSTOM_STYLE_NAME}" adı projeye özel stil için ayrılmış — başka bir ad seçin`);
   }
 
   // 2. görsel var mı ve uzantı geçerli mi

@@ -9,17 +9,20 @@ import {
   RECENT_WINDOW_MINUTES, cleanDownloadName, createDownloadWatcher,
 } from '../prep/download-watch.js';
 import { AmbientError, listAmbients } from '../prep/ambients.js';
-import { ProjectFileError, setProjectClip, setProjectField } from '../prep/project-file.js';
+import {
+  ProjectFileError, completeMusicByUser, cropForWatermark, setProjectClip, setProjectCropBottom, setProjectField,
+} from '../prep/project-file.js';
 import { inspectProject, listProjects, nextStep } from '../prep/project-status.js';
-import { describeMultiReferenceStyle } from '../prep/describe-style.js';
+import { generateProjectStyle, projectPromptStyle } from '../prep/project-style.js';
 import { getPhasePrompts } from '../prep/prompts.js';
 import { validateVideoName } from '../prep/scaffold.js';
-import { StyleError, findStyleRef, listStyles, loadStyle, renderStyleBlock } from '../prep/styles.js';
+import {
+  CUSTOM_STYLE_NAME, STYLE_NAME_PATTERN, StyleError, findStyleRef, listStyles, loadStyle,
+} from '../prep/styles.js';
 import { ingestSunoUrl, sanitizeFilename } from '../prep/suno-ingest.js';
 import { SunoIngestError } from '../prep/suno-errors.js';
 import { cleanPath } from './prompt.js';
 
-const STYLE_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /** Auto Watch: İndirilenler ve audio/ tarama aralığı. */
 const DOWNLOAD_POLL_MS = 1000;
@@ -151,7 +154,7 @@ export async function newProject(ctx) {
   }
 
   const items = [
-    { label: '✨ [ Multi-Reference Visual Style ] — Görsellerden Yapay Zeka ile Stil Üret', value: { name: 'custom-generated', suggestedAmbient: 'none', isMultiRef: true } },
+    { label: '✨ [ Multi-Reference Visual Style ] — Görsellerden Yapay Zeka ile Stil Üret', value: { name: CUSTOM_STYLE_NAME, suggestedAmbient: 'none', isMultiRef: true } },
   ];
   for (const styleName of await listStyles({ dir: ctx.stylesDir })) {
     try {
@@ -262,7 +265,7 @@ export async function addStyle(ctx) {
   for (;;) {
     name = await prompter.ask('Stil adı (küçük harf, rakam, tire — ör. neo-tokyo; Esc = geri)');
     if (!name) return false;
-    if (STYLE_NAME.test(name)) break;
+    if (STYLE_NAME_PATTERN.test(name) && name !== CUSTOM_STYLE_NAME) break;
     prompter.print('Ad küçük harf, rakam ve tireden oluşmalı (ör. neo-tokyo).');
   }
 
@@ -533,25 +536,10 @@ export async function continueProject(ctx, targetDir = null, { pollMs = 50 } = {
           if (updated.references.length > 0) {
             prompter.print(`\x1b[36m[🎨 Yapay Zeka Stil Analizi Başlatılıyor...]\x1b[0m ${updated.references.length} referans görsel analiz ediliyor...`);
             try {
-              const concept = status.projectJson.data?.concept || `${status.name} Album Concept`;
-              const { style: generatedStyle } = await describeMultiReferenceStyle({
-                imagePaths: updated.references,
-                concept,
-                name: 'custom-generated',
-                options: { ambientDir: ctx.ambientDir, generateContentFn: ctx.generateContentFn, ...(ctx.describeOptions || {}) },
+              await generateProjectStyle(updated, {
+                ambientDir: ctx.ambientDir,
+                describeOptions: { generateContentFn: ctx.generateContentFn, ...(ctx.describeOptions || {}) },
               });
-
-              // Write STYLE_BLOCK.txt and update project.json
-              const { writeTextFile } = await import('../core/workspace.js');
-              await writeTextFile(status.styleBlockPath, renderStyleBlock(generatedStyle) + '\n', { bom: true });
-
-              const projectData = status.projectJson.data ?? {};
-              projectData.styleBlock = generatedStyle.styleBlock;
-              projectData.motionHints = generatedStyle.motionHints;
-              projectData.style = 'custom-generated';
-              await setProjectField(status.projectPath, 'styleBlock', generatedStyle.styleBlock);
-              await setProjectField(status.projectPath, 'motionHints', generatedStyle.motionHints);
-              await setProjectField(status.projectPath, 'style', 'custom-generated');
 
               prompter.print('\x1b[32m[✓ Visual Style Başarıyla Üretildi & Persist Edildi!]\x1b[0m STYLE_BLOCK.txt oluşturuldu.');
               styleGenerated = true;
@@ -572,18 +560,7 @@ export async function continueProject(ctx, targetDir = null, { pollMs = 50 } = {
     if (step.id === 'faz1') {
       let phasePrompt = '';
       try {
-        const projectStyleName = status.style !== '-' ? status.style : (status.projectJson.data?.style ?? 'cozy-realistic');
-        let styleObj = null;
-        if (status.projectJson.data?.styleBlock) {
-          styleObj = {
-            name: projectStyleName,
-            styleBlock: status.projectJson.data.styleBlock,
-            motionHints: status.projectJson.data.motionHints || ['subtle motion'],
-          };
-        } else {
-          const loadedStyle = await loadStyle(projectStyleName, { dir: ctx.stylesDir }).catch(() => null);
-          styleObj = loadedStyle?.style;
-        }
+        const styleObj = await projectPromptStyle(status, { stylesDir: ctx.stylesDir });
         const prompts = await getPhasePrompts({ videoName: basename(dir), style: styleObj });
         phasePrompt = prompts.faz1;
       } catch {
@@ -766,14 +743,8 @@ export async function continueProject(ctx, targetDir = null, { pollMs = 50 } = {
         { label: ' [Evet, watermark var] - Alttan kırpma (watermark crop) uygula', value: 'yes' },
       ]);
 
-      const rawJson = status.projectJson.data ?? {};
-      const currentVideoObj = { ...rawJson.video };
-      if (wmChoice === 'no') {
-        currentVideoObj.cropBottom = 0;
-      } else {
-        currentVideoObj.cropBottom = (currentVideoObj.cropBottom && currentVideoObj.cropBottom > 0) ? currentVideoObj.cropBottom : 150;
-      }
-      await setProjectField(status.projectPath, 'video', currentVideoObj);
+      const currentCrop = status.projectJson.data?.video?.cropBottom;
+      await setProjectCropBottom(status.projectPath, cropForWatermark(wmChoice === 'yes', currentCrop));
 
       prompter.print('\x1b[32m[✓ Watermark Kararı Kaydedildi]\x1b[0m Otomatik devam ediliyor...');
       continue;
@@ -1124,9 +1095,7 @@ async function finishMusicStage(ctx, { status, musicData }) {
     ],
   );
   if (confirmChoice !== 'yes') return false;
-  musicData.status = 'completed_by_user';
-  musicData.completedCount = completedCnt;
-  await setProjectField(status.projectPath, 'music', musicData);
+  await completeMusicByUser(status.projectPath, musicData);
   ctx.store?.set({ watchNotice: null });
   ctx.prompter.print('\x1b[32m[✓ Müzik Aşaması Kullanıcı Tarafından Tamamlandı]\x1b[0m Sonraki adıma geçiliyor...');
   return true;

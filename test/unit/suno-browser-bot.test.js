@@ -1,15 +1,18 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { after, before, describe, test } from 'node:test';
+import { join, resolve } from 'node:path';
+import { after, afterEach, before, beforeEach, describe, test } from 'node:test';
 
 import { generateAlbum } from '../../prep/album-chain.js';
 import { SunoGenerateError } from '../../prep/suno-generate-errors.js';
 import { generateSong, waitForSong } from '../../prep/suno-generate.js';
 import {
   CAPTCHA_MESSAGE,
+  DEFAULT_PROFILE_DIR,
   LAUNCH_OPTIONS,
+  LOGIN_MESSAGE,
+  PROFILE_API_KEY,
   SELECTORS,
   SUNO_AUDIO_URL,
   SUNO_CREATE_URL,
@@ -17,6 +20,7 @@ import {
   createSunoBrowserBot,
   extractClipIds,
   parseCookieHeader,
+  resolveProfileDir,
   resolveSunoCookie,
   summarizeClips,
 } from '../../prep/providers/suno-browser-bot.js';
@@ -27,16 +31,26 @@ const ID_OLD = '00000000-0000-4000-8000-000000000000';
 const ID_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const ID_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const song = (id) => `/song/${id}`;
+const PROFILE_DIR = 'C:/sahte/suno-profile';
 
-/** Create sayfasının tam hali: tüm alanlar görünür, toggle'lar kapalı. */
+/** Gerçek .env'deki SUNO_COOKIE testlere karışmasın (loadEnvFile mevcut değişkeni ezmez). */
+let savedCookie;
+beforeEach(() => { savedCookie = process.env.SUNO_COOKIE; process.env.SUNO_COOKIE = ''; });
+afterEach(() => {
+  if (savedCookie === undefined) delete process.env.SUNO_COOKIE;
+  else process.env.SUNO_COOKIE = savedCookie;
+});
+
+/** Oturumlu create sayfasının tam hali (Gelişmiş mod): tüm alanlar görünür, toggle'lar kapalı. */
 function createPage(overrides = {}) {
   return {
-    [SELECTORS.customModeToggle]: { attrs: { 'aria-pressed': 'false' } },
+    [SELECTORS.formModeTab]: {},
+    [SELECTORS.inactiveFormModeTab]: { attrs: { 'aria-selected': 'false' } },
     [SELECTORS.styleInput]: {},
     [SELECTORS.titleInput]: {},
     [SELECTORS.lyricsInput]: {},
     [SELECTORS.negativeTagsInput]: {},
-    [SELECTORS.instrumentalToggle]: { attrs: { 'aria-checked': 'false' } },
+    [SELECTORS.instrumentalToggle]: { attrs: { 'data-selected': 'false' } },
     [SELECTORS.createButton]: {},
     ...overrides,
   };
@@ -46,7 +60,8 @@ function makeBot(fake, clock = createFakeClock(), extra = {}) {
   const notices = [];
   const logs = [];
   const bot = createSunoBrowserBot({
-    launchBrowser: fake.launchBrowser,
+    launchContext: fake.launchContext,
+    profileDir: PROFILE_DIR,
     sleepFn: clock.sleepFn,
     now: clock.now,
     notify: (m) => notices.push(m),
@@ -96,13 +111,25 @@ describe('saf yardımcılar', () => {
     assert.equal(resolveSunoCookie({ cookie: 'b=2', env: { SUNO_COOKIE: 'a=1' } }), 'b=2');
   });
 
+  test('resolveSunoCookie - required=false iken cookie yoksa undefined', () => {
+    assert.equal(resolveSunoCookie({ env: {}, required: false }), undefined);
+    assert.equal(resolveSunoCookie({ env: { SUNO_COOKIE: 'a=1' }, required: false }), 'a=1');
+  });
+
+  test('resolveProfileDir - varsayılan .auth/suno-profile, SUNO_PROFILE_DIR ile değişir', () => {
+    const root = resolve('C:/repo');
+    assert.equal(resolveProfileDir({ env: {}, repoRoot: root }), resolve(root, DEFAULT_PROFILE_DIR));
+    assert.equal(resolveProfileDir({ env: { SUNO_PROFILE_DIR: ' profiller/suno ' }, repoRoot: root }), resolve(root, 'profiller/suno'));
+    assert.equal(resolveProfileDir({ env: { SUNO_PROFILE_DIR: 'D:/suno' }, repoRoot: root }), resolve('D:/suno'));
+  });
+
   test('tarayıcı görünür (headed) açılır', () => {
     assert.equal(LAUNCH_OPTIONS.headless, false);
   });
 });
 
 describe('generateSong', () => {
-  test('tam akış: cookie, create sayfası, Custom Mode, alanlar, Create, iki yeni clip', async () => {
+  test('tam akış: kalıcı profil, create sayfası, alanlar, Create, iki yeni clip', async () => {
     const fake = createFakeBrowser({
       elements: createPage(),
       hrefs: [[song(ID_OLD)], [song(ID_OLD)], [song(ID_A), song(ID_B), song(ID_OLD)]],
@@ -112,10 +139,10 @@ describe('generateSong', () => {
     const result = await bot.generateSong(REQUEST, CTX);
 
     assert.deepEqual(result, { jobId: `${ID_A},${ID_B}` });
-    assert.deepEqual(fake.state.cookies.map((c) => c.name), ['__client', '__session']);
+    assert.deepEqual(fake.state.profileDirs, [PROFILE_DIR]);
+    assert.deepEqual(fake.state.cookies, [], 'profil oturumu açıkken yedek cookie eklenmez');
     assert.deepEqual(fake.actions.map((a) => [a.type, a.selector ?? a.url, a.value]), [
       ['goto', SUNO_CREATE_URL, undefined],
-      ['click', SELECTORS.customModeToggle, undefined],
       ['fill', SELECTORS.styleInput, 'lofi, rhodes'],
       ['fill', SELECTORS.negativeTagsInput, 'vocals'],
       ['fill', SELECTORS.titleInput, 'Rain'],
@@ -124,11 +151,29 @@ describe('generateSong', () => {
     ]);
   });
 
+  test('Basit moddaysa (style yok) seçili olmayan sekmeye geçilir; aria-selected okunur', async () => {
+    let advanced = false;
+    const fake = createFakeBrowser({
+      elements: createPage({
+        [SELECTORS.inactiveFormModeTab]: { attrs: { 'aria-selected': 'false' }, onClick: () => { advanced = true; } },
+        [SELECTORS.styleInput]: { visible: () => advanced },
+      }),
+      hrefs: [[], [song(ID_A), song(ID_B)]],
+    });
+    const { bot } = makeBot(fake);
+
+    await bot.generateSong(REQUEST, CTX);
+
+    const order = fake.actions.map((a) => `${a.type}:${a.selector ?? a.url}`);
+    assert.equal(order[1], `click:${SELECTORS.inactiveFormModeTab}`);
+    assert.equal(order[2], `fill:${SELECTORS.styleInput}`);
+  });
+
   test('zaten açık toggle tıklanmaz; instrumental değilse lyrics doldurulur', async () => {
     const fake = createFakeBrowser({
       elements: createPage({
-        [SELECTORS.customModeToggle]: { attrs: { 'data-state': 'on' } },
-        [SELECTORS.instrumentalToggle]: { attrs: { 'aria-checked': 'false' } },
+        [SELECTORS.instrumentalToggle]: { attrs: { 'data-selected': 'true' } },
+        [SELECTORS.inactiveFormModeTab]: { attrs: { 'aria-selected': 'true' } },
       }),
       hrefs: [[], [song(ID_A), song(ID_B)]],
     });
@@ -137,8 +182,27 @@ describe('generateSong', () => {
     await bot.generateSong({ prompt: 'la la', style: 'pop', instrumental: false }, CTX);
 
     const clicks = fake.actions.filter((a) => a.type === 'click').map((a) => a.selector);
-    assert.deepEqual(clicks, [SELECTORS.createButton]);
+    assert.deepEqual(clicks, [SELECTORS.instrumentalToggle, SELECTORS.createButton], 'instrumental açık → kapatılır, mod sekmesine dokunulmaz');
     assert.ok(fake.actions.some((a) => a.selector === SELECTORS.lyricsInput && a.value === 'la la'));
+  });
+
+  test('toggle durumu okunamıyorsa tıkla(ma)z, üretimi güvenli şekilde durdurup hata fırlatır', async () => {
+    const fake = createFakeBrowser({
+      elements: createPage({
+        [SELECTORS.instrumentalToggle]: { attrs: {} },
+      }),
+      hrefs: [[], [song(ID_A), song(ID_B)]],
+    });
+    const { bot } = makeBot(fake);
+
+    await assert.rejects(bot.generateSong(REQUEST, CTX), (err) => {
+      assert.ok(err instanceof SunoGenerateError);
+      assert.match(err.message, /durumunu doğrulayamadım; güvenli şekilde duruyorum/);
+      return true;
+    });
+
+    const clicks = fake.actions.filter((a) => a.type === 'click').map((a) => a.selector);
+    assert.ok(!clicks.includes(SELECTORS.instrumentalToggle), 'okunamayan toggle kesinlikle tıklanmamalı');
   });
 
   test('exclude alanı gizliyse önce More Options açılır', async () => {
@@ -158,15 +222,30 @@ describe('generateSong', () => {
     assert.ok(order.indexOf(SELECTORS.moreOptions) < order.indexOf(SELECTORS.negativeTagsInput));
   });
 
+  test('negativeTags verildiğinde Exclude Styles alanı yoksa hata vermez, atlar ve loglar', async () => {
+    const pageObj = createPage();
+    delete pageObj[SELECTORS.negativeTagsInput];
+    delete pageObj[SELECTORS.moreOptions];
+    const fake = createFakeBrowser({
+      elements: pageObj,
+      hrefs: [[], [song(ID_A), song(ID_B)]],
+    });
+    const { bot, logs } = makeBot(fake);
+
+    const result = await bot.generateSong(REQUEST, CTX);
+    assert.deepEqual(result, { jobId: `${ID_A},${ID_B}` });
+    assert.ok(logs.some((l) => l.includes("Exclude Styles mevcut UI'da yok")));
+  });
+
   test('captcha: kullanıcı bir kez uyarılır, çözülene kadar beklenir, sonra devam', async () => {
-    let captchaChecks = 0;
+    const clock = createFakeClock();
     const fake = createFakeBrowser({
       elements: createPage({
-        [SELECTORS.captchaFrame]: { visible: () => ++captchaChecks <= 3 },
+        [SELECTORS.captchaFrame]: { visible: () => clock.now() < 4000 },
       }),
       hrefs: [[], [song(ID_A), song(ID_B)]],
     });
-    const { bot, notices, clock } = makeBot(fake);
+    const { bot, notices } = makeBot(fake, clock);
 
     const { jobId } = await bot.generateSong(REQUEST, CTX);
 
@@ -200,15 +279,68 @@ describe('generateSong', () => {
     assert.equal(jobId, `${ID_A},${ID_B}`);
   });
 
-  test('oturum açma sayfasına yönlenirse 401 ve cookie mesajda yok', async () => {
-    const fake = createFakeBrowser({ elements: createPage(), landingUrl: 'https://suno.com/sign-in?redirect=create' });
-    const { bot } = makeBot(fake);
+  test('profilde oturum yoksa cookie yedeği eklenir, sayfa yenilenir, akış sürer', async () => {
+    const hasCookie = () => fake.state.cookies.length > 0;
+    const fake = createFakeBrowser({
+      elements: createPage({
+        [SELECTORS.formModeTab]: { visible: hasCookie },
+        [SELECTORS.loginButton]: { visible: () => !hasCookie() },
+      }),
+      hrefs: [[], [song(ID_A), song(ID_B)]],
+    });
+    const { bot, logs, notices } = makeBot(fake);
+
+    assert.deepEqual(await bot.generateSong(REQUEST, CTX), { jobId: `${ID_A},${ID_B}` });
+    assert.deepEqual(fake.state.cookies.map((c) => c.name), ['__client', '__session']);
+    assert.deepEqual(fake.actions.slice(0, 3).map((a) => a.type), ['goto', 'addCookies', 'goto']);
+    assert.ok(logs.some((m) => /yedeği/.test(m)));
+    assert.ok(!notices.includes(LOGIN_MESSAGE), 'yedek yetince elle giriş istenmez');
+  });
+
+  test('oturum yoksa elle giriş beklenir; giriş sonrası ana sayfadaysa create sayfasına dönülür', async () => {
+    const clock = createFakeClock();
+    const loggedIn = () => clock.now() >= 4000;
+    const fake = createFakeBrowser({
+      elements: createPage({
+        [SELECTORS.formModeTab]: { visible: () => loggedIn() && fake.state.url === SUNO_CREATE_URL },
+        [SELECTORS.loginButton]: { visible: () => !loggedIn() },
+      }),
+      // Oturumsuz Suno /create'ten ana sayfaya yönlendirir.
+      landingUrl: () => (loggedIn() ? SUNO_CREATE_URL : 'https://suno.com/'),
+      hrefs: [[], [song(ID_A), song(ID_B)]],
+    });
+    const { bot, notices } = makeBot(fake, clock);
+
+    assert.deepEqual(await bot.generateSong(REQUEST, { apiKey: PROFILE_API_KEY }), { jobId: `${ID_A},${ID_B}` });
+    assert.equal(notices.filter((m) => m === LOGIN_MESSAGE).length, 1);
+    assert.equal(fake.actions.filter((a) => a.type === 'goto').length, 2);
+    assert.deepEqual(fake.state.cookies, [], 'yer tutucu apiKey cookie sayılmaz');
+  });
+
+  test('giriş süresinde yapılmazsa 401 ve suno-login ipucu; cookie mesajda yok', async () => {
+    const fake = createFakeBrowser({
+      elements: createPage({ [SELECTORS.formModeTab]: { visible: false }, [SELECTORS.loginButton]: {} }),
+      landingUrl: 'https://suno.com/sign-in?redirect=create',
+    });
+    const { bot } = makeBot(fake, createFakeClock(), { loginTimeoutMs: 10000 });
 
     await assert.rejects(bot.generateSong(REQUEST, CTX), (err) => {
       assert.equal(err.status, 401);
-      assert.match(err.message, /SUNO_COOKIE/);
+      assert.match(err.message, /suno-login/);
+      assert.ok(!err.message.includes('secretclientvalue123456'));
       return true;
     });
+    assert.equal(fake.actions.filter((a) => a.type === 'click').length, 0);
+    assert.equal(fake.actions.filter((a) => a.type === 'goto').length, 2, 'giriş sayfasındayken yeniden yönlendirilmez');
+  });
+
+  test('ne form ne giriş düğmesi gelirse seçici ipucu veren hata', async () => {
+    const elements = createPage();
+    delete elements[SELECTORS.formModeTab];
+    const fake = createFakeBrowser({ elements });
+    const { bot } = makeBot(fake);
+
+    await assert.rejects(bot.generateSong(REQUEST, CTX), /create formu .* yüklenmedi/);
   });
 
   test('Playwright hatası sarılır; cookie değeri sızmaz', async () => {
@@ -312,6 +444,18 @@ describe('checkStatus / waitForSong / close', () => {
     const { bot } = makeBot(fake);
     const jobId = await generateSong('[Instrumental] Rain', { provider: bot, apiKey: COOKIE, env: {}, style: 'lofi', instrumental: true });
     assert.equal(jobId, `${ID_A},${ID_B}`);
+  });
+
+  test('login: yalnızca formu doğrular; cookie eklemez, tıklamaz', async () => {
+    process.env.SUNO_COOKIE = COOKIE;
+    const fake = createFakeBrowser({ elements: createPage() });
+    const { bot } = makeBot(fake);
+
+    await bot.login();
+    assert.deepEqual(fake.actions.map((a) => a.type), ['goto']);
+    assert.deepEqual(fake.state.cookies, []);
+    await bot.close();
+    assert.equal(fake.state.closed, true);
   });
 
   test('close tarayıcıyı kapatır; sonraki çağrı yeniden açar', async () => {

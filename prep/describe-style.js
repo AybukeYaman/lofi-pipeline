@@ -4,7 +4,7 @@
  * Network çağrısı yapmaz.
  */
 
-import { STYLE_FIELDS, validateStyle } from './styles.js';
+import { CUSTOM_STYLE_NAME, STYLE_FIELDS, validateStyle } from './styles.js';
 
 export const MAX_IMAGE_SIZE_BYTES = 15 * 1024 * 1024; // 15 MB
 
@@ -185,7 +185,7 @@ export function toStyle(responseText, name, { ambients } = {}) {
 export async function describeMultiReferenceStyle({
   imagePaths = [],
   concept = '',
-  name = 'custom-generated',
+  name = CUSTOM_STYLE_NAME,
   options = {},
 } = {}) {
   const { extname } = await import('node:path');

@@ -232,6 +232,13 @@ test('5. Geçersiz stil adı veya olmayan görsel durumunda API çağrılmaması
   );
   assert.equal(apiCalled, false);
 
+  // Projeye özel stil adı ayrılmış: loadStyle bu adı dosyaya bakmadan karşılar.
+  await assert.rejects(
+    runAddStyle({ imagePath: 'valid.jpg', name: 'custom-generated', options: { generateContentFn: fakeGenerate } }),
+    (err) => err instanceof AddStyleError && /ayrılmış/.test(err.message),
+  );
+  assert.equal(apiCalled, false);
+
   // Olmayan görsel
   await assert.rejects(
     async () => {

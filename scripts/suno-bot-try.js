@@ -5,6 +5,8 @@
  *
  *   node scripts/suno-bot-try.js --style "lofi hip hop, rhodes, tape hiss" --title "Rain" --negative "vocals, EDM"
  *
+ * Oturum kalıcı tarayıcı profilinden gelir (önce: node scripts/suno-login.js). Profilde oturum
+ * yoksa varsa SUNO_COOKIE denenir, o da olmazsa tarayıcıda elle giriş beklenir.
  * Captcha çıkarsa terminal "captcha bekleniyor, elle çöz" der; tarayıcıda çöz, bot devam eder.
  * Seçiciler tutmazsa hata mesajı hangi alanın bulunamadığını söyler → SELECTORS güncellenir.
  */
@@ -15,7 +17,7 @@ import { parseArgs } from 'node:util';
 
 import { generateSong, waitForSong } from '../prep/suno-generate.js';
 import { audioExtension, downloadAudio, sanitizeFilename } from '../prep/suno-ingest.js';
-import { createSunoBrowserBot, resolveSunoCookie } from '../prep/providers/suno-browser-bot.js';
+import { PROFILE_API_KEY, createSunoBrowserBot, resolveSunoCookie } from '../prep/providers/suno-browser-bot.js';
 
 const { values } = parseArgs({
   options: {
@@ -36,8 +38,9 @@ async function main() {
 
   const bot = createSunoBrowserBot();
   try {
-    const cookie = resolveSunoCookie();
-    const common = { provider: bot, apiKey: cookie };
+    // Cookie yalnızca yedek; yoksa suno-generate'in zorunlu apiKey'i yer tutucuyla karşılanır.
+    const cookie = resolveSunoCookie({ required: false });
+    const common = { provider: bot, apiKey: cookie ?? PROFILE_API_KEY };
 
     console.log('Tarayıcı açılıyor, suno.com/create…');
     const jobId = await generateSong(`[Instrumental] ${values.title}`, {

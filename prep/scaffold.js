@@ -10,18 +10,16 @@ import { copyFile, mkdir, rm } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 
 import { writeTextFile } from '../core/workspace.js';
+import { DEFAULT_CROP_BOTTOM } from './project-file.js';
 import { generateMusicPlan, generateMusicPlanAsync } from './music-planner.js';
 import { buildPromptsMd } from './prompts.js';
-import { renderStyleBlock } from './styles.js';
+import { CUSTOM_STYLE_NAME, renderStyleBlock } from './styles.js';
 
 /** Albüm klasörlerinin kökü. `--videos-dir` ezer. */
 export const DEFAULT_VIDEOS_DIR = 'C:\\Users\\Aybuke Yeni\\Desktop\\Youtube\\videolar';
 
 /** Kullanıcının mevcut düzeni (HANDOFF bölüm 9). */
 export const PROJECT_SUBDIRS = ['audio', 'resimler', 'videolar', 'references'];
-
-/** Watermark kırpması — Hailuo'da ölçülen değer (bölüm 4). */
-const CROP_BOTTOM = 150;
 
 export class ProjectExistsError extends Error {
   /** @param {string} dir */
@@ -90,15 +88,15 @@ export function planProject({ videosDir, videoName, style, ambient, styleRef, te
     clip: '',
     audioDir: './audio',
     ...(ambientVal ? { ambient: ambientVal } : {}),
-    video: { cropBottom: CROP_BOTTOM, aspect: '16:9' },
+    video: { cropBottom: DEFAULT_CROP_BOTTOM, aspect: '16:9' },
     output: { dir: './out' },
     music: plan,
     style: style.name,
-    ...(style.name === 'custom-generated' && style.styleBlock ? { styleBlock: style.styleBlock, motionHints: style.motionHints } : {}),
+    ...(style.name === CUSTOM_STYLE_NAME && style.styleBlock ? { styleBlock: style.styleBlock, motionHints: style.motionHints } : {}),
   };
 
   const files = [
-    ...(style.name === 'custom-generated' && !style.styleBlock ? [] : [{ name: 'STYLE_BLOCK.txt', content: renderStyleBlock(style) + '\n', bom: true }]),
+    ...(style.name === CUSTOM_STYLE_NAME && !style.styleBlock ? [] : [{ name: 'STYLE_BLOCK.txt', content: renderStyleBlock(style) + '\n', bom: true }]),
     { name: 'project.json', content: JSON.stringify(project, null, 2) + '\n', bom: false },
     { name: 'prompts.md', content: buildPromptsMd({ videoName, style, templates }), bom: true },
   ];

@@ -9,6 +9,9 @@
   },
   "scripts": {
     "start": "node lofi.js",
+    "web": "node server/web-server.js",
+    "web:client": "vite --config web/vite.config.ts --host 127.0.0.1",
+    "web:client:build": "vite build --config web/vite.config.ts",
     "tty-check": "node scripts/tty-check.js",
     "tui-check": "node scripts/tui-check.js",
     "build": "node build.js",
@@ -21,9 +24,15 @@
     "enquirer": "2.4.1",
     "ink": "7.1.1",
     "playwright": "1.63.0",
-    "react": "19.3.0"
+    "react": "19.3.0",
+    "react-dom": "^19.3.0"
   },
   "devDependencies": {
-    "ink-testing-library": "4.0.0"
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "ink-testing-library": "4.0.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0"
   }
 }

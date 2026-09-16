@@ -1,23 +1,31 @@
 /**
  * Suno tarayıcı botu — SunoGenerateProvider sözleşmesinin Playwright ile somut hali.
  *
- * Akış (görünür Chromium, kullanıcının kendi oturumu):
- *   SUNO_COOKIE → context.addCookies → suno.com/create → Custom Mode
- *   → style / exclude styles / başlık / instrumental → Create
+ * Akış (görünür Chromium, kalıcı profil):
+ *   launchPersistentContext(.auth/suno-profile) → suno.com/create
+ *   → oturum yoksa: SUNO_COOKIE yedeği (verildiyse) → yine yoksa elle giriş beklenir
+ *   → Custom Mode (Gelişmiş sekme) → style / exclude styles / başlık / instrumental → Create
  *   → yeni /song/<uuid> bağlantıları DOM'dan yakalanır → jobId = "uuid,uuid"
  *   checkStatus: aynı sayfada her clip satırının metni okunur (süre görünür → done).
+ *
+ * Oturum profilde kalır: ilk kez `node scripts/suno-login.js` ile elle giriş yapılır.
+ * Clerk'in asıl oturum cookie'si (__client, auth.suno.com, HttpOnly) Cookie
+ * başlığında görünmediği için SUNO_COOKIE tek başına genelde yetmez; yalnızca yedek.
  *
  * hCaptcha: OTOMATİK ÇÖZÜLMEZ. Çerçeve görünürse kullanıcıya bildirilir ve
  * elle çözülene kadar beklenir (captchaTimeoutMs).
  *
- * SEÇİCİLER CANLI SİTEDE DOĞRULANMADI — suno.com arayüzü değiştikçe yalnızca
- * SELECTORS güncellenir. Bekleme/backoff prep/suno-generate.js'te, indirme
- * prep/suno-ingest.js downloadAudio'da (album-chain üzerinden) kalır.
+ * Seçiciler 2026-09-16'da canlı sitede (Türkçe arayüz) kısmen doğrulandı; bkz. SELECTORS.
+ * suno.com arayüzü değiştikçe yalnızca SELECTORS güncellenir. Bekleme/backoff
+ * prep/suno-generate.js'te, indirme prep/suno-ingest.js downloadAudio'da kalır.
  *
- * Cookie, suno-generate'e `apiKey` olarak verilir: böylece hata mesajlarından
- * birebir silinir (SunoGenerateError secrets). Asla loglanmaz.
+ * Cookie verilirse suno-generate'e `apiKey` olarak geçer: böylece hata mesajlarından
+ * birebir silinir (SunoGenerateError secrets). Asla loglanmaz. Cookie yoksa
+ * suno-generate'in dolu apiKey şartı PROFILE_API_KEY yer tutucusuyla karşılanır.
  */
 
+import { mkdir } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import process from 'node:process';
 
 import { SunoGenerateError } from '../suno-generate-errors.js';
@@ -28,10 +36,25 @@ export const SUNO_CREATE_URL = `${SUNO_ORIGIN}/create`;
 /** Suno'nun kendi clip ses adresi deseni. */
 export const SUNO_AUDIO_URL = (clipId) => `https://cdn1.suno.ai/${clipId}.mp3`;
 
-/** Görünür tarayıcı: captcha elle çözülebilsin. */
+/** Görünür tarayıcı: captcha ve giriş elle yapılabilsin. */
 export const LAUNCH_OPTIONS = Object.freeze({ headless: false });
 
+/** Kalıcı profil klasörü (repo köküne göre); SUNO_PROFILE_DIR ile değiştirilebilir. Git'e girmez (.gitignore: .auth/). */
+export const DEFAULT_PROFILE_DIR = '.auth/suno-profile';
+
+/**
+ * Cookie yokken suno-generate'in zorunlu apiKey'ini karşılayan yer tutucu.
+ * Bot bu değeri cookie saymaz.
+ */
+export const PROFILE_API_KEY = '<suno-browser-profile>';
+
 export const PAGE_TIMEOUT_MS = 45000;
+/** Giriş düğmesi göründükten sonra formun yine de gelmesi için kısa pay (hydration). */
+export const LOGIN_GRACE_MS = 5000;
+/** Kullanıcının tarayıcıda elle giriş yapması için süre. */
+export const LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
+/** Mod sekmeleri geldikten sonra style alanının render edilmesi için süre (yanlış sekmeye tıklamamak için). */
+export const FORM_SETTLE_MS = 5000;
 /** Create'ten sonra yeni clip'lerin listede görünmesi için süre (captcha beklemesi hariç). */
 export const CLIP_APPEAR_TIMEOUT_MS = 120000;
 export const CAPTCHA_TIMEOUT_MS = 10 * 60 * 1000;
@@ -40,17 +63,29 @@ export const POLL_INTERVAL_MS = 2000;
 export const EXPECTED_VARIANTS = 2;
 
 export const CAPTCHA_MESSAGE = 'captcha bekleniyor, elle çöz — tarayıcı penceresinde captcha\'yı çözünce bot kendiliğinden devam edecek.';
+export const LOGIN_MESSAGE = 'Suno oturumu açık değil — açılan tarayıcı penceresinde Suno\'ya giriş yap; giriş tamamlanınca bot kendiliğinden devam edecek.';
 
-/** Tüm DOM bağımlılığı burada. Virgüllü seçicilerde ilk eşleşen kullanılır. */
+/**
+ * Tüm DOM bağımlılığı burada. Virgüllü seçicilerde DOM sırasında ilk eşleşen kullanılır.
+ * [canlı] = 2026-09-16'da suno.com'da (Türkçe arayüz, oturumlu/oturumsuz) DOM'dan doğrulandı.
+ * :visible → Suno aynı öğeyi gizli kopyasıyla da render ediyor (ör. iki "Log in", ilki gizli); first() gizliyi seçmesin.
+ */
 export const SELECTORS = Object.freeze({
-  customModeToggle: 'button:has-text("Custom")',
-  styleInput: 'textarea[placeholder*="style" i], textarea[aria-label*="style" i]',
+  /** [canlı] Basit/Gelişmiş mod sekmeleri (tek tablist); form hazır işareti. Metne bağlı değil. */
+  formModeTab: '[role="tablist"] [role="tab"]:visible',
+  /** [canlı] Custom Mode = style alanı görünmüyorken seçili olmayan sekme (Basit modda style alanı yok). */
+  inactiveFormModeTab: '[role="tablist"] [role="tab"][aria-selected="false"]:visible',
+  /** [canlı] Oturumsuz sayfadaki giriş düğmesi; öznitelik yok, yalnızca metin (en: "Log in", tr: "Giriş yap"). */
+  loginButton: ':is(button, a):visible:has-text("Log in"), :is(button, a):visible:has-text("Giriş yap")',
+  /** [canlı] Style kutusu data-testid'li sarmalayıcının içinde; placeholder önerilen stillerdir, dile bağlı değil. */
+  styleInput: '[data-testid="create-form-styles-wrapper"] textarea:visible',
   lyricsInput: 'textarea[placeholder*="lyrics" i], textarea[aria-label*="lyrics" i]',
-  titleInput: 'input[placeholder*="title" i], input[aria-label*="title" i]',
+  titleInput: 'input[placeholder="Song Title (Optional)"]:visible, input[placeholder*="Song Title" i]:visible, input[placeholder*="title" i]:visible, input[aria-label*="title" i]:visible',
   moreOptions: 'button:has-text("More Options"), button:has-text("Advanced Options")',
   negativeTagsInput: 'input[placeholder*="exclude" i], textarea[placeholder*="exclude" i]',
-  instrumentalToggle: '[role="switch"][aria-label*="instrumental" i], button[aria-label*="instrumental" i], button:has-text("Instrumental")',
-  createButton: 'button[aria-label="Create song"], button:has-text("Create")',
+  instrumentalToggle: 'button:visible[data-selected]:has-text("Instrumental"), button:visible[aria-pressed]:has-text("Instrumental"), button:visible[data-selected]:has-text("Off"), [role="switch"]:visible[aria-label*="instrumental" i], button:visible[aria-label*="instrumental" i]',
+  /** [canlı: tr "Şarkı oluştur"] Sayfada ayrıca aria-label="Üret" (söz yazarı) düğmesi var; ona dokunulmaz. */
+  createButton: 'button[aria-label="Create song"]:visible, button[aria-label="Şarkı oluştur"]:visible',
   captchaFrame: 'iframe[src*="hcaptcha.com"]',
   songLink: 'a[href*="/song/"]',
 });
@@ -72,12 +107,14 @@ export function getSunoCookie(env = process.env) {
 
 /**
  * Cookie'yi çözer (gemini.js/suno-generate.js'teki loadEnv deseni); yoksa anlaşılır hata.
- * @param {{ cookie?: string, env?: object, repoRoot?: string }} [options]
- * @returns {string}
+ * required=false: kalıcı profil ana yöntem olduğunda cookie yedektir, yoksa undefined.
+ * @param {{ cookie?: string, env?: object, repoRoot?: string, required?: boolean }} [options]
+ * @returns {string | undefined}
  */
-export function resolveSunoCookie({ cookie, env, repoRoot } = {}) {
+export function resolveSunoCookie({ cookie, env, repoRoot, required = true } = {}) {
   if (!cookie && !env) loadEnv(repoRoot || process.cwd());
   const value = (cookie || getSunoCookie(env || process.env) || '').trim();
+  if (!value && !required) return undefined;
   if (!value) {
     throw new SunoGenerateError(
       'SUNO_COOKIE bulunamadı. suno.com\'da oturum açıkken bir isteğin Cookie başlığını .env dosyasına SUNO_COOKIE= olarak ekleyin.',
@@ -85,6 +122,18 @@ export function resolveSunoCookie({ cookie, env, repoRoot } = {}) {
     );
   }
   return value;
+}
+
+/**
+ * Kalıcı profil klasörü: SUNO_PROFILE_DIR (göreliyse repo köküne göre) ya da DEFAULT_PROFILE_DIR.
+ * @param {{ env?: object, repoRoot?: string }} [options]
+ * @returns {string} mutlak yol
+ */
+export function resolveProfileDir({ env, repoRoot } = {}) {
+  const root = repoRoot || process.cwd();
+  if (!env) loadEnv(root);
+  const configured = ((env || process.env).SUNO_PROFILE_DIR || '').trim();
+  return resolve(root, configured || DEFAULT_PROFILE_DIR);
 }
 
 /**
@@ -159,10 +208,14 @@ function parseJobId(jobId) {
   return ids;
 }
 
-/** Gerçek tarayıcı: yalnızca canlı kullanımda yüklenir (testler launchBrowser verir). */
-async function launchChromium() {
+/**
+ * Gerçek tarayıcı: yalnızca canlı kullanımda yüklenir (testler launchContext verir).
+ * Kalıcı profil: oturum cookie'leri klasörde kalır. Aynı klasörü iki süreç aynı anda açamaz.
+ */
+async function launchPersistentChromium(profileDir) {
   const { chromium } = await import('playwright');
-  return chromium.launch(LAUNCH_OPTIONS);
+  await mkdir(profileDir, { recursive: true });
+  return chromium.launchPersistentContext(profileDir, LAUNCH_OPTIONS);
 }
 
 /**
@@ -184,20 +237,26 @@ function readClipRowsInPage({ ids, songLink }) {
 
 /**
  * @param {object} [deps]
- * @param {() => Promise<object>} [deps.launchBrowser] Playwright Browser döndürür
- * @param {string} [deps.cookie] verilmezse context.apiKey, o da yoksa SUNO_COOKIE
- * @param {(message: string) => void} [deps.notify] kullanıcıya görünen mesajlar (captcha)
+ * @param {(profileDir: string) => Promise<object>} [deps.launchContext] Playwright kalıcı BrowserContext döndürür
+ * @param {string} [deps.profileDir] verilmezse SUNO_PROFILE_DIR, o da yoksa DEFAULT_PROFILE_DIR
+ * @param {string} [deps.cookie] yedek cookie; verilmezse context.apiKey, o da yoksa SUNO_COOKIE (hiçbiri şart değil)
+ * @param {(message: string) => void} [deps.notify] kullanıcıya görünen mesajlar (captcha, giriş)
  * @param {(message: string) => void} [deps.log] ayrıntı/sapma bildirimleri
  * @param {typeof setTimeout} [deps.sleepFn]
  * @param {() => number} [deps.now]
  * @param {number} [deps.pageTimeoutMs]
  * @param {number} [deps.clipTimeoutMs]
  * @param {number} [deps.captchaTimeoutMs]
+ * @param {number} [deps.loginTimeoutMs]
  * @param {number} [deps.pollIntervalMs]
- * @returns {import('../suno-generate-provider.js').SunoGenerateProvider & { close: () => Promise<void> }}
+ * @returns {import('../suno-generate-provider.js').SunoGenerateProvider & {
+ *   login: (options?: { signal?: AbortSignal }) => Promise<void>,
+ *   close: () => Promise<void>,
+ * }}
  */
 export function createSunoBrowserBot({
-  launchBrowser = launchChromium,
+  launchContext = launchPersistentChromium,
+  profileDir,
   cookie: fixedCookie,
   notify = (message) => console.log(`[suno-bot] ${message}`),
   log = (message) => console.warn(`[suno-bot] ${message}`),
@@ -206,49 +265,128 @@ export function createSunoBrowserBot({
   pageTimeoutMs = PAGE_TIMEOUT_MS,
   clipTimeoutMs = CLIP_APPEAR_TIMEOUT_MS,
   captchaTimeoutMs = CAPTCHA_TIMEOUT_MS,
+  loginTimeoutMs = LOGIN_TIMEOUT_MS,
   pollIntervalMs = POLL_INTERVAL_MS,
 } = {}) {
-  /** @type {{ browser: any, page: any } | null} */
+  /** @type {{ context: any, page: any } | null} */
   let session = null;
 
   const sleep = (ms) => new Promise((done) => (sleepFn ? sleepFn(done, ms) : setTimeout(done, ms)));
   const first = (selector) => session.page.locator(selector).first();
+  const settle = (locator, timeout) => locator.waitFor({ state: 'visible', timeout }).then(() => true, () => false);
 
   async function isVisible(selector) {
     const locator = first(selector);
     return (await locator.count()) > 0 && locator.isVisible();
   }
 
-  async function openSession(cookie) {
-    if (session) return session;
+  /** Yedek cookie: sabit > apiKey (yer tutucu değilse) > SUNO_COOKIE; yoksa undefined (profil yeter). */
+  function resolveCookie(apiKey) {
+    const given = fixedCookie || (apiKey === PROFILE_API_KEY ? undefined : apiKey);
+    return resolveSunoCookie({ cookie: given, required: false });
+  }
+
+  /** Verilen cookie tarayıcı açılmadan doğrulanır; cookie yoksa boş liste. */
+  function cookiesFrom(cookie) {
+    if (!cookie) return [];
     const cookies = parseCookieHeader(cookie);
     if (cookies.length === 0) {
       throw new SunoGenerateError('SUNO_COOKIE ayrıştırılamadı ("ad=değer; ad2=değer2" biçimi beklenir).', { secrets: [cookie] });
     }
-    const browser = await launchBrowser();
+    return cookies;
+  }
+
+  async function openSession() {
+    if (session) return session;
+    const context = await launchContext(profileDir || resolveProfileDir());
     try {
-      const context = await browser.newContext();
-      await context.addCookies(cookies);
-      const page = await context.newPage();
-      session = { browser, page };
+      const page = context.pages()[0] ?? (await context.newPage());
+      session = { context, page };
     } catch (err) {
-      await browser.close().catch(() => {});
+      await context.close().catch(() => {});
       throw err;
     }
     return session;
   }
 
-  /** Create sayfasında değilse gider; oturum yoksa anlaşılır hata. */
-  async function ensureCreatePage(cookie, signal) {
-    await openSession(cookie);
-    const { page } = session;
-    if (!String(page.url()).startsWith(SUNO_CREATE_URL)) {
-      await page.goto(SUNO_CREATE_URL, { waitUntil: 'domcontentloaded', timeout: pageTimeoutMs });
+  const onCreatePage = () => String(session.page.url()).startsWith(SUNO_CREATE_URL);
+
+  async function gotoCreate() {
+    await session.page.goto(SUNO_CREATE_URL, { waitUntil: 'domcontentloaded', timeout: pageTimeoutMs });
+  }
+
+  /**
+   * Create formunu hazırlar: profil oturumu → (varsa) cookie yedeği → elle giriş.
+   * @param {object[]} cookies cookiesFrom çıktısı
+   */
+  async function ensureCreatePage(cookies, signal) {
+    await openSession();
+    if (!onCreatePage()) await gotoCreate();
+    if (await waitForCreateForm(signal)) return;
+
+    if (cookies.length > 0) {
+      log('profilde Suno oturumu yok; SUNO_COOKIE yedeği deneniyor.');
+      await session.context.addCookies(cookies);
+      await gotoCreate();
+      if (await waitForCreateForm(signal)) return;
     }
-    await waitWhileCaptcha(signal);
-    if (SIGN_IN_PATH.test(String(page.url()))) {
-      throw new SunoGenerateError('Suno oturumu açılamadı: SUNO_COOKIE geçersiz ya da süresi dolmuş. Tarayıcıdan yeni Cookie kopyalayın.', { status: 401, secrets: [cookie] });
+    await waitForManualLogin(signal);
+  }
+
+  /**
+   * SPA hydration: mod sekmeleri, giriş düğmesi ya da captcha görünene kadar bekler.
+   * URL tek başına yetmez (oturumsuz sayfa /create'te de kalabilir, / adresine de gidebilir).
+   * @returns {Promise<boolean>} form hazır mı (false → oturum yok)
+   */
+  async function waitForCreateForm(signal) {
+    const form = first(SELECTORS.formModeTab);
+    const anySignal = form.or(first(SELECTORS.loginButton)).or(first(SELECTORS.captchaFrame)).first();
+    if (!(await settle(anySignal, pageTimeoutMs))) {
+      throw new SunoGenerateError(`Suno create formu ${Math.round(pageTimeoutMs / 1000)} sn içinde yüklenmedi (seçici değişmiş olabilir: ${SELECTORS.formModeTab}).`);
     }
+    if (await waitWhileCaptcha(signal)) return waitForCreateForm(signal);
+    if (await form.isVisible()) return true;
+    // Giriş düğmesi hydration sırasında kısa süre görünebilir: form için kısa pay.
+    return settle(form, LOGIN_GRACE_MS);
+  }
+
+  /** Kullanıcı tarayıcıda elle giriş yapana kadar bekler; giriş sonrası suno.com'da başka sayfadaysa create'e döner. */
+  async function waitForManualLogin(signal) {
+    notify(LOGIN_MESSAGE);
+    const deadline = now() + loginTimeoutMs;
+    let loggedInChecks = 0;
+    while (true) {
+      signal?.throwIfAborted();
+      await waitWhileCaptcha(signal);
+      if (await isVisible(SELECTORS.formModeTab)) {
+        notify('Suno oturumu açık, devam ediliyor.');
+        return;
+      }
+      if (now() >= deadline) break;
+      // Art arda iki bakışta giriş düğmesi yoksa (hydration değil) giriş tamamlanmıştır.
+      loggedInChecks = (await leftLoginElsewhere()) ? loggedInChecks + 1 : 0;
+      if (loggedInChecks >= 2) {
+        loggedInChecks = 0;
+        await gotoCreate();
+      }
+      await sleep(pollIntervalMs);
+    }
+    throw new SunoGenerateError(
+      `Suno oturumu açılmadı: ${Math.round(loginTimeoutMs / 60000)} dakika içinde giriş yapılmadı. Önce "node scripts/suno-login.js" ile tarayıcı profilinde oturum aç.`,
+      { status: 401 },
+    );
+  }
+
+  /** suno.com'un create dışı bir sayfasında ve giriş düğmesi yok mu (Google/Clerk giriş sayfalarına dokunulmaz). */
+  async function leftLoginElsewhere() {
+    let url;
+    try {
+      url = new URL(String(session.page.url()));
+    } catch {
+      return false;
+    }
+    if (url.hostname !== 'suno.com' || onCreatePage() || SIGN_IN_PATH.test(url.pathname)) return false;
+    return !(await isVisible(SELECTORS.loginButton));
   }
 
   /**
@@ -270,22 +408,33 @@ export function createSunoBrowserBot({
     return true;
   }
 
-  /** aria-pressed/aria-checked/data-state ile açık mı; değilse tıklar. */
+  /**
+   * Custom Mode = style alanının göründüğü sekme (Basit modda style alanı yok).
+   * Style alanı render için kısa süre beklenir; yine yoksa seçili olmayan sekmeye geçilir.
+   * Sekme metnine/sırasına bağlı değil.
+   */
+  async function ensureCustomMode() {
+    if (await settle(first(SELECTORS.styleInput), FORM_SETTLE_MS)) return;
+    await setToggle(SELECTORS.inactiveFormModeTab, true, 'Custom Mode (Gelişmiş sekmesi)');
+  }
+
+  /** aria-pressed/aria-checked/aria-selected/data-state/data-selected ile açık mı; değilse tıklar. Okunamazsa hata fırlatır. */
   async function setToggle(selector, wanted, label) {
     if (!(await isVisible(selector))) {
-      log(`${label} düğmesi bulunamadı (seçici: ${selector}).`);
-      return;
+      throw new SunoGenerateError(`Suno sayfasında ${label} düğmesi bulunamadı (seçici: ${selector}).`);
     }
     const locator = first(selector);
     let current = null;
-    for (const attr of ['aria-pressed', 'aria-checked', 'data-state']) {
+    for (const attr of ['aria-pressed', 'aria-checked', 'aria-selected', 'data-state', 'data-selected']) {
       const value = await locator.getAttribute(attr);
       if (value !== null && value !== undefined) {
         current = ACTIVE_VALUES.has(String(value).toLowerCase());
         break;
       }
     }
-    if (current === null) log(`${label} durumu okunamadı; tıklanıyor.`);
+    if (current === null) {
+      throw new SunoGenerateError(`${label} durumunu doğrulayamadım; güvenli şekilde duruyorum (seçici: ${selector}).`);
+    }
     if (current !== wanted) await locator.click();
   }
 
@@ -337,19 +486,26 @@ export function createSunoBrowserBot({
     name: 'suno-browser',
 
     async generateSong({ prompt, style, title, instrumental, negativeTags }, { apiKey, signal } = {}) {
-      const cookie = resolveSunoCookie({ cookie: fixedCookie || apiKey });
+      const cookie = resolveCookie(apiKey);
       signal?.throwIfAborted();
       if (!style) throw new SunoGenerateError('Suno botu Custom Mode kullanır: style zorunlu.');
+      const cookies = cookiesFrom(cookie);
 
       try {
-        await ensureCreatePage(cookie, signal);
-        await setToggle(SELECTORS.customModeToggle, true, 'Custom Mode');
+        await ensureCreatePage(cookies, signal);
+        await ensureCustomMode();
         await fillRequired(SELECTORS.styleInput, style, 'Style');
 
         if (negativeTags && !(await isVisible(SELECTORS.negativeTagsInput)) && (await isVisible(SELECTORS.moreOptions))) {
           await first(SELECTORS.moreOptions).click();
         }
-        if (negativeTags) await fillRequired(SELECTORS.negativeTagsInput, negativeTags, 'Exclude styles (negative tags)');
+        if (negativeTags) {
+          if (await isVisible(SELECTORS.negativeTagsInput)) {
+            await fillRequired(SELECTORS.negativeTagsInput, negativeTags, 'Exclude styles (negative tags)');
+          } else {
+            log('[suno-bot] Exclude Styles mevcut UI\'da yok; negative tags atlandı.');
+          }
+        }
 
         await fillOptional(SELECTORS.titleInput, title, 'Title');
         if (instrumental !== undefined) await setToggle(SELECTORS.instrumentalToggle, Boolean(instrumental), 'Instrumental');
@@ -368,11 +524,12 @@ export function createSunoBrowserBot({
 
     async checkStatus({ jobId }, { apiKey, signal } = {}) {
       const ids = parseJobId(jobId);
-      const cookie = resolveSunoCookie({ cookie: fixedCookie || apiKey });
+      const cookie = resolveCookie(apiKey);
       signal?.throwIfAborted();
+      const cookies = cookiesFrom(cookie);
 
       try {
-        await ensureCreatePage(cookie, signal);
+        await ensureCreatePage(cookies, signal);
         const rows = await session.page.evaluate(readClipRowsInPage, { ids, songLink: SELECTORS.songLink });
         const clips = rows.map((row) => ({ id: row.id, state: classifyClipRow(row) }));
         const missing = rows.filter((row) => !row.found).map((row) => row.id);
@@ -383,11 +540,20 @@ export function createSunoBrowserBot({
       }
     },
 
-    /** Tarayıcıyı kapatır; generateSong/checkStatus sonra yeniden açabilir. */
+    /** Yalnızca oturumu hazırlar (scripts/suno-login.js): create formu görünene kadar; şarkı üretmez, cookie kullanmaz. */
+    async login({ signal } = {}) {
+      try {
+        await ensureCreatePage([], signal);
+      } catch (err) {
+        throw toProviderError(err);
+      }
+    },
+
+    /** Tarayıcıyı (kalıcı context) kapatır; cookie'ler profile yazılır. Sonraki çağrı yeniden açar. */
     async close() {
       const current = session;
       session = null;
-      if (current) await current.browser.close();
+      if (current) await current.context.close();
     },
   };
 }

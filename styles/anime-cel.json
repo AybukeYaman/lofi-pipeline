@@ -25,5 +25,12 @@
     "steam rising in simple stylized wisps",
     "city lights or stars twinkling in the distance",
     "curtain edge moving slightly in a breeze"
-  ]
+  ],
+  "music": {
+    "genre": "lofi hip hop, instrumental downtempo",
+    "production": ["warm tape saturation", "vinyl crackle", "soft analog hiss", "gentle sidechain"],
+    "instruments": ["dusty Rhodes piano", "upright bass", "brushed drums", "muted guitar", "soft pad"],
+    "aesthetic": "late night city apartment, nostalgic, rain on glass",
+    "exclude": ["vocals", "lyrics", "EDM drops", "heavy distortion", "fast tempo", "aggressive percussion", "orchestral swells"]
+  }
 }

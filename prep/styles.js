@@ -23,7 +23,10 @@ export const STYLES_DIR = fileURLToPath(new URL('../styles/', import.meta.url));
 export const STYLE_REF_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
 
 /** Stil adı = dosya adı: küçük harf kebab-case ("neo-tokyo"). */
-const NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+/** Stil adı: küçük harf kebab-case (add-style, panel ve web aynı kuralı kullanır). */
+export const STYLE_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+/** Projeye özel, referans görsellerden üretilen stil; styles/ altında dosyası yok. */
+export const CUSTOM_STYLE_NAME = 'custom-generated';
 
 /**
  * styleBlock alanları — metin çıktısındaki sıra ve başlıklar.
@@ -105,15 +108,15 @@ export async function findStyleRef(name, { dir = STYLES_DIR } = {}) {
  * @returns {Promise<{ style: object, path: string, warnings: string[] }>}
  */
 export async function loadStyle(name, { dir = STYLES_DIR, ambients } = {}) {
-  if (name === 'custom-generated') {
+  if (name === CUSTOM_STYLE_NAME) {
     return {
-      style: { name: 'custom-generated', suggestedAmbient: 'none' },
-      path: join(dir, 'custom-generated.json'),
+      style: { name: CUSTOM_STYLE_NAME, suggestedAmbient: 'none' },
+      path: join(dir, `${CUSTOM_STYLE_NAME}.json`),
       warnings: [],
     };
   }
 
-  if (typeof name !== 'string' || !NAME_PATTERN.test(name)) {
+  if (typeof name !== 'string' || !STYLE_NAME_PATTERN.test(name)) {
     throw new StyleError(String(name), [`stil adı küçük harf kebab-case olmalı (ör. "neo-tokyo"), verilen: ${JSON.stringify(name)}`]);
   }
 
@@ -160,7 +163,7 @@ export function validateStyle(json, { expectedName, ambients } = {}) {
 
   // --- name
   if (requireText(json.name, 'name', problems)) {
-    if (!NAME_PATTERN.test(json.name)) {
+    if (!STYLE_NAME_PATTERN.test(json.name)) {
       problems.push(`name: küçük harf kebab-case olmalı (verilen: ${JSON.stringify(json.name)})`);
     } else if (expectedName !== undefined && json.name !== expectedName) {
       problems.push(`name: dosya adıyla aynı olmalı ("${expectedName}", verilen: "${json.name}")`);

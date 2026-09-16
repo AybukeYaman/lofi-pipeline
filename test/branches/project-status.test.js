@@ -41,7 +41,12 @@ describe('inspectProject — taze projeden montaja', () => {
     assert.deepEqual(s.clip, { value: '', path: null, exists: false });
     assert.equal(s.audioDir, join(dir, 'audio'));
     assert.equal(s.audioCount, 0);
-    assert.deepEqual(s.output, { path: join(dir, 'out', 'final_ambient.mp4'), exists: false });
+    assert.deepEqual(s.output, {
+      path: join(dir, 'out', 'final_ambient.mp4'),
+      exists: false,
+      tracklistPath: join(dir, 'out', 'tracklist.txt'),
+      tracklistExists: false,
+    });
     assert.equal(s.promptsPath, join(dir, 'prompts.md'));
     assert.equal(nextStep(s).id, 'faz1');
   });

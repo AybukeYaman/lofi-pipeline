@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# Tarayıcı oturum profilleri (Suno botu: .auth/suno-profile) — hesap cookie'leri içerir, asla commit edilmez
+.auth/
+
 # Node modules & OS metadata
 node_modules/
 Thumbs.db
@@ -10,3 +13,8 @@ Thumbs.db
 
 # Üretilmiş video çıktıları (büyük dosyalar, asla commit edilmez)
 videolar/
+
+# Web client build output
+dist/
+web/dist/
+

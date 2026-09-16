@@ -1,5 +1,5 @@
 /**
- * prep/project-file.js — setProjectClip (geçici klasörde küçük dosyalar).
+ * prep/project-file.js — setProjectClip, watermark kırpması (geçici klasörde küçük dosyalar).
  */
 
 import assert from 'node:assert/strict';
@@ -8,7 +8,9 @@ import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
 
 import { loadProject } from '../../core/config.js';
-import { ProjectFileError, setProjectClip } from '../../prep/project-file.js';
+import {
+  DEFAULT_CROP_BOTTOM, ProjectFileError, cropForWatermark, setProjectClip, setProjectCropBottom,
+} from '../../prep/project-file.js';
 import { tempDir } from '../helpers/fixtures.js';
 
 describe('setProjectClip', () => {
@@ -86,5 +88,51 @@ describe('setProjectClip', () => {
     const { projectPath } = await makeProject('{ bozuk');
     await assert.rejects(setProjectClip(projectPath, './videolar/in.mp4'), (e) =>
       e instanceof ProjectFileError && e.message.startsWith('project.json ayrıştırılamadı'));
+  });
+});
+
+describe('watermark kırpması', () => {
+  let root;
+
+  before(async () => { root = await tempDir('project-crop'); });
+  after(() => root?.cleanup());
+
+  test('cropForWatermark: kapalı 0; açık → geçerli pozitif değer korunur, yoksa varsayılan', () => {
+    assert.equal(cropForWatermark(false, 150), 0);
+    assert.equal(cropForWatermark(true, 90), 90);
+    for (const current of [0, undefined, null, -5, 12.5, '150']) {
+      assert.equal(cropForWatermark(true, current), DEFAULT_CROP_BOTTOM);
+    }
+  });
+
+  test('setProjectCropBottom yalnızca video.cropBottom değiştirir; loadProject konfigden okur', async () => {
+    await mkdir(root.path('audio'), { recursive: true });
+    await mkdir(root.path('videolar'));
+    await writeFile(root.path('videolar/in.mp4'), '');
+    const projectPath = root.path('project.json');
+    await writeFile(projectPath, JSON.stringify({
+      clip: './videolar/in.mp4', audioDir: './audio', video: { aspect: '16:9', cropBottom: 150, crf: 20 },
+    }));
+    assert.equal(await setProjectCropBottom(projectPath, 0), 0);
+    const json = JSON.parse(await readFile(projectPath, 'utf8'));
+    assert.deepEqual(json, { clip: './videolar/in.mp4', audioDir: './audio', video: { aspect: '16:9', cropBottom: 0, crf: 20 } });
+
+    const config = await loadProject(projectPath);
+    assert.equal(config.video.cropBottom, 0);
+    assert.equal(config.video.cropFromConfig, true); // build.js onay istemez
+  });
+
+  test('video yoksa oluşturulur; geçersiz değer ve video nesne değilse ProjectFileError', async () => {
+    const projectPath = root.path('p2.json');
+    await writeFile(projectPath, '{"clip": ""}');
+    await setProjectCropBottom(projectPath, 120);
+    assert.deepEqual(JSON.parse(await readFile(projectPath, 'utf8')), { clip: '', video: { cropBottom: 120 } });
+
+    for (const bad of [-1, 1.5, '150', null]) {
+      await assert.rejects(setProjectCropBottom(projectPath, bad), ProjectFileError);
+    }
+    await writeFile(projectPath, '{"video": "x"}');
+    await assert.rejects(setProjectCropBottom(projectPath, 0), /"video" bir nesne/);
+    assert.equal(await readFile(projectPath, 'utf8'), '{"video": "x"}');
   });
 });

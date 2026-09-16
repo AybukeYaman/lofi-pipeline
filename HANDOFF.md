@@ -143,7 +143,9 @@ GEMINI_MODEL=gemini-3.6-flash
 
 Kanıta göre **sondan başa** bakılır; elle yapılmış ama işaretlenmemiş adım tekrar istenmez:
 
-`fix-project` (project.json okunamıyor) → `done` (çıktı var) → `build` (clip dosyası var + parça var) → `audio` (clip var, parça yok; elle) → `clip` (videolar\ altında .mp4 var; seçim) → `faz3` (`resimler\MASTER.*` var; elle) → `faz1` (elle).
+`fix-project` (project.json okunamıyor) → `done` (çıktı var) → `style-references` (custom-generated, STYLE_BLOCK yok) → `faz1` (MASTER yok; elle) → `build` (clip dosyası var + müzik bitti) → `audio` (müzik bitmedi — **klipten bağımsız**; elle) → `clip` (videolar\ altında .mp4 var; seçim) → `faz3` (elle).
+
+Güncel akış sırası (kod ve test `'müzik klipten önce gelir'` ile): stil → master → **müzik → klip** → montaj. `audio` adımındaki projede klip henüz olmayabilir; aşama başına gerçek durum için web API'nin `readiness` alanına bakılır (bölüm 18). Müzik "bitti" kararı `isMusicCompleted` (parça planı varsa plan durumu, yoksa en az bir ses dosyası).
 
 - Faz 2 hiçbir adımı engellemez.
 - `Master1.jpg` gibi açı varyantları MASTER sayılmaz.
@@ -398,14 +400,38 @@ Tekrar denenecekse bilinmesi gerekenler:
 
 ## 17. Suno tarayıcı botu (Playwright) · ✅ YAZILDI (mock testli, canlı kabul kullanıcıda)
 
-`prep/providers/suno-browser-bot.js` — `SunoGenerateProvider` sözleşmesinin ikinci somut hali; sözleşme ve `suno-generate.js` değişmedi. `createSunoBrowserBot({ launchBrowser, cookie, notify, log, sleepFn, now, …timeouts })` → `{ name, generateSong, checkStatus, close }`.
+`prep/providers/suno-browser-bot.js` — `SunoGenerateProvider` sözleşmesinin ikinci somut hali; sözleşme ve `suno-generate.js` değişmedi. `createSunoBrowserBot({ launchContext, profileDir, cookie, notify, log, sleepFn, now, …timeouts })` → `{ name, generateSong, checkStatus, login, close }`.
 
-- **Oturum:** `SUNO_COOKIE` (`.env`, DevTools'taki `Cookie:` başlığı) → `.suno.com` cookie'leri olarak eklenir. Zincire `apiKey` olarak verilir (`resolveSunoCookie()`); böylece `SunoGenerateError` mesajlarından birebir silinir.
+- **Oturum (2026-09-16'dan beri): kalıcı Playwright profili** — `chromium.launchPersistentContext(.auth/suno-profile)` (`SUNO_PROFILE_DIR` ile değişir, göreliyse repo köküne göre; `.gitignore`: `.auth/`). İlk kez `node scripts/suno-login.js` ile tarayıcıda elle giriş yapılır; oturum profilde kalır. Neden: Clerk'in asıl oturum cookie'si `__client` (`auth.suno.com`, HttpOnly) suno.com isteklerinin `Cookie:` başlığında görünmez → `SUNO_COOKIE` tek başına oturum açmıyordu (sayfa `/create`'te "Giriş yap" gösteriyor ya da `/`'e yönleniyordu).
+- **Oturum kontrolü:** URL yetmez. Mod sekmeleri (form) / görünür "Log in"/"Giriş yap" düğmesi / captcha beklenir (`locator.or`). Oturum yoksa → `SUNO_COOKIE` verilmişse yedek olarak eklenip sayfa yenilenir → yine yoksa `notify(LOGIN_MESSAGE)` ve 10 dk elle giriş beklenir (giriş sonrası suno.com'da başka sayfadaysa `/create`'e dönülür; Google/Clerk sayfalarına dokunulmaz) → olmazsa 401 + `suno-login` ipucu.
+- **SUNO_COOKIE:** artık yalnızca yedek, zorunlu değil (`resolveSunoCookie({ required: false })`). Cookie yoksa `suno-generate`'in zorunlu `apiKey`'i `PROFILE_API_KEY` yer tutucusuyla karşılanır (bot bunu cookie saymaz). Cookie varsa hâlâ `apiKey` olarak geçer ve hata mesajlarından silinir.
+- **Aynı profil iki süreçle aynı anda açılamaz** (Chromium profil kilidi): `suno-login.js` ile bot aynı anda çalıştırılmaz. Açık olan normal Chrome'u etkilemez (ayrı Chromium, ayrı klasör).
 - **Akış:** görünür Chromium (`LAUNCH_OPTIONS.headless=false`) → `suno.com/create` → Custom Mode → Style / (More Options →) Exclude styles / Title / Instrumental → Create → Create'ten önce ve sonraki `/song/<uuid>` bağlantılarının farkı = yeni clip'ler. `jobId = "uuid1,uuid2"`.
+- **Custom Mode = Gelişmiş sekmesi** (`[role=tablist]` içinde iki `role=tab`, durum `aria-selected`). Metin/sıra kullanılmaz: style alanı 5 sn içinde görünmüyorsa (Basit modda yok) seçili olmayan sekmeye tıklanır. `setToggle` artık `aria-selected`'ı da okur.
 - **checkStatus:** aynı sayfada her clip'in satır metni okunur; `m:ss` süre → done, hata metni → failed, aksi pending. Ses adresi `https://cdn1.suno.ai/<uuid>.mp3`. İndirme zincirde `suno-ingest.downloadAudio` ile.
 - **hCaptcha:** otomatik çözülmez. Görünürse `notify("captcha bekleniyor, elle çöz …")`, kaybolana kadar beklenir (10 dk). Captcha süresi clip bekleme süresinden düşülmez.
-- **Seçiciler (`SELECTORS`) canlı sitede DOĞRULANMADI** — ilk canlı denemede ayarlanacak tek yer burası.
+- **Seçiciler (`SELECTORS`):** `[canlı]` işaretliler (form sekmeleri, giriş düğmesi, style `[data-testid="create-form-styles-wrapper"] textarea`, Create `aria-label="Şarkı oluştur"`) 2026-09-16'da Türkçe arayüzde DOM'dan doğrulandı; `:visible` şart (Suno gizli kopyalar render ediyor). Hesap arayüzü Türkçe; İngilizce `aria-label="Create song"` doğrulanmadı.
+  - **Doğrulanmamış / bilinen açıklar:** güncel arayüzde **Exclude styles alanı ve Instrumental düğmesi yok** ("Daha fazla seçenek": vokal cinsiyeti, süre, Maks mod, tuhaflık, stil etkisi, çeşitlilik, kişiselleştir). Instrumental = sözleri boş bırakmak (sayfadaki ipucu); bot instrumental'de söz doldurmadığı için sonuç aynı, yalnızca "bulunamadı" logu düşer. `--negative` verilirse Exclude alanı bulunamadığı için hata verir. Başlık (`placeholder` tr: "Şarkı adı (isteğe bağlı)") ve söz editörü (`[data-lexical-editor][role=textbox]`, textarea değil) seçicileri eşleşmez → atlanır (log).
 - **Bağımlılık:** `playwright` 1.63.0 (sabit). Tarayıcı ikilisi ayrıca: `npx playwright install chromium`.
-- **Canlı deneme:** `node scripts/suno-bot-try.js --style "<style>" --title "<başlık>" --negative "<exclude>"` (elle; `npm test`'e dahil değil).
+- **Canlı deneme:** önce bir kez `node scripts/suno-login.js` (yalnızca giriş; üretim yok), sonra `node scripts/suno-bot-try.js --style "<style>" --title "<başlık>"` (elle; kredi harcar; `npm test`'e dahil değil).
 - **Testler:** `test/unit/suno-browser-bot.test.js` + `test/helpers/fake-playwright.js` (sahte Playwright, sanal saat; ağ/tarayıcı yok).
 - **Not:** `FORCE_COLOR=3` olan kabukta `regression-compare.test.js` "kırpma filtresi" testi renk kodları yüzünden düşüyor (bu işten bağımsız, önceden var); `FORCE_COLOR=0` ile 481/481.
+
+## 18. Web UI backend (`server/`) · ✅ (2026-09-16)
+
+`npm run web` → `server/web-server.js` (yalnızca `127.0.0.1`, varsayılan port 3000; Vite `/api`'yi buraya yönlendirir). Katmanlar: `web-server.js` (HTTP, rota, gövde) → `project-api.js` (adapter) → mevcut domain fonksiyonları. Yeni domain mantığı yok.
+
+| Endpoint | Yeniden kullanılan |
+|---|---|
+| `GET /api/projects`, `GET /api/projects/:id` (+ `readiness`) | `listProjects`, `inspectProject`, `nextStep`, `isMusicCompleted` |
+| `POST /api/projects` | `runNewVideo` (panelin `new-video.js` yolu) |
+| `GET /api/library` | `listStyles`, `loadStyle`, `findStyleRef`, `listAmbients` |
+| `PUT /api/projects/:id/clip` | `setProjectClip` (panelin `chooseClip`'i) |
+| `POST /api/projects/:id/music/complete` | `completeMusicByUser` (`prep/project-file.js`; panelin "Müziği bitir ve devam et"i de bunu çağırır). Web'de koşul: parça planı var ve audio klasöründe en az bir dosya; müzik zaten bittiyse yazmadan 200 |
+| `POST`/`GET /api/projects/:id/build` | `build.js` ayrı süreçte (`server/build-jobs.js`), panel gibi |
+
+- **Montaj:** istek beklemez (202); durum bellekte, UI `GET …/build` ile yoklar. Aynı anda tek montaj. Yalnızca `nextStep` = `build`/`done` olan proje; çıktı varsa `overwrite: true` şart. Kırpma değeri project.json'da olduğundan onay sorulmaz. İptal uç noktası yok.
+- **Güvenlik (yerel):** Host yalnızca localhost (DNS rebinding); yazan isteklerde `Content-Type: application/json` zorunlu ve Origin localhost olmalı. Kimlik doğrulama yok (kişisel yerel uygulama).
+- **Proje oluşturma:** müzik planı `runNewVideo` → `generateMusicPlanAsync`; sunucu `.env` yüklemez, `GEMINI_API_KEY` yalnızca sunucunun ortamında varsa Gemini'ye gider, yoksa deterministik plan. İsim zaten varsa planlamadan önce 409.
+- **Yapılmayanlar (panelde var, web'de yok):** faz 2–3 promptlarını gösterme/kopyalama (Faz 1 promptu `GET /api/projects/:id/master` ile var), müzik parçalarını tek tek dosyayla "tamamlandı" işaretleme (web yalnızca aşamayı toptan bitirir), İndirilenler izleme.
+- **Testler:** `test/unit/web-api.test.js` (sahte build süreci), `test/unit/web-server.test.js`.

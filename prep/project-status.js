@@ -15,7 +15,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { CONFIG_DEFAULTS } from '../core/config.js';
 import { AUDIO_EXTENSIONS, listFiles } from '../core/files.js';
 import { readJsonFile } from '../core/workspace.js';
-import { STYLE_REF_EXTENSIONS } from './styles.js';
+import { CUSTOM_STYLE_NAME, STYLE_REF_EXTENSIONS } from './styles.js';
 
 /** Faz 1 çıktısı: resimler/MASTER.<uzantı>. Master1.jpg gibi açı varyantları sayılmaz. */
 const MASTER_PATTERN = /^master\.[a-z0-9]+$/i;
@@ -44,10 +44,9 @@ export async function inspectProject(dir) {
 
   const audioDir = at(nonEmpty(data.audioDir) ?? './audio');
   const output = data.output !== null && typeof data.output === 'object' ? data.output : {};
-  const outputPath = resolve(
-    at(nonEmpty(output.dir) ?? CONFIG_DEFAULTS.output.dir),
-    nonEmpty(output.name) ?? CONFIG_DEFAULTS.output.name,
-  );
+  const outputDir = at(nonEmpty(output.dir) ?? CONFIG_DEFAULTS.output.dir);
+  const outputPath = resolve(outputDir, nonEmpty(output.name) ?? CONFIG_DEFAULTS.output.name);
+  const tracklistPath = resolve(outputDir, nonEmpty(output.tracklist) ?? CONFIG_DEFAULTS.output.tracklist);
 
   const references = await filesOrEmpty(join(dir, 'references'), STYLE_REF_EXTENSIONS);
   const styleBlockExists = await isFile(join(dir, 'STYLE_BLOCK.txt'));
@@ -68,7 +67,12 @@ export async function inspectProject(dir) {
     clip: { value: clipValue, path: clipPath, exists: clipPath ? await isFile(clipPath) : false },
     audioDir,
     audioCount: (await filesOrEmpty(audioDir, AUDIO_EXTENSIONS)).length,
-    output: { path: outputPath, exists: await isFile(outputPath) },
+    output: {
+      path: outputPath,
+      exists: await isFile(outputPath),
+      tracklistPath,
+      tracklistExists: await isFile(tracklistPath),
+    },
   };
 }
 
@@ -93,7 +97,7 @@ export function nextStep(s, { skipped = new Set() } = {}) {
 
   const missingClip = s.clip.value && !s.clip.exists ? `clip'teki dosya bulunamadı: ${s.clip.path}\n` : '';
 
-  const isCustomStylePending = s.style === 'custom-generated' && !s.styleBlockExists;
+  const isCustomStylePending = s.style === CUSTOM_STYLE_NAME && !s.styleBlockExists;
   if (isCustomStylePending) {
     return step('style-references', 'manual', 'Stil Referansı Bekleniyor',
       `Stil analizi için referans görsellerinizi şu klasöre koyun: ${join(s.dir, 'references')}\n` +
@@ -106,11 +110,7 @@ export function nextStep(s, { skipped = new Set() } = {}) {
       `Promptlar: ${s.promptsPath}`);
   }
 
-  const musicData = s.projectJson.data?.music;
-  const isMultiTrack = musicData && Array.isArray(musicData.tracks) && musicData.tracks.length > 0;
-  const musicCompleted = isMultiTrack
-    ? (musicData.status === 'completed' || musicData.status === 'completed_by_user' || musicData.tracks.every((t) => t.status === 'completed'))
-    : s.audioCount > 0;
+  const musicCompleted = isMusicCompleted(s);
 
   if (s.clip.exists && musicCompleted) {
     return step('build', 'auto', 'Montaj', `Klip: ${s.clip.value} · ${s.audioCount} parça\nÇıktı: ${s.output.path}`);
@@ -133,6 +133,22 @@ export function nextStep(s, { skipped = new Set() } = {}) {
   }
 
   return step('clip', 'manual', 'Klip bekleniyor', `${missingClip}videolar\\ altına klibi (.mp4) koy: ${join(s.dir, 'videolar')}`);
+}
+
+/**
+ * Müzik aşaması bitti mi? Parça planı varsa plan durumu (ya da tüm parçalar
+ * tamam), yoksa audio klasöründe en az bir dosya. nextStep ile web API ortak
+ * kullanır.
+ *
+ * @param {Awaited<ReturnType<typeof inspectProject>>} s
+ * @returns {boolean}
+ */
+export function isMusicCompleted(s) {
+  const musicData = s.projectJson.data?.music;
+  const isMultiTrack = musicData && Array.isArray(musicData.tracks) && musicData.tracks.length > 0;
+  return isMultiTrack
+    ? (musicData.status === 'completed' || musicData.status === 'completed_by_user' || musicData.tracks.every((t) => t.status === 'completed'))
+    : s.audioCount > 0;
 }
 
 /**
