@@ -393,3 +393,19 @@ Tekrar denenecekse bilinmesi gerekenler:
 - **Ölçüm (RTX 3050 Laptop 4GB, sürücü 566.07):** 60 sn parça ≈ 4.7 dk; bunun ~129 sn'si CPU↔GPU model taşıma, 65 sn diffusion (8 adım), ~20 sn tiled VAE decode. Dil modeli (LM) VRAM yüzünden otomatik kapalı.
 - **Bilinen uyumsuzluk:** UI (Haziran) `/generation_wrapper`'a 51 parametre gönderiyor, motor (Ağustos) 72 bekliyor — panelden üretim çalışmıyor. Test motorun REST API'siyle (`/release_task`, `/query_result`) yapıldı.
 - **UI'de yapılan yerel değişiklikler (commit'lenmedi):** backend ve Vite `127.0.0.1`'e kısıtlandı (`/api/auth/auto` parolasız token veriyor), `server\.env`'de rastgele `JWT_SECRET` + `ACESTEP_PATH`, `better-sqlite3` 11.10 → 12.11.1 (Node 24 hazır paketi).
+
+---
+
+## 17. Suno tarayıcı botu (Playwright) · ✅ YAZILDI (mock testli, canlı kabul kullanıcıda)
+
+`prep/providers/suno-browser-bot.js` — `SunoGenerateProvider` sözleşmesinin ikinci somut hali; sözleşme ve `suno-generate.js` değişmedi. `createSunoBrowserBot({ launchBrowser, cookie, notify, log, sleepFn, now, …timeouts })` → `{ name, generateSong, checkStatus, close }`.
+
+- **Oturum:** `SUNO_COOKIE` (`.env`, DevTools'taki `Cookie:` başlığı) → `.suno.com` cookie'leri olarak eklenir. Zincire `apiKey` olarak verilir (`resolveSunoCookie()`); böylece `SunoGenerateError` mesajlarından birebir silinir.
+- **Akış:** görünür Chromium (`LAUNCH_OPTIONS.headless=false`) → `suno.com/create` → Custom Mode → Style / (More Options →) Exclude styles / Title / Instrumental → Create → Create'ten önce ve sonraki `/song/<uuid>` bağlantılarının farkı = yeni clip'ler. `jobId = "uuid1,uuid2"`.
+- **checkStatus:** aynı sayfada her clip'in satır metni okunur; `m:ss` süre → done, hata metni → failed, aksi pending. Ses adresi `https://cdn1.suno.ai/<uuid>.mp3`. İndirme zincirde `suno-ingest.downloadAudio` ile.
+- **hCaptcha:** otomatik çözülmez. Görünürse `notify("captcha bekleniyor, elle çöz …")`, kaybolana kadar beklenir (10 dk). Captcha süresi clip bekleme süresinden düşülmez.
+- **Seçiciler (`SELECTORS`) canlı sitede DOĞRULANMADI** — ilk canlı denemede ayarlanacak tek yer burası.
+- **Bağımlılık:** `playwright` 1.63.0 (sabit). Tarayıcı ikilisi ayrıca: `npx playwright install chromium`.
+- **Canlı deneme:** `node scripts/suno-bot-try.js --style "<style>" --title "<başlık>" --negative "<exclude>"` (elle; `npm test`'e dahil değil).
+- **Testler:** `test/unit/suno-browser-bot.test.js` + `test/helpers/fake-playwright.js` (sahte Playwright, sanal saat; ağ/tarayıcı yok).
+- **Not:** `FORCE_COLOR=3` olan kabukta `regression-compare.test.js` "kırpma filtresi" testi renk kodları yüzünden düşüyor (bu işten bağımsız, önceden var); `FORCE_COLOR=0` ile 481/481.
