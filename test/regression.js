@@ -21,7 +21,6 @@
  * anlamsızdır, test en başta açık bir mesajla durur.
  */
 
-import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -32,8 +31,9 @@ import { after, before, describe, test } from 'node:test';
 
 import { ffmpeg } from '../core/ffmpeg.js';
 import { md5File } from '../core/files.js';
-import { DURATION_TOLERANCE, probe } from '../core/probe.js';
+import { probe } from '../core/probe.js';
 import { countFrames } from './helpers/fixtures.js';
+import { assertAlbumUnchanged, CHECKS, TOLERANCE } from './helpers/regression-compare.js';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const BASELINE_PATH = join(REPO, 'test', 'baseline.json');
@@ -54,17 +54,6 @@ const DEFAULT_CONFIG = {
   names: { 2: 'Before Light' },
   video: { cropBottom: 150, aspect: '16:9', crf: 16, preset: 'slow', fadeOut: 5, crossfadeSeconds: 0 },
   audio: { bitrate: '192k', ambientOffsetDb: -18.8 },
-};
-
-const TOLERANCE = {
-  durationSeconds: DURATION_TOLERANCE,
-  trackSeconds: 0.001,
-  sizeRatio: 0.02,
-  lufs: 0.5,
-  truePeakDb: 0.5,
-  ambientLufs: 0.5,
-  frameAverage: 1.5,
-  loopSsim: 0.01,
 };
 
 /** Ambient ayrıştırma kesitleri (sn): albümün ortası ve en sessiz noktası (Somnambule). */
@@ -210,13 +199,7 @@ async function buildAndMeasure(config, workDir) {
 }
 
 // ------------------------------------------------------------------ testler
-
-const near = (actual, expected, tolerance, label) => {
-  assert.ok(
-    Math.abs(actual - expected) <= tolerance,
-    `${label}: ${actual}, baseline ${expected} (tolerans ±${tolerance})`,
-  );
-};
+// Karşılaştırmalar test/helpers/regression-compare.js'te (build'siz sınanıyor).
 
 describe('regresyon (gerçek albüm)', { skip: ALBUM ? false : 'LOFI_ALBUM_DIR tanımlı değil' }, () => {
   let workDir;
@@ -232,13 +215,7 @@ describe('regresyon (gerçek albüm)', { skip: ALBUM ? false : 'LOFI_ALBUM_DIR t
     config = baseline?.config ?? DEFAULT_CONFIG;
 
     const fingerprint = await fingerprintAlbum(config);
-    if (!UPDATE) {
-      assert.deepEqual(
-        fingerprint, baseline.album,
-        'Albüm dosyaları baseline üretildiğinden beri değişmiş — karşılaştırma anlamsız. ' +
-        'Bilerek değiştirdiysen --update ile yeniden üret.',
-      );
-    }
+    if (!UPDATE) assertAlbumUnchanged(fingerprint, baseline);
 
     workDir = await mkdtemp(join(tmpdir(), 'lofi-regression-'));
     measured = await buildAndMeasure(config, workDir);
@@ -281,80 +258,9 @@ describe('regresyon (gerçek albüm)', { skip: ALBUM ? false : 'LOFI_ALBUM_DIR t
     if (workDir) await rm(workDir, { recursive: true, force: true });
   });
 
-  test('çıktı dosyaları ve adımlar', () => {
-    const e = baseline.expect;
-    assert.deepEqual(measured.outputs, e.outputs);
-    assert.deepEqual(measured.report.stepOrder, e.report.stepOrder);
-    assert.deepEqual(measured.report.warnings, e.report.warnings);
-    assert.equal(measured.report.sortSource, e.report.sortSource);
-    assert.equal(measured.report.ambient, e.report.ambient);
-  });
-
-  test('ses: parça süreleri ve damgalar birebir', () => {
-    const e = baseline.expect.report;
-    assert.equal(measured.report.tracks.length, e.tracks.length);
-    measured.report.tracks.forEach((t, i) => {
-      assert.equal(t.file, e.tracks[i].file, `parça ${i + 1} dosyası`);
-      near(t.duration, e.tracks[i].duration, TOLERANCE.trackSeconds, `${t.file} süresi`);
-      near(t.startSeconds, e.tracks[i].startSeconds, TOLERANCE.trackSeconds, `${t.file} başlangıcı`);
-    });
-    near(measured.report.musicDuration, e.musicDuration, TOLERANCE.durationSeconds, 'müzik süresi');
-  });
-
-  test('tracklist metni birebir', () => {
-    assert.equal(measured.tracklistText, baseline.expect.tracklistText);
-    assert.deepEqual(measured.report.tracklist, baseline.expect.report.tracklist);
-  });
-
-  test('video: kırpma, base, montaj planı ve birleşme noktaları', () => {
-    const e = baseline.expect.report;
-    assert.equal(measured.report.cropFilter, e.cropFilter);
-    assert.deepEqual(measured.report.base, e.base);
-    near(measured.report.loopSsim, e.loopSsim, TOLERANCE.loopSsim, 'loop SSIM');
-    assert.deepEqual(measured.report.assemble, e.assemble);
-  });
-
-  test('nihai dosya: akışlar, süre, kare, boyut', () => {
-    const o = measured.output;
-    const e = baseline.expect.output;
-    for (const key of ['width', 'height', 'fps', 'videoCodec', 'audioCodec', 'sampleRate', 'channels', 'frames']) {
-      assert.equal(o[key], e[key], key);
-    }
-    near(o.duration, e.duration, TOLERANCE.durationSeconds, 'süre');
-    near(o.sizeBytes / e.sizeBytes, 1, TOLERANCE.sizeRatio, 'boyut oranı');
-  });
-
-  test('ses seviyesi: tam dosya ve ambient adımı', () => {
-    const l = measured.loudness;
-    const e = baseline.expect.loudness;
-    near(l.integratedLufs, e.integratedLufs, TOLERANCE.lufs, 'tam dosya I (LUFS)');
-    near(l.rangeLu, e.rangeLu, TOLERANCE.lufs, 'LRA');
-    near(l.truePeakDb, e.truePeakDb, TOLERANCE.truePeakDb, 'true peak');
-
-    const m = measured.report.ambientMix;
-    const em = baseline.expect.report.ambientMix;
-    assert.equal(m === null, em === null, 'ambient adımı var/yok');
-    if (m) {
-      near(m.musicI, em.musicI, TOLERANCE.lufs, 'müzik I');
-      assert.equal(m.targetI, em.targetI, 'ambient hedefi');
-      near(m.verificationAmbientI, em.verificationAmbientI, TOLERANCE.lufs, '03 doğrulama ambient');
-      near(m.verificationMixI, em.verificationMixI, TOLERANCE.lufs, '03 doğrulama karışım');
-    }
-  });
-
-  test('ayrıştırılmış ambient (aynı build\'in montajına karşı)', () => {
-    for (const [t, expected] of Object.entries(baseline.expect.ambientIsolatedLufs)) {
-      near(measured.ambientIsolatedLufs[t], expected, TOLERANCE.ambientLufs, `${t}. sn ambient`);
-    }
-  });
-
-  test('görüntü: kare Y/U/V ortalamaları', () => {
-    for (const [t, expected] of Object.entries(baseline.expect.frameAverages)) {
-      for (const channel of ['Y', 'U', 'V']) {
-        near(measured.frameAverages[t][channel], expected[channel], TOLERANCE.frameAverage, `${t}. sn ${channel}`);
-      }
-    }
-  });
+  for (const check of CHECKS) {
+    test(check.name, () => check.run(measured, baseline));
+  }
 
   test('süreler (bilgi)', (t) => {
     t.diagnostic(`adımlar (sn): ${JSON.stringify(measured.stepSeconds)} · toplam ${measured.totalSeconds} sn`);
