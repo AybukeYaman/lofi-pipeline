@@ -39,7 +39,8 @@ export const STYLE_FIELDS = [
   { key: 'shading', label: 'Shading' },
 ];
 
-const ROOT_KEYS = ['name', 'styleBlock', 'suggestedAmbient', 'motionHints'];
+/** `music`: opsiyonel albüm kimliği bloğu — prep/album-prompt.js okur ve doğrular. */
+const ROOT_KEYS = ['name', 'styleBlock', 'suggestedAmbient', 'motionHints', 'music'];
 
 /**
  * Loop'ta kapanmayan yönlü hareketler (HANDOFF bölüm 4, Faz 3). Uyarıdır:

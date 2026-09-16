@@ -158,6 +158,42 @@ export async function parseSunoUrl(url, fetchFn = fetch) {
 }
 
 /**
+ * İndirme adresinin uzantısı: .m4a değilse .mp3.
+ * @param {string} audioUrl
+ * @returns {'.m4a'|'.mp3'}
+ */
+export function audioExtension(audioUrl) {
+  return extname(new URL(audioUrl).pathname).toLowerCase() === '.m4a' ? '.m4a' : '.mp3';
+}
+
+/**
+ * Tek bir ses dosyasını indirip diske yazar (ingest ve albüm zinciri ortak kullanır).
+ *
+ * @param {{ url: string, localPath: string, label: string }} params label hata mesajı öneki ("Parça 3 (Başlık)")
+ * @param {typeof fetch} [fetchFn]
+ * @returns {Promise<string>} yazılan yol
+ * @throws {SunoIngestError}
+ */
+export async function downloadAudio({ url, localPath, label }, fetchFn = fetch) {
+  let audioResponse;
+  try {
+    audioResponse = await fetchFn(url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+  } catch (cause) {
+    throw new SunoIngestError(`${label} indirilemedi: ${cause.message}`);
+  }
+
+  if ([401, 403].includes(audioResponse.status)) {
+    throw new SunoIngestError(`${label}: ${NOT_PUBLIC_HINT} (HTTP ${audioResponse.status})`, { notPublic: true });
+  }
+  if (!audioResponse.ok) {
+    throw new SunoIngestError(`${label} indirme yanıtı başarısız (HTTP ${audioResponse.status}).`);
+  }
+
+  await writeFile(localPath, Buffer.from(await audioResponse.arrayBuffer()));
+  return localPath;
+}
+
+/**
  * Public Suno playlist veya song linkinden metadata ve ses dosyalarını indirir.
  * Uzantı indirme adresinden gelir (.mp3 ya da .m4a).
  *
@@ -186,27 +222,10 @@ export async function ingestSunoUrl({ url, outputDir } = {}, options = {}) {
     const index = i + 1;
     const prefix = String(index).padStart(2, '0');
     const safeTitle = sanitizeFilename(clip.title);
-    const extension = extname(new URL(clip.audioUrl).pathname).toLowerCase() === '.m4a' ? '.m4a' : '.mp3';
-    const filename = `${prefix}-${safeTitle}${extension}`;
+    const filename = `${prefix}-${safeTitle}${audioExtension(clip.audioUrl)}`;
     const localPath = join(outputDir, filename);
 
-    let audioResponse;
-    try {
-      audioResponse = await fetchFn(clip.audioUrl, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
-    } catch (cause) {
-      throw new SunoIngestError(`Parça ${index} (${clip.title}) indirilemedi: ${cause.message}`);
-    }
-
-    if ([401, 403].includes(audioResponse.status)) {
-      throw new SunoIngestError(`Parça ${index} (${clip.title}): ${NOT_PUBLIC_HINT} (HTTP ${audioResponse.status})`, { notPublic: true });
-    }
-    if (!audioResponse.ok) {
-      throw new SunoIngestError(`Parça ${index} (${clip.title}) indirme yanıtı başarısız (HTTP ${audioResponse.status}).`);
-    }
-
-    const arrayBuffer = await audioResponse.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    await writeFile(localPath, buffer);
+    await downloadAudio({ url: clip.audioUrl, localPath, label: `Parça ${index} (${clip.title})` }, fetchFn);
 
     resultTracks.push({
       index,

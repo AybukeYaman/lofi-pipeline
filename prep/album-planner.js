@@ -1,15 +1,16 @@
 /**
- * Albüm konsept üreticisi (11b).
- * Gemini API ile konsept + track sayısı alıp başlık ve atmosfer arkı üretir.
- * Üretilen değişkenler 11a fonksiyonlarından (buildStylePrompt, buildExcludePrompt) geçirilerek
- * Suno prompt'ları hazırlanır.
+ * Albüm konsept üreticisi (11b, 11f'de daraltıldı).
+ *
+ * Gemini YALNIZCA parça başlığı ve kısa atmosfer kelimeleri üretir. Yay
+ * (album-arc.js) ve Suno stil dizesi (album-prompt.js) deterministik kodda
+ * kalır — LLM asla ham Suno prompt'u yazmaz. Birleştirme: prep/album-chain.js.
  */
 
-import { generateContent, GeminiError } from './gemini.js';
-import { loadStyle } from './styles.js';
-import { buildStylePrompt } from './style-builder.js';
-import { buildExcludePrompt } from './style-exclude.js';
+import { describeArcPhases, energyModifiers, phaseFor } from './album-arc.js';
 import { AlbumPlanError } from './album-errors.js';
+import { generateContent, GeminiError } from './gemini.js';
+
+export const MAX_TRACKS = 20;
 
 const ALBUM_RESPONSE_SCHEMA = {
   type: 'OBJECT',
@@ -23,14 +24,6 @@ const ALBUM_RESPONSE_SCHEMA = {
           index: { type: 'INTEGER' },
           title: { type: 'STRING' },
           atmosphere: { type: 'STRING' },
-          additionalMoods: {
-            type: 'ARRAY',
-            items: { type: 'STRING' },
-          },
-          additionalInstruments: {
-            type: 'ARRAY',
-            items: { type: 'STRING' },
-          },
         },
         required: ['index', 'title', 'atmosphere'],
       },
@@ -40,68 +33,75 @@ const ALBUM_RESPONSE_SCHEMA = {
 };
 
 /**
- * Gemini ile albüm konsepti ve track listesi planlar, 11a filtresinden geçirir.
+ * Gemini'ye giden metin. Saf — test edilebilir.
+ *
+ * @param {{ concept: string, trackCount: number, styleContext?: string }} input
+ * @returns {string}
+ */
+export function buildPlannerPrompt({ concept, trackCount, styleContext }) {
+  const slots = Array.from({ length: trackCount }, (_, i) => {
+    const phase = phaseFor(i, trackCount);
+    const { tempo, density } = energyModifiers(phase.energy);
+    return `Track ${i + 1}: ${phase.name} (${tempo}, ${density})`;
+  }).join('\n');
+
+  return `You are naming the tracks of a ${trackCount}-track instrumental lofi album around the concept: "${concept}".
+${styleContext ? `Album sound (fixed, do not describe it again): ${styleContext}\n` : ''}
+The album follows a night-to-morning energy arc. The quietest, most still moment is exactly in the middle (trough); the album opens moderately, sinks, then rises toward a warmer, brighter resolution:
+${describeArcPhases()}
+
+Each track's position on the arc is already fixed:
+${slots}
+
+For each track return:
+- title: a short evocative title (max 60 characters), unique within the album, no quotes or brackets
+- atmosphere: 2 to 5 English words describing the scene/emotion of that moment, matching its arc phase
+
+Do NOT mention genre, instruments, tempo, vocals or production in the atmosphere. Do NOT write music prompts.`;
+}
+
+/** LLM metnini stil dizesine güvenle girecek hale getirir (meta etiket, fazla boşluk). */
+export function cleanIdeaText(value) {
+  if (typeof value !== 'string') return '';
+  return value.replace(/[[\]{}<>"]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Gemini ile parça başlıkları ve atmosferleri.
  *
  * @param {object} params
- * @param {string} params.concept - Albüm konusu/konsepti
- * @param {string} params.styleName - Stil adı (styles/<name>.json okumak için)
- * @param {number} [params.trackCount=8] - Üretilecek parça sayısı (1-20 arası)
+ * @param {string} params.concept
+ * @param {number} params.trackCount 1..MAX_TRACKS
+ * @param {string} [params.styleContext] albüm DNA'sı — yalnızca bağlam olarak verilir
  * @param {object} [options]
- * @param {string} [options.stylesDir] - Stil klasör yolu
- * @param {typeof fetch} [options.fetchFn] - Mock/Custom fetch
+ * @param {typeof fetch} [options.fetchFn]
  * @param {typeof setTimeout} [options.sleepFn]
- * @param {string} [options.apiKey] - Gemini API Key
- * @param {string} [options.model] - Gemini Model adı
+ * @param {string} [options.apiKey] Gemini API key
+ * @param {string} [options.model]
  * @param {object} [options.env]
- * @returns {Promise<{ concept: string, styleName: string, albumTitle: string, tracks: Array<{ index: number, title: string, atmosphere: string, stylePrompt: string, excludePrompt: string }> }>}
+ * @returns {Promise<{ albumTitle: string, tracks: Array<{ index: number, title: string, atmosphere: string }> }>}
  * @throws {AlbumPlanError}
  */
-export async function planAlbum({ concept, styleName, trackCount = 8 } = {}, options = {}) {
+export async function planTrackIdeas({ concept, trackCount, styleContext } = {}, options = {}) {
   if (typeof concept !== 'string' || concept.trim() === '') {
     throw new AlbumPlanError('Albüm konsepti boş olamaz.');
   }
-
-  if (typeof styleName !== 'string' || styleName.trim() === '') {
-    throw new AlbumPlanError('Stil adı belirtilmeli.');
+  if (!Number.isInteger(trackCount) || trackCount < 1 || trackCount > MAX_TRACKS) {
+    throw new AlbumPlanError(`Parça sayısı 1 ile ${MAX_TRACKS} arasında olmalı, verilen: ${trackCount}`);
   }
-
-  const numTracks = Number(trackCount);
-  if (isNaN(numTracks) || numTracks < 1 || numTracks > 20) {
-    throw new AlbumPlanError(`Parça sayısı 1 ile 20 arasında olmalı, verilen: ${trackCount}`);
-  }
-
-  let styleObj;
-  try {
-    const loaded = await loadStyle(styleName, { dir: options.stylesDir });
-    styleObj = loaded.style;
-  } catch (cause) {
-    throw new AlbumPlanError(`Stil okunamadı (${styleName}): ${cause.message}`);
-  }
-
-  const systemPrompt = `You are a music producer planning a ${numTracks}-track Lofi album around the concept: "${concept}".
-Style Context: Genre: ${styleObj.genre || 'lo-fi'}, Default Instruments: ${(styleObj.instruments || []).join(', ')}.
-
-Create a cohesive sequence of ${numTracks} track titles and emotional atmospheres that follow a natural arc (intro, build, peak, wind-down, outro).
-For each track, suggest optional additional moods or instruments that fit that specific track's atmosphere.`;
-
-  const generationConfig = {
-    responseMimeType: 'application/json',
-    responseSchema: ALBUM_RESPONSE_SCHEMA,
-    temperature: 0.7,
-  };
 
   let responseData;
   try {
     responseData = await generateContent({
-      contents: [{ parts: [{ text: systemPrompt }] }],
+      contents: [{ parts: [{ text: buildPlannerPrompt({ concept, trackCount, styleContext }) }] }],
       model: options.model,
-      generationConfig,
-      apiKey: options.apiKey,
-      options: {
-        fetchFn: options.fetchFn,
-        sleepFn: options.sleepFn,
-        env: options.env,
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: ALBUM_RESPONSE_SCHEMA,
+        temperature: 0.7,
       },
+      apiKey: options.apiKey,
+      options: { fetchFn: options.fetchFn, sleepFn: options.sleepFn, env: options.env },
     });
   } catch (cause) {
     if (cause instanceof GeminiError) {
@@ -125,45 +125,22 @@ For each track, suggest optional additional moods or instruments that fit that s
   if (!parsed || !Array.isArray(parsed.tracks) || parsed.tracks.length === 0) {
     throw new AlbumPlanError('Gemini yanıtında tracks listesi bulunamadı.');
   }
-
-  const tracks = [];
-  const baseExclude = buildExcludePrompt(styleObj);
-
-  for (let i = 0; i < parsed.tracks.length; i++) {
-    const t = parsed.tracks[i];
-    const index = i + 1;
-    const title = t.title || `Track ${index}`;
-    const atmosphere = t.atmosphere || concept;
-
-    // Stil nesnesinin bir kopyasını oluştur ve varyasyonları ekle
-    const trackStyleObj = {
-      ...styleObj,
-      mood: [...(styleObj.mood || [])],
-      instruments: [...(styleObj.instruments || [])],
-    };
-
-    if (Array.isArray(t.additionalMoods)) {
-      trackStyleObj.mood.push(...t.additionalMoods.filter((m) => typeof m === 'string'));
-    }
-    if (Array.isArray(t.additionalInstruments)) {
-      trackStyleObj.instruments.push(...t.additionalInstruments.filter((inst) => typeof inst === 'string'));
-    }
-
-    const stylePrompt = buildStylePrompt(trackStyleObj);
-
-    tracks.push({
-      index,
-      title,
-      atmosphere,
-      stylePrompt,
-      excludePrompt: baseExclude,
-    });
+  // Yay konumları parça sayısına göre sabitlendi; eksik/fazla liste yayı kaydırır.
+  if (parsed.tracks.length !== trackCount) {
+    throw new AlbumPlanError(`Gemini ${trackCount} yerine ${parsed.tracks.length} parça döndürdü.`);
   }
 
+  const tracks = parsed.tracks.map((t, i) => {
+    const index = i + 1;
+    return {
+      index,
+      title: cleanIdeaText(t?.title) || `Track ${index}`,
+      atmosphere: cleanIdeaText(t?.atmosphere) || cleanIdeaText(concept),
+    };
+  });
+
   return {
-    concept,
-    styleName,
-    albumTitle: parsed.albumTitle || concept,
+    albumTitle: cleanIdeaText(parsed.albumTitle) || concept.trim(),
     tracks,
   };
 }

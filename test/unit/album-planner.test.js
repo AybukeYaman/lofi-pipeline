@@ -1,89 +1,78 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { planAlbum } from '../../prep/album-planner.js';
+import { buildPlannerPrompt, cleanIdeaText, planTrackIdeas } from '../../prep/album-planner.js';
 import { AlbumPlanError } from '../../prep/album-errors.js';
 
-test('planAlbum - eksik/geçersiz parametreler AlbumPlanError fırlatır', async () => {
-  await assert.rejects(
-    () => planAlbum({ concept: '', styleName: 'anime-cel' }),
-    (err) => err instanceof AlbumPlanError && err.message.includes('Albüm konsepti boş olamaz')
-  );
-
-  await assert.rejects(
-    () => planAlbum({ concept: 'Night Walk', styleName: '' }),
-    (err) => err instanceof AlbumPlanError && err.message.includes('Stil adı belirtilmeli')
-  );
-
-  await assert.rejects(
-    () => planAlbum({ concept: 'Night Walk', styleName: 'anime-cel', trackCount: 0 }),
-    (err) => err instanceof AlbumPlanError && err.message.includes('Parça sayısı 1 ile 20 arasında olmalı')
-  );
-
-  await assert.rejects(
-    () => planAlbum({ concept: 'Night Walk', styleName: 'olmayan-stil' }),
-    (err) => err instanceof AlbumPlanError && err.message.includes('Stil okunamadı')
-  );
-});
-
-test('planAlbum - sahte fetchFn ile başarılı albüm planlaması ve 11a entegrasyonu', async () => {
-  const fakeGeminiResponse = {
-    candidates: [
-      {
-        content: {
-          parts: [
-            {
-              text: JSON.stringify({
-                albumTitle: 'Late Night Studying',
-                tracks: [
-                  {
-                    index: 1,
-                    title: 'Intro Reflection',
-                    atmosphere: 'Calm opening with soft rain',
-                    additionalMoods: ['peaceful'],
-                    additionalInstruments: ['soft flute'],
-                  },
-                  {
-                    index: 2,
-                    title: 'Midnight Coffee',
-                    atmosphere: 'Warm and cozy focus',
-                    additionalMoods: ['cozy'],
-                  },
-                ],
-              }),
-            },
-          ],
-        },
-      },
-    ],
-  };
-
-  const fakeFetch = async (url, options) => {
-    assert.equal(options.headers['x-goog-api-key'], 'test-key');
+/** Gemini yanıtını taklit eden sahte fetch; gönderilen gövdeyi kaydeder. */
+function fakeGemini(payload, sent = []) {
+  return async (url, options) => {
+    sent.push({ url, headers: options.headers, body: JSON.parse(options.body) });
     return {
       ok: true,
       status: 200,
-      text: async () => JSON.stringify(fakeGeminiResponse),
+      text: async () => JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(payload) }] } }] }),
     };
   };
+}
 
-  const result = await planAlbum(
-    { concept: 'Late Night Studying', styleName: 'anime-cel', trackCount: 2 },
-    { apiKey: 'test-key', fetchFn: fakeFetch }
+const ideas = (n) => Array.from({ length: n }, (_, i) => ({ index: i + 1, title: `T${i + 1}`, atmosphere: `mood ${i + 1}` }));
+
+test('planTrackIdeas - eksik/geçersiz parametreler AlbumPlanError fırlatır', async () => {
+  await assert.rejects(() => planTrackIdeas({ concept: '', trackCount: 3 }), /Albüm konsepti boş olamaz/);
+  await assert.rejects(() => planTrackIdeas({ concept: 'Night', trackCount: 0 }), AlbumPlanError);
+  await assert.rejects(() => planTrackIdeas({ concept: 'Night', trackCount: 21 }), AlbumPlanError);
+  await assert.rejects(() => planTrackIdeas({ concept: 'Night', trackCount: 2.5 }), AlbumPlanError);
+});
+
+test('planTrackIdeas - yalnızca başlık ve atmosfer döner, metinleri temizler', async () => {
+  const sent = [];
+  const fetchFn = fakeGemini({
+    albumTitle: 'Late Night',
+    tracks: [
+      { index: 1, title: '  "Intro"  [Vocals] ', atmosphere: 'calm   rain', additionalInstruments: ['flute'] },
+      { index: 2, title: '', atmosphere: '' },
+    ],
+  }, sent);
+
+  const result = await planTrackIdeas({ concept: 'Late Night', trackCount: 2 }, { apiKey: 'test-key', fetchFn });
+
+  assert.equal(sent[0].headers['x-goog-api-key'], 'test-key');
+  assert.deepEqual(result, {
+    albumTitle: 'Late Night',
+    tracks: [
+      { index: 1, title: 'Intro Vocals', atmosphere: 'calm rain' },
+      { index: 2, title: 'Track 2', atmosphere: 'Late Night' },
+    ],
+  });
+});
+
+test('planTrackIdeas - parça sayısı tutmazsa yay kaymasın diye hata verir', async () => {
+  await assert.rejects(
+    () => planTrackIdeas({ concept: 'Night', trackCount: 3 }, { apiKey: 'k', fetchFn: fakeGemini({ albumTitle: 'x', tracks: ideas(2) }) }),
+    /3 yerine 2 parça/,
   );
+});
 
-  assert.equal(result.concept, 'Late Night Studying');
-  assert.equal(result.styleName, 'anime-cel');
-  assert.equal(result.albumTitle, 'Late Night Studying');
-  assert.equal(result.tracks.length, 2);
+test('planTrackIdeas - bozuk yanıtlar AlbumPlanError olur', async () => {
+  await assert.rejects(
+    () => planTrackIdeas({ concept: 'Night', trackCount: 1 }, { apiKey: 'k', fetchFn: fakeGemini({ albumTitle: 'x', tracks: [] }) }),
+    /tracks listesi bulunamadı/,
+  );
+});
 
-  // Track 1 kontrolleri
-  assert.equal(result.tracks[0].index, 1);
-  assert.equal(result.tracks[0].title, 'Intro Reflection');
-  assert.ok(result.tracks[0].stylePrompt.includes('soft flute'));
-  assert.ok(result.tracks[0].stylePrompt.includes('peaceful'));
+test('buildPlannerPrompt - yayı album-arc.js tarif eder, ortada trough vardır', () => {
+  const prompt = buildPlannerPrompt({ concept: 'Night', trackCount: 5, styleContext: 'lofi hip hop' });
 
-  // Track 2 kontrolleri
-  assert.equal(result.tracks[1].index, 2);
-  assert.equal(result.tracks[1].title, 'Midnight Coffee');
-  assert.ok(result.tracks[1].stylePrompt.includes('cozy'));
+  assert.match(prompt, /Track 1: opening/);
+  assert.match(prompt, /Track 3: trough \(very slow tempo, spacious\)/);
+  assert.match(prompt, /Track 5: resolution/);
+  assert.match(prompt, /- trough \(40-60% of the album\)/);
+  assert.match(prompt, /lofi hip hop/);
+  // Eski, yanlış yay (ortada zirve) artık yok.
+  assert.doesNotMatch(prompt, /peak/i);
+});
+
+test('cleanIdeaText - meta etiket karakterlerini ve fazla boşluğu siler', () => {
+  assert.equal(cleanIdeaText(' [No Vocals] {x} <y> "z" '), 'No Vocals x y z');
+  assert.equal(cleanIdeaText(42), '');
 });

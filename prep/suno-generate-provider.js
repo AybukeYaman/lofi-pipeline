@@ -14,12 +14,16 @@
  *
  *   provider.generateSong(request, context) => Promise<{ jobId: string }>
  *     request : { prompt: string, style?: string, title?: string,
- *                 instrumental?: boolean, model?: string }
+ *                 instrumental?: boolean, model?: string,
+ *                 negativeTags?: string, styleWeight?: number (0-1),
+ *                 weirdness?: number (0-1) }
  *     context : { apiKey: string, signal?: AbortSignal }
  *
  *   provider.checkStatus(query, context) => Promise<RawStatus>
  *     query    : { jobId: string }
- *     RawStatus: { status: string, audioUrl?: string, error?: string, raw?: unknown }
+ *     RawStatus: { status: string, audioUrl?: string, audioUrls?: string[],
+ *                  error?: string, raw?: unknown }
+ *     Suno üretim başına genelde 2 varyant döndürür: hepsi audioUrls'te, sırayla.
  *
  * Sağlayıcı hata durumunda SunoGenerateError fırlatır; geçici hatalarda
  * `retryable: true` verir ki waitForSong backoff ile beklemeye devam etsin.
@@ -72,18 +76,23 @@ export function normalizeStatus(value) {
   return STATUS_ALIASES.get(value.trim().toLowerCase()) ?? STATUS.PENDING;
 }
 
+const isHttpUrl = (value) => typeof value === 'string' && /^https?:\/\//.test(value);
+
 /**
  * Sağlayıcının ham cevabını iş mantığının beklediği biçime çevirir.
  * 'done' ama audioUrl yoksa iş henüz kullanılabilir değildir → pending.
+ * audioUrl = ilk varyant; audioUrls = tüm geçerli varyantlar (tekrarsız, sıralı).
  *
- * @param {{ status?: unknown, audioUrl?: unknown, error?: unknown }} raw
- * @returns {{ status: 'pending'|'done'|'failed', audioUrl: string | null, error: string | null }}
+ * @param {{ status?: unknown, audioUrl?: unknown, audioUrls?: unknown, error?: unknown }} raw
+ * @returns {{ status: 'pending'|'done'|'failed', audioUrl: string | null, audioUrls: string[], error: string | null }}
  */
 export function normalizeStatusResult(raw = {}) {
-  const audioUrl = typeof raw.audioUrl === 'string' && /^https?:\/\//.test(raw.audioUrl) ? raw.audioUrl : null;
+  const candidates = [raw.audioUrl, ...(Array.isArray(raw.audioUrls) ? raw.audioUrls : [])];
+  const audioUrls = [...new Set(candidates.filter(isHttpUrl))];
+  const audioUrl = audioUrls[0] ?? null;
   let status = normalizeStatus(raw.status);
   if (status === STATUS.DONE && !audioUrl) status = STATUS.PENDING;
-  return { status, audioUrl, error: typeof raw.error === 'string' && raw.error ? raw.error : null };
+  return { status, audioUrl, audioUrls, error: typeof raw.error === 'string' && raw.error ? raw.error : null };
 }
 
 /**

@@ -7,6 +7,7 @@
  * 3. Her track title benzersizdir ve her prompt kendi title'ını ve [Instrumental] etiketini içerir.
  */
 
+import { describeArcPhases, energyModifiers, phaseFor } from './album-arc.js';
 import { generateContent, getApiKey } from './gemini.js';
 
 export class MusicPlanError extends Error {
@@ -43,7 +44,9 @@ Do not merely replace adjectives between tracks.
 Do not use generic titles unrelated to the concept.
 
 Think about the album as one continuous experience from the first track to the final track.
-The final track should provide an appropriate sense of resolution based on the concept.
+Follow this energy arc (night to morning): the quietest, most still track sits exactly in the middle,
+and the album rises toward a warmer, brighter resolution at the end:
+${describeArcPhases()}
 
 Return JSON in the exact format:
 {
@@ -68,31 +71,31 @@ const CONCEPT_DICTIONARIES = [
   {
     keywords: ['night', 'sleep', '2:17', 'midnight', 'asleep', 'dark', 'insomnia', 'gece', 'uyku'],
     scenes: [
-      { arc: 'Intro / Setting Scene', titles: ['2:17 AM', 'The Quiet Hour', 'Lights Across the Bay', 'Midnight Arrival'], instruments: 'warm vintage Rhodes, vinyl crackle, distant city ambient hum' },
-      { arc: 'Solitude & Quiet', titles: ['The Apartment Is Quiet', 'Streetlights Through the Blinds', 'Clock Ticking in the Hall', 'Ceiling Shadows'], instruments: 'mellow upright piano, tape pitch-drift, deep sub-bass pulse' },
-      { arc: 'Memories & Thoughts', titles: ['Unsent Messages', 'Coffee Cooling on the Desk', 'Faded Photographs', 'Echoes of Earlier'], instruments: 'delicate acoustic guitar, soft brush snare, subtle rain texture' },
-      { arc: 'Late Hour Wandering', titles: ['Empty Avenue', 'Night Bus Home', 'Quiet Distances', 'Solitary Walk'], instruments: 'spacey analog synth pads, muted trumpet accents, relaxed hip-hop groove' },
-      { arc: 'Resolution & Rest', titles: ['Drifting Off', 'Before Dawn', 'First Light', 'Peaceful Silence'], instruments: 'soft decaying piano chords fading into quiet ambient room tone' },
+      { phase: 'opening', arc: 'Opening — Setting the Scene', titles: ['2:17 AM', 'The Quiet Hour', 'Lights Across the Bay', 'Midnight Arrival'], instruments: 'warm vintage Rhodes, vinyl crackle, distant city ambient hum' },
+      { phase: 'descent', arc: 'Descent — Solitude & Quiet', titles: ['The Apartment Is Quiet', 'Streetlights Through the Blinds', 'Clock Ticking in the Hall', 'Ceiling Shadows'], instruments: 'mellow upright piano, tape pitch-drift, deep sub-bass pulse' },
+      { phase: 'trough', arc: 'Trough — Deepest Stillness', titles: ['Unsent Messages', 'Coffee Cooling on the Desk', 'Faded Photographs', 'Echoes of Earlier'], instruments: 'sparse felt piano, long sustained pads, faint rain texture' },
+      { phase: 'ascent', arc: 'Ascent — Late Hour Wandering', titles: ['Empty Avenue', 'Night Bus Home', 'Quiet Distances', 'Solitary Walk'], instruments: 'spacey analog synth pads, muted trumpet accents, relaxed hip-hop groove' },
+      { phase: 'resolution', arc: 'Resolution — First Light', titles: ['Before Dawn', 'First Light', 'Morning Window', 'Waking Slowly'], instruments: 'warm brighter piano chords, gentle groove returning, soft morning ambience' },
     ],
   },
   {
     keywords: ['tokyo', 'neon', 'city', 'japan', 'street', 'train', 'vending', 'rainy', 'sokak'],
     scenes: [
-      { arc: 'Arrival in Neon', titles: ['Shinjuku Neon Rain', 'Midnight Vending Machine', 'Last Train to Shibuya', 'Crosswalk Reflection'], instruments: 'dusty lo-fi keys, warm synth bass, soft rain field recordings' },
-      { arc: 'Alleyways & Lights', titles: ['Lanterns in Omoide Yokocho', 'Under the Railway Track', 'Quiet Izakaya Glow', 'Rooftop Over Looking Tokyo'], instruments: 'mellow electric piano, gentle koto-inspired synth motif, relaxed boom-bap beat' },
-      { arc: 'Night City Glides', titles: ['Yamanote Line Loop', 'Neon Reflections on Wet Asphalt', 'Akihabara Side Alley', 'Distant Highway Hum'], instruments: 'tape-saturated Rhodes, subtle vinyl crackle, soft rimshot rhythm' },
-      { arc: 'Inner Thoughts in the City', titles: ['Convenience Store Coffee', 'Tower Lights Distant', 'Tokyo Fog at 3 AM', 'Sleepless In Shibuya'], instruments: 'warm acoustic guitar plucks, sub-bass warmth, ambient city soundscape' },
-      { arc: 'Morning Light over Skyscraper', titles: ['Sunrise over Sumida', 'Tokyo Morning Mist', 'Station Gates Opening', 'New Day Awakening'], instruments: 'peaceful piano arpeggio, soft pad wash, gentle shaker rhythm' },
+      { phase: 'opening', arc: 'Opening — Arrival in Neon', titles: ['Shinjuku Neon Rain', 'Midnight Vending Machine', 'Last Train to Shibuya', 'Crosswalk Reflection'], instruments: 'dusty lo-fi keys, warm synth bass, soft rain field recordings' },
+      { phase: 'descent', arc: 'Descent — Alleyways & Lights', titles: ['Lanterns in Omoide Yokocho', 'Under the Railway Track', 'Quiet Izakaya Glow', 'Rooftop Over Looking Tokyo'], instruments: 'mellow electric piano, gentle koto-inspired synth motif, relaxed boom-bap beat' },
+      { phase: 'trough', arc: 'Trough — Inner Thoughts in the City', titles: ['Convenience Store Coffee', 'Tower Lights Distant', 'Tokyo Fog at 3 AM', 'Sleepless In Shibuya'], instruments: 'sparse acoustic guitar plucks, sub-bass warmth, distant city soundscape' },
+      { phase: 'ascent', arc: 'Ascent — Night City Glides', titles: ['Yamanote Line Loop', 'Neon Reflections on Wet Asphalt', 'Akihabara Side Alley', 'Distant Highway Hum'], instruments: 'tape-saturated Rhodes, subtle vinyl crackle, soft rimshot rhythm' },
+      { phase: 'resolution', arc: 'Resolution — Morning Light over Skyscraper', titles: ['Sunrise over Sumida', 'Tokyo Morning Mist', 'Station Gates Opening', 'New Day Awakening'], instruments: 'peaceful piano arpeggio, soft pad wash, gentle shaker rhythm' },
     ],
   },
   {
     keywords: ['coffee', 'morning', 'sunday', 'sunlight', 'cozy', 'sun', 'sabah', 'kahve'],
     scenes: [
-      { arc: 'Morning Awakening', titles: ['Sunday Morning Coffee', 'Sunbeams on the Table', 'First Sip of Warmth', 'Kitchen Window Light'], instruments: 'soft acoustic guitar strumming, gentle vinyl static, warm piano chords' },
-      { arc: 'Quiet Home Moments', titles: ['Steam Rising Slow', 'Turning the Page', 'Morning Breeze in the Curtains', 'Peaceful Kitchen'], instruments: 'mellow Rhodes piano, slow head-nod beat, subtle room ambient' },
-      { arc: 'Relaxation & Ease', titles: ['Lazy Breakfast', 'Dust Motes in Sunlight', 'Radio Playing Softly', 'Sipping Earl Grey'], instruments: 'cozy upright piano, warm low-pass bass, soft brushed drums' },
-      { arc: 'Daydreaming & Warmth', titles: ['Warm Blanket Nostalgia', 'Garden Birds Outside', 'Quiet Hour Reading', 'Soft Sunlight Glow'], instruments: 'chill lofi guitar melody, vintage sampled pads, light shaker' },
-      { arc: 'Peaceful Afternoon Transition', titles: ['Afternoon Shadows', 'Golden Hour Approaching', 'Restful Heart', 'Sunday Farewell'], instruments: 'soft acoustic guitar and piano duet, gentle ambient trail' },
+      { phase: 'opening', arc: 'Opening — Morning Awakening', titles: ['Sunday Morning Coffee', 'Sunbeams on the Table', 'First Sip of Warmth', 'Kitchen Window Light'], instruments: 'soft acoustic guitar strumming, gentle vinyl static, warm piano chords' },
+      { phase: 'descent', arc: 'Descent — Quiet Home Moments', titles: ['Steam Rising Slow', 'Turning the Page', 'Morning Breeze in the Curtains', 'Peaceful Kitchen'], instruments: 'mellow Rhodes piano, slow head-nod beat, subtle room ambient' },
+      { phase: 'trough', arc: 'Trough — Stillness & Ease', titles: ['Lazy Breakfast', 'Dust Motes in Sunlight', 'Radio Playing Softly', 'Sipping Earl Grey'], instruments: 'sparse upright piano, warm low-pass bass, barely-there percussion' },
+      { phase: 'ascent', arc: 'Ascent — Daydreaming & Warmth', titles: ['Warm Blanket Nostalgia', 'Garden Birds Outside', 'Quiet Hour Reading', 'Soft Sunlight Glow'], instruments: 'chill lofi guitar melody, vintage sampled pads, light shaker' },
+      { phase: 'resolution', arc: 'Resolution — Golden Afternoon', titles: ['Afternoon Shadows', 'Golden Hour Approaching', 'Restful Heart', 'Sunday Farewell'], instruments: 'bright acoustic guitar and piano duet, warm gentle groove' },
     ],
   },
 ];
@@ -191,11 +194,11 @@ export function generateMusicPlan({ concept = '2:17 AM — Everyone Is Asleep', 
     matchedDict = {
       keywords: [rawTitle.toLowerCase()],
       scenes: [
-        { arc: 'Album Intro', titles: [`${rawTitle} — Intro`, 'Opening Reflections', 'Setting the Scene', 'First Atmosphere'], instruments: 'warm dusty Rhodes piano, vinyl crackle, soft ambient hum' },
-        { arc: 'Developing Atmosphere', titles: ['Quiet Moments', 'Ears to the Wind', 'Deepening Mood', 'Subtle Reflections'], instruments: 'mellow upright piano, tape pitch-drift, deep sub-bass pulse' },
-        { arc: 'Introspective Core', titles: ['Inner Thoughts', 'Echoing Memories', 'Shadows on the Wall', 'Soft Whispers'], instruments: 'delicate acoustic guitar, soft brush snare, subtle room tone' },
-        { arc: 'Late Phase Wandering', titles: ['Solitary Journey', 'Quiet Distances', 'Stillness in Motion', 'Night Horizon'], instruments: 'spacey analog synth pads, muted trumpet, slow hip-hop groove' },
-        { arc: 'Resolution & Closing', titles: ['Drifting Rest', 'Before the Dawn', 'Peaceful Resolution', 'Final Echo'], instruments: 'soft decaying piano chords fading into gentle silence' },
+        { phase: 'opening', arc: 'Opening — Album Intro', titles: [`${rawTitle} — Intro`, 'Opening Reflections', 'Setting the Scene', 'First Atmosphere'], instruments: 'warm dusty Rhodes piano, vinyl crackle, soft ambient hum' },
+        { phase: 'descent', arc: 'Descent — Developing Atmosphere', titles: ['Quiet Moments', 'Ears to the Wind', 'Deepening Mood', 'Subtle Reflections'], instruments: 'mellow upright piano, tape pitch-drift, deep sub-bass pulse' },
+        { phase: 'trough', arc: 'Trough — Introspective Core', titles: ['Inner Thoughts', 'Echoing Memories', 'Shadows on the Wall', 'Soft Whispers'], instruments: 'sparse delicate guitar, long sustained pads, subtle room tone' },
+        { phase: 'ascent', arc: 'Ascent — Late Phase Wandering', titles: ['Solitary Journey', 'Quiet Distances', 'Stillness in Motion', 'Night Horizon'], instruments: 'spacey analog synth pads, muted trumpet, slow hip-hop groove' },
+        { phase: 'resolution', arc: 'Resolution — Toward the Light', titles: ['Before the Dawn', 'Peaceful Resolution', 'Morning Horizon', 'Final Echo'], instruments: 'warm brighter piano chords, gentle groove returning' },
       ],
     };
   }
@@ -205,15 +208,10 @@ export function generateMusicPlan({ concept = '2:17 AM — Everyone Is Asleep', 
 
   for (let i = 0; i < count; i++) {
     const trackNum = i + 1;
-    const progress = i / Math.max(1, count - 1); // 0.0 to 1.0
-
-    let sceneIndex = 0;
-    if (progress >= 0.85) sceneIndex = 4;
-    else if (progress >= 0.60) sceneIndex = 3;
-    else if (progress >= 0.30) sceneIndex = 2;
-    else if (progress >= 0.10) sceneIndex = 1;
-
-    const sceneGroup = matchedDict.scenes[sceneIndex];
+    // Sahne seçimi album-arc.js yayına bağlı: ortadaki parça trough (en sessiz).
+    const phase = phaseFor(i, count);
+    const sceneGroup = matchedDict.scenes.find((scene) => scene.phase === phase.name);
+    const { tempo, density } = energyModifiers(phase.energy);
 
     let title = sceneGroup.titles.find((t) => !usedTitles.has(t));
     if (!title) {
@@ -230,7 +228,7 @@ export function generateMusicPlan({ concept = '2:17 AM — Everyone Is Asleep', 
     const padNum = String(trackNum).padStart(2, '0');
     const instruments = sceneGroup.instruments;
 
-    const prompt = `[Instrumental] Style: ${style}. Concept: ${concept}. Track ${padNum}: "${title}". Atmosphere: ${sceneGroup.arc}. Instrumentation: ${instruments}. Pure instrumental lo-fi composition, no vocals, no lyrics.`;
+    const prompt = `[Instrumental] Style: ${style}. Concept: ${concept}. Track ${padNum}: "${title}". Atmosphere: ${sceneGroup.arc}. Instrumentation: ${instruments}. Energy: ${tempo}, ${density}. Pure instrumental lo-fi composition, no vocals, no lyrics.`;
 
     tracks.push({
       number: trackNum,

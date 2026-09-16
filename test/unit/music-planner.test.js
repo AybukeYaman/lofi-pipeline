@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { generateMusicPlan, generateMusicPlanAsync, validateTrackPlan } from '../../prep/music-planner.js';
+import { ARC_PHASES, phaseFor } from '../../prep/album-arc.js';
+import { SYSTEM_META_PROMPT, generateMusicPlan, generateMusicPlanAsync, validateTrackPlan } from '../../prep/music-planner.js';
 
 describe('music-planner', () => {
   test('1. Yeni concept -> yeni track planı oluşuyor', () => {
@@ -86,6 +87,24 @@ describe('music-planner', () => {
     assert.equal(plan.totalTracks, 5);
     assert.equal(plan.tracks[0].title, 'Neon Track 1');
     assert.ok(validateTrackPlan(plan));
+  });
+
+  test('8. Fallback sahneleri album-arc yayını izler: ortadaki parça trough', () => {
+    for (const concept of ['2:17 AM — Everyone Is Asleep', 'Tokyo Neon', 'Sunday Morning Coffee', 'Bilinmeyen Konsept']) {
+      const plan = generateMusicPlan({ concept, totalTracks: 15 });
+      plan.tracks.forEach((track, i) => {
+        const phase = phaseFor(i, 15);
+        const label = phase.name[0].toUpperCase() + phase.name.slice(1);
+        assert.ok(track.prompt.includes(`Atmosphere: ${label} — `), `${concept} #${i + 1}: ${track.prompt}`);
+      });
+      assert.match(plan.tracks[7].prompt, /Energy: very slow tempo, spacious./);
+      assert.match(plan.tracks[14].prompt, /Energy: relaxed mid-tempo, open./);
+    }
+  });
+
+  test('9. Meta prompt yayı album-arc.js üzerinden alır (ortada zirve yok)', () => {
+    for (const phase of ARC_PHASES) assert.ok(SYSTEM_META_PROMPT.includes(`- ${phase.name} (`));
+    assert.doesNotMatch(SYSTEM_META_PROMPT, /peak/i);
   });
 
   test('validateTrackPlan: yinelenen veya geçersiz başlıkları yakalar', () => {

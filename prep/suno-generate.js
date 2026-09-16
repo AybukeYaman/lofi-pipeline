@@ -121,6 +121,9 @@ function throwIfAborted(signal) {
  * @param {string} [options.title]
  * @param {boolean} [options.instrumental]
  * @param {string} [options.model]
+ * @param {string} [options.negativeTags]
+ * @param {number} [options.styleWeight] 0-1
+ * @param {number} [options.weirdness] 0-1
  * @param {string} [options.apiKey]
  * @param {object} [options.env]
  * @param {string} [options.repoRoot]
@@ -134,14 +137,14 @@ export async function generateSong(prompt, options = {}) {
 
   const provider = assertProvider(options.provider);
   const apiKey = resolveApiKey(options);
-  const { style, title, instrumental, model, signal } = options;
+  const { style, title, instrumental, model, negativeTags, styleWeight, weirdness, signal } = options;
 
   throwIfAborted(signal);
 
   let result;
   try {
     result = await provider.generateSong(
-      { prompt: prompt.trim(), style, title, instrumental, model },
+      { prompt: prompt.trim(), style, title, instrumental, model, negativeTags, styleWeight, weirdness },
       { apiKey, signal },
     );
   } catch (err) {
@@ -164,7 +167,7 @@ export async function generateSong(prompt, options = {}) {
  *
  * @param {string} jobId
  * @param {object} options generateSong ile aynı provider/key/env seçenekleri
- * @returns {Promise<{ status: 'pending'|'done'|'failed', audioUrl: string | null, error: string | null }>}
+ * @returns {Promise<{ status: 'pending'|'done'|'failed', audioUrl: string | null, audioUrls: string[], error: string | null }>}
  */
 export async function checkStatus(jobId, options = {}) {
   if (typeof jobId !== 'string' || !jobId) {
@@ -191,7 +194,7 @@ export async function checkStatus(jobId, options = {}) {
 /**
  * İş bitene kadar exponential backoff ile durumu yoklar.
  *
- * - 'done'   → { jobId, audioUrl } döner
+ * - 'done'   → { jobId, audioUrl, audioUrls } döner (audioUrl = ilk varyant)
  * - 'failed' → SunoGenerateError fırlatır
  * - geçici hata (retryable) → beklenip tekrar denenir, deneme hakkı tükenirse fırlatılır
  * - deneme hakkı biterse → SunoGenerateError { timedOut: true }
@@ -203,7 +206,7 @@ export async function checkStatus(jobId, options = {}) {
  * @param {number} [options.initialBackoffMs]
  * @param {number} [options.maxBackoffMs]
  * @param {(info: { attempt: number, status: string, waitMs: number }) => void} [options.onProgress]
- * @returns {Promise<{ jobId: string, audioUrl: string }>}
+ * @returns {Promise<{ jobId: string, audioUrl: string, audioUrls: string[] }>}
  */
 export async function waitForSong(jobId, options = {}) {
   const {
@@ -222,6 +225,7 @@ export async function waitForSong(jobId, options = {}) {
 
     let status = STATUS.PENDING;
     let audioUrl = null;
+    let audioUrls = [];
     let failureMessage = null;
     let retryAfterMs = null;
 
@@ -229,6 +233,7 @@ export async function waitForSong(jobId, options = {}) {
       const result = await checkStatus(jobId, options);
       status = result.status;
       audioUrl = result.audioUrl;
+      audioUrls = result.audioUrls;
       failureMessage = result.error;
       lastRetryableError = null;
     } catch (err) {
@@ -237,7 +242,7 @@ export async function waitForSong(jobId, options = {}) {
       retryAfterMs = err.retryAfterMs ?? null;
     }
 
-    if (status === STATUS.DONE) return { jobId, audioUrl };
+    if (status === STATUS.DONE) return { jobId, audioUrl, audioUrls };
 
     if (status === STATUS.FAILED) {
       throw new SunoGenerateError(

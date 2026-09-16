@@ -114,17 +114,18 @@ test('12. provider verilmezse ya da sözleşmeye uymazsa hata', async () => {
 
 test('13. checkStatus pending/done/failed durumlarını normalize eder', async () => {
   const provider = createFakeProvider({ statuses: [{ status: 'queued' }] });
-  assert.deepEqual(await checkStatus('job-1', base(provider)), { status: 'pending', audioUrl: null, error: null });
+  assert.deepEqual(await checkStatus('job-1', base(provider)), { status: 'pending', audioUrl: null, audioUrls: [], error: null });
 
   const done = createFakeProvider({ statuses: [{ status: 'complete', audioUrl: 'https://cdn.test/a.mp3' }] });
   assert.deepEqual(await checkStatus('job-1', base(done)), {
     status: 'done',
     audioUrl: 'https://cdn.test/a.mp3',
+    audioUrls: ['https://cdn.test/a.mp3'],
     error: null,
   });
 
   const failed = createFakeProvider({ statuses: [{ status: 'error', error: 'moderation' }] });
-  assert.deepEqual(await checkStatus('job-1', base(failed)), { status: 'failed', audioUrl: null, error: 'moderation' });
+  assert.deepEqual(await checkStatus('job-1', base(failed)), { status: 'failed', audioUrl: null, audioUrls: [], error: 'moderation' });
 });
 
 test('14. audioUrl yoksa "done" pending sayılır', () => {
@@ -181,7 +182,7 @@ test('20. waitForSong sabit aralık değil exponential backoff kullanır', async
 
   const result = await waitForSong('job-1', { ...base(provider), sleepFn, initialBackoffMs: 1000 });
 
-  assert.deepEqual(result, { jobId: 'job-1', audioUrl: 'https://cdn.test/a.mp3' });
+  assert.deepEqual(result, { jobId: 'job-1', audioUrl: 'https://cdn.test/a.mp3', audioUrls: ['https://cdn.test/a.mp3'] });
   assert.deepEqual(waits, [1000, 2000, 4000]);
   assert.equal(provider.calls.status.length, 4);
 });
@@ -294,4 +295,44 @@ test('29. iptal edilmiş signal ile iş başlatılmaz', async () => {
     (err) => err.name === 'AbortError',
   );
   assert.equal(provider.calls.generate.length, 0);
+});
+
+// --- varyantlar ve üretim parametreleri (11f) ----------------------------------
+
+test('30. normalizeStatusResult tüm varyantları sırayla, tekrarsız toplar', () => {
+  const result = normalizeStatusResult({
+    status: 'done',
+    audioUrl: 'https://cdn.test/a.mp3',
+    audioUrls: ['https://cdn.test/a.mp3', 'https://cdn.test/b.mp3', 'ftp://x/c.mp3', null],
+  });
+  assert.equal(result.audioUrl, 'https://cdn.test/a.mp3');
+  assert.deepEqual(result.audioUrls, ['https://cdn.test/a.mp3', 'https://cdn.test/b.mp3']);
+
+  const onlyList = normalizeStatusResult({ status: 'done', audioUrls: ['https://cdn.test/b.mp3'] });
+  assert.equal(onlyList.status, 'done');
+  assert.equal(onlyList.audioUrl, 'https://cdn.test/b.mp3');
+});
+
+test('31. generateSong negativeTags/styleWeight/weirdness değerlerini sağlayıcıya iletir', async () => {
+  const provider = createFakeProvider();
+  await generateSong('lofi', {
+    ...base(provider),
+    style: 's',
+    title: 't',
+    instrumental: true,
+    model: 'V5_5',
+    negativeTags: 'vocals',
+    styleWeight: 0.75,
+    weirdness: 0.3,
+  });
+  assert.deepEqual(provider.calls.generate[0].request, {
+    prompt: 'lofi',
+    style: 's',
+    title: 't',
+    instrumental: true,
+    model: 'V5_5',
+    negativeTags: 'vocals',
+    styleWeight: 0.75,
+    weirdness: 0.3,
+  });
 });
