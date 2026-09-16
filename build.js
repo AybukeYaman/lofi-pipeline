@@ -19,8 +19,8 @@
  * edilir: yarıda kesilen build çıktı klasörüne yarım dosya bırakmaz (bölüm 8).
  */
 
-import { mkdir, rename, stat, statfs } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { copyFile, mkdir, rename, stat, statfs } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -145,7 +145,7 @@ export async function runBuild(config, options = {}) {
       // Loop testi gözle bakmak için; workspace silinecekse üretmenin anlamı yok.
       loopTest: keep,
       logger,
-    }));
+    })).catch((error) => keepCropFrame(error, config.output.dir));
 
     let configLine = null;
     if (video.crop.approval.required && !config.video.cropFromConfig) {
@@ -273,6 +273,27 @@ export async function runBuild(config, options = {}) {
       log.info(`Workspace bırakıldı (--keep): ${workspace.dir}`);
     }
   }
+}
+
+/**
+ * Onay verilmeyen kırpmada kontrol karesini çıktı klasörüne kopyalar ve hatayı
+ * yeni yolla yeniden fırlatır. Workspace `finally`'de silindiği için hatadaki
+ * workspace yolu kullanıcıya ulaştığında açılmaz (HANDOFF bölüm 15, açık iş 2).
+ * Kopyalanamazsa özgün hata olduğu gibi fırlatılır.
+ *
+ * @param {unknown} error
+ * @param {string} outDir
+ * @returns {Promise<never>}
+ */
+async function keepCropFrame(error, outDir) {
+  if (!(error instanceof CropNotConfirmedError) || !error.framePath) throw error;
+  const keptPath = join(outDir, 'crop-check.png');
+  try {
+    await copyFile(error.framePath, keptPath);
+  } catch {
+    throw error;
+  }
+  throw new CropNotConfirmedError(keptPath);
 }
 
 /**
