@@ -1,4 +1,5 @@
 # Lofi Video Pipeline — Devir ve Mimari Dokümanı (Aşama 7–11)
+> **Durum (2026-09-16):** Aşama 11f (albüm üretim zinciri: yay, DNA/varyant prompt, orkestratör) commit'li — bölüm 14.6. Paralel oturumların toparlaması ve açık işler — bölüm 15. `npm test` 448/448.
 > **Durum (2026-09-15):** Aşama 11 (Suno prompt motoru + ingest: 11a, 11b, 11c, 11d) tamamlandı — bölüm 14. `npm test` 310/310 geçiyor.
 > **Durum (2026-09-14):** Pipeline Katman 1 (Montaj Otomasyonu: Aşama 1–6) ve Katman 2 (Hazırlık Otomasyonu: Aşama 7a, 7b, 7c, 7d-1, 7d-2) başarıyla tamamlandı. `npm test` 164/164 test geçiyor. Gerçek Gemini API kabul testi doğrulandı.
 >
@@ -92,7 +93,7 @@ GEMINI_MODEL=gemini-3.6-flash
 
 ## 7. Test Durumu
 
-- **Toplam Test Sayısı:** 248 unit ve branch testi (`npm test`, 2026-09-15; Aşama 7 kapanışında 164, Aşama 8'de 228).
+- **Toplam Test Sayısı:** 448 unit ve branch testi (`npm test`, 2026-09-16; Aşama 7 kapanışında 164, Aşama 8'de 228, Aşama 9'da 248).
 - **Network Bağımlılığı:** Bütün unit/branch testleri sahte `fetch` ve `sleep` (mock) kullanır.
 - **Kabul Testi (Acceptance Test):** Gerçek Gemini API (`gemini-3.6-flash`) ile uçtan uca `add-style` ve `new-video` entegrasyonu gerçek görsel ile test edilmiş ve PASS almıştır.
 
@@ -265,7 +266,7 @@ Ardından panel kabulü: `npm start` → ok tuşlarıyla yeni proje → devam et
 **Yeniden açılırsa:** önce 10a kapısı (tui-check, 3 terminal), sonra 10b planı kullanıcıyla konuşulur. `ink` / `react` sürümleri o gün tekrar kontrol edilmeli.
 
 **Etkisi:** `npm start` enquirer panelini açar; ink hiçbir üretim akışında kullanılmıyor.
-## 14. Aşama 11 — Suno Entegrasyonu (Prompt Motoru + Ingest) · ⏸ PLANLANDI, BAŞLAMADI
+## 14. Aşama 11 — Suno Entegrasyonu (Prompt Motoru + Ingest + Üretim) · 11a–11d ✅ · 11e iskelet ✅ · 11f ✅
 
 **Karar (2026-09-15):** Aşama 10 (ink TUI) beklemede kaldığı sürece üretim akışı `npm start` (enquirer, Aşama 9) üzerinden devam ediyor. Bu doğrultuda, üretim öncesi manuel adımların (albüm konsepti, Suno prompt yazımı, şarkı indirme) otomasyonu **Aşama 10'un önüne alınarak Aşama 11 olarak** planlandı — TUI görsel cila, bu üretim darboğazını çözmüyor.
 
@@ -277,7 +278,7 @@ Araştırma dokümanı: `docs/research/suno-integration.md` (tam mekanizma anali
 
 | Alt-aşama | İş | Bağımlılık |
 |---|---|---|
-| 11a | `prep/style-builder.js`, `prep/style-cleaner.js`, `prep/style-exclude.js` — saf fonksiyonlar, mevcut `styles/<ad>.json` şemasını Suno Style/Exclude string'ine çevirir | Yok |
+| 11a | `prep/style-cleaner.js`, `prep/style-exclude.js` — saf fonksiyonlar, Suno Style/Exclude string temizliği. (`prep/style-builder.js` 2026-09-16'da silindi: işlevini 11f `album-prompt.js` devraldı, bkz. bölüm 15) | Yok |
 | 11b | `prep/album-planner.js` — Gemini (mevcut `prep/gemini.js` client'ı, `x-goog-api-key`) ile konsept → track listesi → atmosfer arkı; çıktı 11a'dan geçirilir | 11a, `prep/gemini.js` |
 | 11c | `prep/suno-ingest.js` — public playlist/song linkinden clip listesi + metadata + mp3 indirme | Yok (bağımsız yazılabilir) |
 
@@ -308,3 +309,43 @@ Araştırma dokümanı: `docs/research/suno-integration.md` (tam mekanizma anali
 - Suno üretimini API ile tetikleme (resmi API yok, üçüncü parti ücretli/riskli — araştırma dokümanı Bölüm 6)
 - Private şarkı ingest / oturum tabanlı kayıt (araştırma dokümanı Bölüm 2.2 / 14.3 ön koşul notu)
 - Websocket — gerek yok, HTTP GET yeterli (araştırma dokümanı Bölüm 7)
+
+### 14.6 Aşama 11f — Albüm üretim zinciri · ✅ TAMAM (commit `70733cf`, `57a2eda`)
+
+**Karar (2026-09-16):** Albüm planı → parça parça Suno stil dizesi → üretim (11e provider arayüzü) → indirme tek zincirde. Albüm tutarlılığı (ortak "DNA") ile parçalar arası akış (enerji yayı) ayrı, deterministik katmanlarda. **LLM (Gemini) yalnızca parça başlığı ve 2-5 kelimelik atmosfer üretir; ham Suno prompt'u asla yazmaz.**
+
+| Parça | Dosya | İş |
+|---|---|---|
+| 11f-1 | `prep/album-arc.js` | Deterministik enerji yayı. `ARC_PHASES`: opening 0–15% (0.45) → descent 15–40% (0.35) → **trough 40–60% (0.20)** → ascent 60–85% (0.45) → resolution 85–100% (0.60); yarı açık `[rangeStart, rangeEnd)`, son faz 1.00'i kapsar. `phaseFor(index, trackCount)` (p = index/(n-1); tek parça → opening), `energyModifiers(energy)` → `{ rhythm, tempo, density }` (eşikler 0.25 / 0.40 / 0.55), `describeArcPhases()` → LLM prompt'larına gömülen tek yay tarifi |
+| 11f-2 | `prep/album-prompt.js` | **DNA / varyant ayrımı.** `buildAlbumDna(style)`: stilin `music` bloğundan tür → prodüksiyon → çekirdek enstrümanlar → estetik; her parçada birebir aynı. `buildTrackStyle({ dna, atmosphere, energyMods })`: `"[Instrumental] " + dna + atmosfer + rhythm + tempo + density + ". No vocals, no lyrics. [No Vocals]"` — DNA önde çünkü Suno erken token'lara daha çok ağırlık veriyor. `buildNegativeTags(style)`: `music.exclude`'dan. `SUNO_LIMITS` + `assertSunoLimits`: style 1000 / negative_tags 200 / title 80 (V4.5+/V5/V5.5), aşılırsa `AlbumPromptError` ve **istek gönderilmez** |
+| 11f-3 | `prep/album-chain.js` | Orkestratör. `planAlbum({ concept, styleName, trackCount })` → `{ albumTitle, tracks: [{ index, title, atmosphere, phase, styleString, negativeTags }] }`; stil uygun değilse Gemini hiç çağrılmaz. `generateAlbum(tracks, options)`: sırayla `generateSong → waitForSong → downloadAudio`; dosya adı `03-Quiet-Moments.mp3` (`suno-ingest` `sanitizeFilename` kuralı); aynı adlı dosya varsa atlanır (kredi harcanmaz). Parametreler `GENERATION_PARAMS`: styleWeight 0.75, weirdness 0.3, instrumental true; `modelVersion` varsayılan `V5_5`. `formatAlbumSummary` → başarılı / başarısız / atlandı |
+
+**Instrumental üçlü kilit:** `[Instrumental]` stil dizesinin başında + `No vocals, no lyrics. [No Vocals]` sonunda + API'de `instrumental: true`. Tek başına hiçbiri güvenilir değil.
+
+**Yay kararı — ortada zirve değil DİP:** 11b'deki ilk Gemini prompt'u "intro, build, peak, wind-down, outro" diyordu (ortada zirve). Bu yanlış: kullanıcının yayınlanmış albümünde en sessiz nokta tam ortada — **Somnambule, 26:52** (`test/baseline.json` tracklist'i; `test/regression.js` ambient kesitleri de bu noktayı ölçer). Albüm gece→sabah yayı: orta ölçüde açılır, çöker, ortada en durgun an, sonra daha sıcak/parlak bir çözülmeye yükselir. Bu yüzden:
+- `album-planner.js` yayı kendisi tarif etmez; `describeArcPhases()` ve `phaseFor` kullanır, parça sayısı tutmazsa hata verir (yay kaymasın).
+- `music-planner.js` sahneleri `phase` alanıyla fazlara bağlandı, seçim `phaseFor` ile; trough sahneleri sadeleşti, resolution sahneleri parlaklaştı; fallback prompt'lara `Energy: <tempo>, <density>` eklendi.
+
+**Manifest ve varyantlar:** Suno üretim başına genelde 2 varyant döndürür. İlki indirilir; diğerlerinin URL'i proje klasöründeki `album-manifest.json`'a (`audio/`'nun bir üstü) `alternateUrls` olarak yazılır — kullanıcı beğenmezse elle değiştirir. Manifest her parçadan sonra yeniden yazılır; süreç yarıda kesilse de o ana kadarki kayıt kalır.
+
+**Sözleşme genişlemesi (geriye uyumlu):** `SunoGenerateProvider` request'ine `negativeTags`, `styleWeight`, `weirdness`; RawStatus'a `audioUrls[]` eklendi. `checkStatus`/`waitForSong` artık `audioUrls` da döner (`audioUrl` = ilk varyant).
+
+**Stil şeması:** `styles/<ad>.json` görsel stil dosyası; müzik kimliği opsiyonel `"music": { genre, production, instruments, aesthetic, exclude }` bloğunda (`styles.js` `ROOT_KEYS`'e eklendi, uyarı vermez). **Mevcut üç stilde bu blok yok** — albüm üretimi için kullanıcı doldurmalı; yoksa `AlbumPromptError`.
+
+**Paylaşılan kod:** `suno-ingest.js`'ten `downloadAudio` ve `audioExtension` çıkarıldı; ingest ve zincir aynı indirme kodunu kullanır.
+
+**Kapsam dışı / sonraki:** panel adımı (`ui/actions.js`) henüz yok; somut apiframe provider'ı 11e'nin devamı.
+
+---
+
+## 15. Paralel Oturum Toparlaması ve Açık İşler (2026-09-16)
+
+Dört paralel oturum HANDOFF'u güncelleyemedi (dosya hep başka oturumdaydı); durum burada tek seferde kayıtlı.
+
+| # | İş | Durum |
+|---|---|---|
+| 1 | Regresyon karşılaştırmasının negatif testi — karşılaştırma gerçek sapmada düşüyor mu? | ✅ **DÜZELTİLDİ** — `2caec8c`: karşılaştırma `test/helpers/regression-compare.js`'e taşındı, `test/unit/regression-compare.test.js` 24 sapmanın yalnızca ilgili kontrolü düşürdüğünü doğruluyor |
+| 2 | `crop-check.png` yolu — kırpma onaylanmayınca hata, `finally`'de silinen workspace'teki dosyayı gösteriyordu | ✅ **DÜZELTİLDİ** — `9a8b542`: kare çıktı klasörüne kopyalanıyor, hata o yolla yeniden fırlatılıyor |
+| 3 | Suno limit doğrulaması tek kaynak | ✅ Tek kaynak: `prep/album-prompt.js` (`SUNO_LIMITS`, `assertSunoLimits`). Paralel oturumun yazacağı `prep/suno-limits.js` repoda hiç oluşmadı (hiçbir branch/worktree/commit'te yok) — silinecek ikinci kopya olmadı. Dosya ileride gelirse esas o olacak, `album-prompt.js` onu import edecek |
+| 4 | `prep/style-builder.js` ölü kod + `describe-style.js`'teki `buildStylePrompt` ile isim çakışması | ✅ `style-builder.js` ve `test/unit/style-builder.test.js` silindi (import eden yer yoktu). `style-cleaner.js` / `style-exclude.js` / `style-errors.js` kullanımda, kaldı |
+| 5 | env/secret yardımcılarının tekrarı (env-secrets dedupe) | ⚠ **AÇIK** — bu işin çıktısı repoda bulunamadı. Tekrar hâlâ duruyor: `loadEnv` ve key maskeleme `prep/gemini.js` ile `prep/suno-generate.js` / `prep/suno-generate-errors.js`'te ayrı ayrı. Ortak bir modüle indirilmesi ayrı iş olarak bekliyor |
