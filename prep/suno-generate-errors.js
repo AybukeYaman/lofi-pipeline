@@ -6,10 +6,11 @@
  * kullanıcıya gösterilen metne sızması imkansız olsun.
  */
 
-/** Bilinen sağlayıcı key biçimleri (Gemini AIzaSy…, OpenAI/apiframe sk-…). */
+/** Bilinen sağlayıcı key biçimleri (Gemini AIzaSy…, OpenAI sk-…, apiframe afk_…). */
 const KEY_PATTERNS = [
   /AIzaSy[A-Za-z0-9_-]{33}/g,
   /\bsk-[A-Za-z0-9_-]{16,}/g,
+  /\bafk_[A-Za-z0-9_-]{16,}/g,
   /\bBearer\s+[A-Za-z0-9._-]{12,}/gi,
   /\b(api[-_]?key|token|authorization)\s*[:=]\s*[A-Za-z0-9._-]{8,}/gi,
 ];

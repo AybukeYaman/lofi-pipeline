@@ -1,5 +1,5 @@
 # Lofi Video Pipeline — Devir ve Mimari Dokümanı (Aşama 7–11)
-> **Durum (2026-09-16):** Aşama 11f (albüm üretim zinciri: yay, DNA/varyant prompt, orkestratör) commit'li — bölüm 14.6. Paralel oturumların toparlaması ve açık işler — bölüm 15. `npm test` 448/448.
+> **Durum (2026-09-16):** Aşama 11f (albüm üretim zinciri: yay, DNA/varyant prompt, orkestratör) commit'li — bölüm 14.6. Paralel oturumların toparlaması ve açık işler — bölüm 15. apiframe provider (11e) yazıldı — bölüm 14.7. `npm test` 457/457.
 > **Durum (2026-09-15):** Aşama 11 (Suno prompt motoru + ingest: 11a, 11b, 11c, 11d) tamamlandı — bölüm 14. `npm test` 310/310 geçiyor.
 > **Durum (2026-09-14):** Pipeline Katman 1 (Montaj Otomasyonu: Aşama 1–6) ve Katman 2 (Hazırlık Otomasyonu: Aşama 7a, 7b, 7c, 7d-1, 7d-2) başarıyla tamamlandı. `npm test` 164/164 test geçiyor. Gerçek Gemini API kabul testi doğrulandı.
 >
@@ -93,7 +93,7 @@ GEMINI_MODEL=gemini-3.6-flash
 
 ## 7. Test Durumu
 
-- **Toplam Test Sayısı:** 448 unit ve branch testi (`npm test`, 2026-09-16; Aşama 7 kapanışında 164, Aşama 8'de 228, Aşama 9'da 248).
+- **Toplam Test Sayısı:** 457 unit ve branch testi (`npm test`, 2026-09-16; Aşama 7 kapanışında 164, Aşama 8'de 228, Aşama 9'da 248).
 - **Network Bağımlılığı:** Bütün unit/branch testleri sahte `fetch` ve `sleep` (mock) kullanır.
 - **Kabul Testi (Acceptance Test):** Gerçek Gemini API (`gemini-3.6-flash`) ile uçtan uca `add-style` ve `new-video` entegrasyonu gerçek görsel ile test edilmiş ve PASS almıştır.
 
@@ -266,7 +266,7 @@ Ardından panel kabulü: `npm start` → ok tuşlarıyla yeni proje → devam et
 **Yeniden açılırsa:** önce 10a kapısı (tui-check, 3 terminal), sonra 10b planı kullanıcıyla konuşulur. `ink` / `react` sürümleri o gün tekrar kontrol edilmeli.
 
 **Etkisi:** `npm start` enquirer panelini açar; ink hiçbir üretim akışında kullanılmıyor.
-## 14. Aşama 11 — Suno Entegrasyonu (Prompt Motoru + Ingest + Üretim) · 11a–11d ✅ · 11e iskelet ✅ · 11f ✅
+## 14. Aşama 11 — Suno Entegrasyonu (Prompt Motoru + Ingest + Üretim) · 11a–11d ✅ · 11e ✅ · 11f ✅
 
 **Karar (2026-09-15):** Aşama 10 (ink TUI) beklemede kaldığı sürece üretim akışı `npm start` (enquirer, Aşama 9) üzerinden devam ediyor. Bu doğrultuda, üretim öncesi manuel adımların (albüm konsepti, Suno prompt yazımı, şarkı indirme) otomasyonu **Aşama 10'un önüne alınarak Aşama 11 olarak** planlandı — TUI görsel cila, bu üretim darboğazını çözmüyor.
 
@@ -334,7 +334,35 @@ Araştırma dokümanı: `docs/research/suno-integration.md` (tam mekanizma anali
 
 **Paylaşılan kod:** `suno-ingest.js`'ten `downloadAudio` ve `audioExtension` çıkarıldı; ingest ve zincir aynı indirme kodunu kullanır.
 
-**Kapsam dışı / sonraki:** panel adımı (`ui/actions.js`) henüz yok; somut apiframe provider'ı 11e'nin devamı.
+**Kapsam dışı / sonraki:** panel adımı (`ui/actions.js`) henüz yok.
+
+### 14.7 Aşama 11e — apiframe Suno provider · ✅ YAZILDI (canlı kabul testi kullanıcıda)
+
+`prep/providers/apiframe-suno.js` — `SunoGenerateProvider` sözleşmesinin somut hali; sözleşme değişmedi. `createApiframeSunoProvider({ fetchFn, baseUrl, timeoutMs, log })` + varsayılan `apiframeProvider`.
+
+Şema dokümandan doğrulandı (2026-09-16: `apiframe.ai/docs/music/suno.mdx`, `/docs/music.mdx`, `/docs/jobs/get.mdx`):
+
+| | Değer |
+|---|---|
+| Taban adres | `https://api.apiframe.ai/v2` |
+| Üretim | `POST /music/generate` → `202 { jobId, status: "QUEUED" }`; gövde `{ prompt, model: "suno", sunoParams: { custom_mode, instrumental, model_version, title, style, negative_tags, style_weight, weirdness_constraint } }` |
+| Durum | `GET /jobs/{id}` → `{ status: QUEUED\|PROCESSING\|COMPLETED\|FAILED, result: { tracks: [{ id, audioUrl, imageUrl, title, tags, duration }] }, error }` |
+| Auth | **`X-API-Key: <key>`** (dokümandaki başlık; ilk brifteki "Bearer" dokümanla uyuşmadı) |
+| model_version | V4, V4_5, V4_5ALL, V4_5PLUS, V5, V5_5 — varsayılan V5_5, geçersiz değer istek atılmadan reddedilir |
+| Maliyet | üretim başına 11 kredi (doküman) |
+
+**Kararlar:**
+- İş kimliği dokümanda `jobId` (brifteki `task_id` değil). Ses adresi `result.tracks[].audioUrl`. Şema değişirse diye yedek alanlar (`id`/`job_id`/`task_id`, `audio_url`/`url`/`streamAudioUrl`) denenir; yedek alan kullanılırsa ya da COMPLETED işte adres bulunamazsa `log` ile bildirilir.
+- `custom_mode`: style veya title verildiyse `true`. Enstrümantal custom modda `prompt` (zincirde `"[Instrumental] <başlık>"`) Suno tarafından kullanılmaz.
+- Hatalar: 401 (key) / 402 (kredi) / 400 kalıcı; 408, 425, 429, 5xx ve ağ hataları `retryable` (Retry-After okunur). `generateSong` hiçbir zaman tekrar denemez — çift kredi harcanmasın.
+- apiframe `negative_tags` için 500 karakter kabul ediyor; yerel sınır bilinçli olarak 200 (Suno arayüz sınırı, `SUNO_LIMITS`).
+- `afk_…` key biçimi `suno-generate-errors.js` maskeleme kalıplarına eklendi.
+
+**Canlı kabul:** `scripts/album-try.js` (elle; `npm test`'e dahil değil):
+1. `lofi/lofi/.env` → `SUNO_GENERATE_API_KEY=afk_...` (`GEMINI_API_KEY` zaten orada)
+2. Seçilen stile `"music"` bloğu (bölüm 14.6)
+3. `node scripts/album-try.js --style <stil> --concept "<konsept>" --plan-only` → yalnızca Gemini, kredi yok
+4. `node scripts/album-try.js --style <stil> --concept "<konsept>" --tracks 1` → 1 üretim (11 kredi), çıktı `videolar/_album-deneme/audio/01-<Başlık>.mp3` + `videolar/_album-deneme/album-manifest.json`
 
 ---
 

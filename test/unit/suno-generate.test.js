@@ -46,6 +46,7 @@ test('3. key sağlayıcıya context ile gider, request gövdesine/URL\'e konmaz'
 test('4. sanitizeApiKey bilinen key biçimlerini maskeler', () => {
   assert.equal(sanitizeApiKey('key: AIzaSy' + 'A'.repeat(33)), 'key: ***REDACTED***');
   assert.equal(sanitizeApiKey('token sk-abcdefghijklmnop123'), 'token ***REDACTED***');
+  assert.equal(sanitizeApiKey('key afk_abcdefghijklmnop123'), 'key ***REDACTED***');
   assert.match(sanitizeApiKey('Authorization: Bearer abcdef1234567890'), /Bearer \*\*\*REDACTED\*\*\*/);
   assert.equal(sanitizeApiKey('gizli-degerim-uzun', ['gizli-degerim-uzun']), '***REDACTED***');
 });
