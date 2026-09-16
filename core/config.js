@@ -37,7 +37,7 @@ export const CONFIG_DEFAULTS = {
 
 /** Bilinen anahtarlar — yazım hatası ("cropbottom") sessizce yok sayılmasın. */
 const KNOWN_KEYS = {
-  root: ['clip', 'audioDir', 'ambient', 'order', 'names', 'video', 'audio', 'output'],
+  root: ['clip', 'audioDir', 'ambient', 'order', 'names', 'video', 'audio', 'output', 'music', 'style', 'styleBlock', 'motionHints'],
   video: ['cropBottom', 'aspect', 'crf', 'preset', 'fadeOut', 'scaleWidth', 'crossfadeSeconds'],
   audio: ['bitrate', 'ambientOffsetDb'],
   output: ['dir', 'name', 'tracklist'],
@@ -99,13 +99,29 @@ async function resolveProject(json, { projectPath, overrides = {} }) {
   // "dosya değil" hatası üretiyordu (new-video.js clip'i boş yazar).
   const clip = requireString(json.clip, 'clip', problems) ? at(json.clip) : null;
   const audioDir = requireString(json.audioDir, 'audioDir', problems) ? at(json.audioDir) : null;
-  const ambient = json.ambient !== undefined && requireString(json.ambient, 'ambient', problems)
-    ? at(json.ambient)
-    : null;
+  let ambient = null;
+  if (json.ambient !== undefined) {
+    if (Array.isArray(json.ambient)) {
+      ambient = [];
+      for (let i = 0; i < json.ambient.length; i++) {
+        const item = json.ambient[i];
+        if (typeof item === 'string' && item.trim()) {
+          const resolved = at(item);
+          ambient.push(resolved);
+          await expectKind(resolved, 'file', `ambient[${i}]`, problems);
+        } else {
+          problems.push(`ambient[${i}]: boş olmayan bir metin olmalı`);
+        }
+      }
+      if (ambient.length === 0) ambient = null;
+    } else if (requireString(json.ambient, 'ambient', problems)) {
+      ambient = at(json.ambient);
+      await expectKind(ambient, 'file', 'ambient', problems);
+    }
+  }
 
   if (clip) await expectKind(clip, 'file', 'clip', problems);
   if (audioDir) await expectKind(audioDir, 'directory', 'audioDir', problems);
-  if (ambient) await expectKind(ambient, 'file', 'ambient', problems);
 
   // --- sıra ve adlar
   if (json.order !== undefined && !(

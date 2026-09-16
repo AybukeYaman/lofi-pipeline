@@ -78,7 +78,7 @@ describe('buildPromptsMd — repodaki şablonlar × stiller', async () => {
       // Kopyalanan metin: yalnızca İngilizce prompt — Türkçe not ve açılı parantez sızmamış
       for (const block of blocks) assert.match(block, /^[\x20-\x7E\n]+$/, block);
 
-      assert.ok(blocks[0].startsWith('Image 1 = composition reference. Image 2 = style reference.\n'));
+      assert.ok(blocks[0].startsWith('Image 1 = environment / composition reference.\n'));
       for (const b of blocks.slice(1, 6)) assert.ok(b.startsWith('Image 1 = master frame, the only reference.\n'));
       assert.equal(
         blocks[6],

@@ -15,6 +15,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { CONFIG_DEFAULTS } from '../core/config.js';
 import { AUDIO_EXTENSIONS, listFiles } from '../core/files.js';
 import { readJsonFile } from '../core/workspace.js';
+import { STYLE_REF_EXTENSIONS } from './styles.js';
 
 /** Faz 1 çıktısı: resimler/MASTER.<uzantı>. Master1.jpg gibi açı varyantları sayılmaz. */
 const MASTER_PATTERN = /^master\.[a-z0-9]+$/i;
@@ -48,11 +49,19 @@ export async function inspectProject(dir) {
     nonEmpty(output.name) ?? CONFIG_DEFAULTS.output.name,
   );
 
+  const references = await filesOrEmpty(join(dir, 'references'), STYLE_REF_EXTENSIONS);
+  const styleBlockExists = await isFile(join(dir, 'STYLE_BLOCK.txt'));
+
   return {
+    name: dir.split(/[\\/]/).pop(),
     dir,
     projectPath,
     promptsPath: join(dir, 'prompts.md'),
+    styleBlockPath: join(dir, 'STYLE_BLOCK.txt'),
+    styleBlockExists,
+    references,
     projectJson,
+    style: data.style || data.music?.style || '-',
     master: master ? join(dir, 'resimler', master) : null,
     styleRef: styleRef ? join(dir, 'resimler', styleRef) : null,
     clips: await filesOrEmpty(join(dir, 'videolar'), ['.mp4']),
@@ -84,10 +93,30 @@ export function nextStep(s, { skipped = new Set() } = {}) {
 
   const missingClip = s.clip.value && !s.clip.exists ? `clip'teki dosya bulunamadı: ${s.clip.path}\n` : '';
 
-  if (s.clip.exists) {
-    if (s.audioCount > 0) {
-      return step('build', 'auto', 'Montaj', `Klip: ${s.clip.value} · ${s.audioCount} parça\nÇıktı: ${s.output.path}`);
-    }
+  const isCustomStylePending = s.style === 'custom-generated' && !s.styleBlockExists;
+  if (isCustomStylePending) {
+    return step('style-references', 'manual', 'Stil Referansı Bekleniyor',
+      `Stil analizi için referans görsellerinizi şu klasöre koyun: ${join(s.dir, 'references')}\n` +
+      `Desteklenen biçimler: .jpg, .jpeg, .png, .webp (${s.references.length} görsel bulundu)`);
+  }
+
+  if (!s.master && !skipped.has('faz1')) {
+    return step('faz1', 'manual', 'Faz 1 — Master frame',
+      `${missingClip}prompts.md → Faz 1 ile master frame'i üret, resimler\\MASTER.png olarak kaydet.\n` +
+      `Promptlar: ${s.promptsPath}`);
+  }
+
+  const musicData = s.projectJson.data?.music;
+  const isMultiTrack = musicData && Array.isArray(musicData.tracks) && musicData.tracks.length > 0;
+  const musicCompleted = isMultiTrack
+    ? (musicData.status === 'completed' || musicData.status === 'completed_by_user' || musicData.tracks.every((t) => t.status === 'completed'))
+    : s.audioCount > 0;
+
+  if (s.clip.exists && musicCompleted) {
+    return step('build', 'auto', 'Montaj', `Klip: ${s.clip.value} · ${s.audioCount} parça\nÇıktı: ${s.output.path}`);
+  }
+
+  if (!musicCompleted) {
     return step('audio', 'manual', 'Müzik (Suno)',
       `Suno parçalarını şu klasöre koy: ${s.audioDir}\n` +
       'Sıra için project.json\'a "order" eklenebilir; yoksa alfabetik sıralanır.');
@@ -97,17 +126,12 @@ export function nextStep(s, { skipped = new Set() } = {}) {
     return step('clip', 'auto', 'Klibi seç', `${missingClip}videolar\\ altında ${s.clips.length} klip var — kullanılacak olanı seç.`);
   }
 
-  if (!s.master && !skipped.has('faz1')) {
-    return step('faz1', 'manual', 'Faz 1 — Master frame',
-      `${missingClip}prompts.md → Faz 1 ile master frame'i üret, resimler\\MASTER.png olarak kaydet.\n` +
-      (s.styleRef ? `Image 2 (stil referansı): ${s.styleRef}\n` : 'Stilin referans görseli yok — Image 2\'yi elle ekle.\n') +
-      `Promptlar: ${s.promptsPath}`);
-  }
   if (!skipped.has('faz3')) {
     return step('faz3', 'manual', 'Faz 3 — Klip (image-to-video)',
       `${missingClip}prompts.md → Faz 3 ile 5 sn'lik döngü klibini üret, videolar\\ altına .mp4 olarak koy.\n` +
       `(Faz 2 açı varyantları isteğe bağlı.) Promptlar: ${s.promptsPath}`);
   }
+
   return step('clip', 'manual', 'Klip bekleniyor', `${missingClip}videolar\\ altına klibi (.mp4) koy: ${join(s.dir, 'videolar')}`);
 }
 

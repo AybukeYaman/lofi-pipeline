@@ -18,7 +18,7 @@ import { parseArgs } from 'node:util';
 import { AmbientError, DEFAULT_AMBIENT_DIR, findAmbient, listAmbients } from './prep/ambients.js';
 import { PromptError, loadTemplates } from './prep/prompts.js';
 import {
-  DEFAULT_VIDEOS_DIR, ProjectExistsError, planProject, validateVideoName, writeProject,
+  DEFAULT_VIDEOS_DIR, ProjectExistsError, planProject, planProjectAsync, validateVideoName, writeProject,
 } from './prep/scaffold.js';
 import { STYLES_DIR, StyleError, findStyleRef, listStyles, loadStyle } from './prep/styles.js';
 
@@ -60,6 +60,8 @@ export async function runNewVideo({
   ambientDir = DEFAULT_AMBIENT_DIR,
   stylesDir = STYLES_DIR,
   promptsDir,
+  concept,
+  totalTracks,
 }) {
   const problems = validateVideoName(videoName);
   const warnings = [];
@@ -69,7 +71,6 @@ export async function runNewVideo({
     ambients = await listAmbients(ambientDir);
   } catch (error) {
     if (!(error instanceof AmbientError)) throw error;
-    // Ambient opsiyonel: istenmediyse klasörün okunamaması projeyi durdurmaz.
     if (ambientName !== undefined) problems.push(error.message);
     else warnings.push(`${error.message} — önerilen ambient denetlenmedi`);
   }
@@ -86,9 +87,18 @@ export async function runNewVideo({
 
   let ambient = null;
   if (ambientName !== undefined && ambients) {
-    ambient = findAmbient(ambients, ambientName);
-    if (!ambient) {
-      problems.push(`bilinmeyen ambient "${ambientName}" — mevcut: ${ambients.map((a) => a.name).join(', ') || '(yok)'}`);
+    const names = Array.isArray(ambientName) ? ambientName : String(ambientName).split(',').map((s) => s.trim()).filter(Boolean);
+    const foundAmbients = [];
+    for (const name of names) {
+      const found = findAmbient(ambients, name);
+      if (!found) {
+        problems.push(`bilinmeyen ambient "${name}" — mevcut: ${ambients.map((a) => a.name).join(', ') || '(yok)'}`);
+      } else {
+        foundAmbients.push(found);
+      }
+    }
+    if (foundAmbients.length > 0) {
+      ambient = foundAmbients.length === 1 ? foundAmbients[0] : foundAmbients;
     }
   }
 
@@ -107,7 +117,7 @@ export async function runNewVideo({
 
   let plan;
   try {
-    plan = planProject({ videosDir, videoName, style, ambient, styleRef: ref.path, templates });
+    plan = await planProjectAsync({ videosDir, videoName, style, ambient, styleRef: ref.path, templates, concept, totalTracks });
   } catch (error) {
     if (!(error instanceof PromptError)) throw error;
     throw new NewVideoError(error.problems);
@@ -130,11 +140,13 @@ export async function runNewVideo({
 // ---------------------------------------------------------------- CLI
 
 const USAGE = `Kullanım:
-  node new-video.js "<isim>" --style <ad> [--ambient <ad>]
+  node new-video.js "<isim>" --style <ad> [--ambient <ad>] [--concept <metin>] [--total-tracks <sayı>]
 
   <isim>               videolar klasöründe açılacak proje (boşluk varsa tırnak içinde)
   --style <ad>         styles/ içindeki stil — verilmezse mevcut stiller listelenir
   --ambient <ad>       ortak ses efekti (ör. heavyRain) — verilmezse project.json'da ambient olmaz
+  --concept <metin>    albüm konsepti (ör. "2:17 AM — Everyone Is Asleep")
+  --total-tracks <n>   üretilecek müzik parça sayısı (varsayılan: 17)
   --videos-dir <yol>   videolar kökü (varsayılan: ${DEFAULT_VIDEOS_DIR})
   --ambient-dir <yol>  ambient klasörü (varsayılan: ${DEFAULT_AMBIENT_DIR})
   --styles-dir <yol>   stil klasörü (varsayılan: repodaki styles/)
@@ -149,6 +161,8 @@ export function parseCli(argv) {
     options: {
       style: { type: 'string' },
       ambient: { type: 'string' },
+      concept: { type: 'string' },
+      'total-tracks': { type: 'string' },
       'videos-dir': { type: 'string' },
       'ambient-dir': { type: 'string' },
       'styles-dir': { type: 'string' },
@@ -168,6 +182,8 @@ export function parseCli(argv) {
     videoName: positionals[0],
     styleName: values.style,
     ambientName: values.ambient,
+    concept: values.concept,
+    totalTracks: values['total-tracks'] ? parseInt(values['total-tracks'], 10) : undefined,
     videosDir: values['videos-dir'],
     ambientDir: values['ambient-dir'],
     stylesDir: values['styles-dir'],

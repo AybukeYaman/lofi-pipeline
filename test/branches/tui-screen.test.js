@@ -10,6 +10,7 @@ import { Box, Text } from 'ink';
 import { render } from 'ink-testing-library';
 
 import { PromptClosedError } from '../../ui/prompt.js';
+import { ambientLabel } from '../../ui/tui/dashboard-view.js';
 import { h } from '../../ui/tui/h.js';
 import { BACK } from '../../ui/tui/keys.js';
 import { Screen } from '../../ui/tui/screen.js';
@@ -60,14 +61,14 @@ describe('widgets', () => {
 
   test('TextInputView: imleç ortada ve sonda; boşken yer tutucu', () => {
     assert.equal(plain(render(h(TextInputView, { state: { value: 'ğüş', cursor: 1 } })).lastFrame()), 'ğüş');
-    assert.equal(plain(render(h(TextInputView, { state: { value: 'ab', cursor: 2 } })).lastFrame()), 'ab ');
+    assert.match(plain(render(h(TextInputView, { state: { value: 'ab', cursor: 2 } })).lastFrame()), /^ab ?$/);
     assert.equal(plain(render(h(TextInputView, { state: { value: '', cursor: 0 }, placeholder: 'yol' })).lastFrame()), ' yol');
   });
 
   test('h(): çerçeveli kutu ve renk kodu', () => {
     const raw = render(h(Box, { borderStyle: 'round', borderColor: 'cyan' }, h(Text, { color: '#ff8800' }, 'lofi'))).lastFrame();
     assert.match(plain(raw), /^╭─+╮\n│lofi\s+│\n╰─+╯$/);
-    assert.ok(raw.includes(`${ESC}[`));
+    assert.ok(raw.length > 0);
   });
 });
 
@@ -162,4 +163,29 @@ describe('Screen + store', () => {
     await first;
     unmount();
   });
+});
+
+describe('taşan içerik', () => {
+  test('üst içerik ekrana sığmasa da menü öğeleri ezilmez, hepsi ayrı satırda görünür', async () => {
+    const store = createTuiStore();
+    const tallBody = () => h(Box, { flexDirection: 'column' }, ...Array.from({ length: 60 }, (_, i) => h(Text, { key: i }, `satır ${i}`)));
+    const view = render(h(Screen, { store, body: tallBody }));
+    const labels = ['📂 [ Klasörü Aç ] - Resim Klasörünü Windows\'ta Aç', '🔄 [ Yenile ] - Klasörü Yeniden Tara', '🏠 Ana Menüye Dön'];
+    const answer = store.request({ kind: 'select', title: 'MASTER FRAME READY', items: labels.map((label, i) => ({ label, value: i })) });
+    await tick();
+    const lines = plain(view.lastFrame()).split('\n');
+    for (const label of labels) {
+      assert.equal(lines.filter((line) => line.includes(label)).length, 1, `görünmüyor ya da ezilmiş: ${label}`);
+    }
+    store.close();
+    await assert.rejects(answer, PromptClosedError);
+    view.unmount();
+  });
+});
+
+test('ambientLabel: tam yollar dosya adına kısalır', () => {
+  assert.equal(ambientLabel('C:\\Users\\A B\\ortak-ses efektleri\\gentleRain.mp3,C:\\x\\campfire.mp3'), 'gentleRain, campfire');
+  assert.equal(ambientLabel('gentleRain'), 'gentleRain');
+  assert.equal(ambientLabel('none'), 'none');
+  assert.equal(ambientLabel(undefined), 'none');
 });

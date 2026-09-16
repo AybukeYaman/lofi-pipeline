@@ -195,18 +195,24 @@ export async function runBuild(config, options = {}) {
     // --- 4: ambient (03, opsiyonel)
     let finalVideo = assembled.output;
     if (config.ambient) {
-      const mixed = await step('03', 'Ambient karıştırma', (logger) => mixAmbient({
-        videoPath: assembled.output,
-        ambientPath: config.ambient,
-        outputPath: workspace.path('final.mp4'),
-        workspace,
-        ambientOffsetDb: config.audio.ambientOffsetDb,
-        fadeOut: config.video.fadeOut,
-        bitrate: config.audio.bitrate,
-        logger,
-        onProgress: progress('03', assembled.result.duration),
-      }));
-      finalVideo = mixed.output;
+      const ambientPaths = Array.isArray(config.ambient) ? config.ambient : [config.ambient];
+      for (let i = 0; i < ambientPaths.length; i++) {
+        const ambPath = ambientPaths[i];
+        const stepName = ambientPaths.length > 1 ? `Ambient karıştırma (${i + 1}/${ambientPaths.length})` : 'Ambient karıştırma';
+        const outPath = workspace.path(i === ambientPaths.length - 1 ? 'final.mp4' : `final_amb_${i}.mp4`);
+        const mixed = await step('03', stepName, (logger) => mixAmbient({
+          videoPath: finalVideo,
+          ambientPath: ambPath,
+          outputPath: outPath,
+          workspace,
+          ambientOffsetDb: config.audio.ambientOffsetDb,
+          fadeOut: config.video.fadeOut,
+          bitrate: config.audio.bitrate,
+          logger,
+          onProgress: progress('03', assembled.result.duration),
+        }));
+        finalVideo = mixed.output;
+      }
     } else {
       log.info('Ambient tanımlı değil — adım atlandı, montaj çıktısı nihai dosya.');
     }

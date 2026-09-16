@@ -98,7 +98,9 @@ export function buildPromptsMd({ videoName, style, templates }) {
   const values = {
     STYLE_NAME: style.name,
     STYLE_BLOCK: renderStyleBlock(style),
-    MOTION_HINTS: style.motionHints.map((hint) => hint.trim().replace(/\.+$/, '')).join(', '),
+    MOTION_HINTS: Array.isArray(style.motionHints)
+      ? style.motionHints.map((hint) => hint.trim().replace(/\.+$/, '')).join(', ')
+      : '',
   };
   const problems = [];
 
@@ -158,4 +160,34 @@ export function codeBlocks(md) {
     }
   }
   return { blocks, unclosed: current !== null };
+}
+
+/**
+ * Proje klasöründeki prompts.md veya şablonlardan Faz 1, 2, 3 metinlerini ayrıştırır.
+ *
+ * @param {{ videoName?: string, style?: object, templates?: { file: string, text: string }[] }} [input]
+ * @returns {Promise<{ faz1: string, faz2: string, faz3: string }>}
+ */
+export async function getPhasePrompts(input = {}) {
+  let templates = input.templates;
+  if (!templates) {
+    templates = await loadTemplates();
+  }
+  const style = input.style ?? { name: 'default', styleBlock: {}, motionHints: ['subtle motion'] };
+  const values = {
+    STYLE_NAME: style.name,
+    STYLE_BLOCK: renderStyleBlock(style),
+    MOTION_HINTS: Array.isArray(style.motionHints) ? style.motionHints.map((hint) => hint.trim().replace(/\.+$/, '')).join(', ') : 'subtle motion',
+  };
+
+  const getFilled = (file) => {
+    const t = templates.find((item) => item.file === file);
+    return t ? fillTemplate(t.text, values, file).trimEnd() : '';
+  };
+
+  return {
+    faz1: getFilled('faz1-master.txt'),
+    faz2: getFilled('faz2-angles.txt'),
+    faz3: getFilled('faz3-motion.txt'),
+  };
 }

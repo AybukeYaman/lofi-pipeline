@@ -46,32 +46,41 @@ describe('inspectProject — taze projeden montaja', () => {
     assert.equal(nextStep(s).id, 'faz1');
   });
 
-  test('açı varyantı MASTER sayılmaz; MASTER.PNG sayılır → faz3', async () => {
+  test('açı varyantı MASTER sayılmaz; MASTER.PNG sayılır → audio', async () => {
     await writeFile(join(dir, 'resimler', 'Master1.jpg'), '');
     assert.equal(nextStep(await inspectProject(dir)).id, 'faz1');
 
     await writeFile(join(dir, 'resimler', 'MASTER.PNG'), '');
     const s = await inspectProject(dir);
     assert.equal(s.master, join(dir, 'resimler', 'MASTER.PNG'));
-    assert.equal(nextStep(s).id, 'faz3');
+    assert.equal(nextStep(s).id, 'audio');
   });
 
-  test('klip konunca → clip; yazılınca → audio; parça konunca → build', async () => {
-    await writeFile(join(dir, 'videolar', 'in.mp4'), '');
-    await writeFile(join(dir, 'videolar', 'notlar.txt'), '');
+  test('parça konunca → multi-track tamamlanana kadar audio adımında kalır; hepsi tamamlanınca → klip beklentisine geçer; klip yazılınca → build', async () => {
+    await writeFile(join(dir, 'resimler', 'MASTER.PNG'), '');
+    await writeFile(join(dir, 'audio', 'a [usesuno.com].m4a'), '');
     let s = await inspectProject(dir);
-    assert.deepEqual(s.clips, [join(dir, 'videolar', 'in.mp4')]);
+    assert.equal(s.audioCount, 1);
+    // multi-track projede (17 track) 1 track yetmez, audio adımında kalır:
+    assert.equal(nextStep(s).id, 'audio');
+
+    // music planını tamamlanmış sayalım (1/1):
+    const data = s.projectJson.data;
+    data.music.totalTracks = 1;
+    data.music.completedCount = 1;
+    data.music.tracks = [data.music.tracks[0]];
+    data.music.tracks[0].status = 'completed';
+    await writeFile(s.projectPath, JSON.stringify(data, null, 2));
+
+    s = await inspectProject(dir);
+    assert.equal(nextStep(s).id, 'faz3');
+
+    await writeFile(join(dir, 'videolar', 'in.mp4'), '');
+    s = await inspectProject(dir);
     assert.equal(nextStep(s).id, 'clip');
 
     await setProjectClip(s.projectPath, s.clips[0]);
     s = await inspectProject(dir);
-    assert.deepEqual(s.clip, { value: './videolar/in.mp4', path: join(dir, 'videolar', 'in.mp4'), exists: true });
-    assert.equal(nextStep(s).id, 'audio');
-
-    await writeFile(join(dir, 'audio', 'a [usesuno.com].m4a'), '');
-    await writeFile(join(dir, 'audio', 'kapak.jpg'), '');
-    s = await inspectProject(dir);
-    assert.equal(s.audioCount, 1);
     assert.equal(nextStep(s).id, 'build');
   });
 

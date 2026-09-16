@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { test } from 'node:test';
+import { describe, test } from 'node:test';
 import { ingestSunoUrl, parseSunoUrl, sanitizeFilename } from '../../prep/suno-ingest.js';
 import { SunoIngestError } from '../../prep/suno-errors.js';
 
@@ -121,4 +121,63 @@ test('ingestSunoUrl - sahte fetch ile MP3 indirme ve dosya yazımı', async () =
   } finally {
     await rm(outputDir, { recursive: true, force: true }).catch(() => {});
   }
+});
+
+test('ingestSunoUrl - sayfa ve indirme isteklerinin hepsi zaman aşımı sinyali taşır', async () => {
+  const outputDir = join(process.cwd(), 'test-temp-suno-timeout');
+  const html = `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify({
+    props: { pageProps: { clip: { id: '11111111-2222-3333-4444-555555555555', title: 'T', audio_url: 'https://cdn1.suno.ai/t.mp3' } } },
+  })}</script>`;
+  const calls = [];
+  const fakeFetch = async (url, options) => {
+    calls.push({ url, signal: options?.signal });
+    if (url.includes('cdn1.suno.ai')) return { ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(4) };
+    return { ok: true, status: 200, text: async () => html };
+  };
+
+  try {
+    await ingestSunoUrl({ url: 'https://suno.com/song/11111111-2222-3333-4444-555555555555', outputDir }, { fetchFn: fakeFetch });
+    assert.ok(calls.length >= 2, 'sayfa + en az bir indirme');
+    for (const call of calls) assert.ok(call.signal instanceof AbortSignal, call.url);
+  } finally {
+    await rm(outputDir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+describe('güncel Suno sayfası (RSC) ve uyarılar', () => {
+  const ID = '15b3ef3e-a0b3-4ffc-9cf2-e6da4df0b3af';
+  const rscPage = (fields) => `<html><head><title>Sabah by kuzru | Suno</title></head><body><script>self.__next_f.push([1,"{\\"id\\":\\"${ID}\\",\\"entity_type\\":\\"song_schema\\",${fields}}"])</script></body></html>`;
+  const page = (html, { status = 200, url = `https://suno.com/song/${ID}?sh=KFj9r501wKVxarsv` } = {}) =>
+    async () => ({ ok: status < 400, status, url, text: async () => html });
+
+  test('kısa link (/s/<kod>) kabul edilir, yönlendirilen /song/<uuid> üzerinden clip okunur', async () => {
+    const fetchFn = page(rscPage(`\\"audio_url\\":\\"https://cdn1.suno.ai/${ID}.mp3\\",\\"title\\":\\"Sabah\\"`));
+    const result = await parseSunoUrl('https://suno.com/s/KFj9r501wKVxarsv', fetchFn);
+    assert.equal(result.id, ID);
+    assert.deepEqual(result.clips, [{ clipId: ID, title: 'Sabah', audioUrl: `https://cdn1.suno.ai/${ID}.mp3` }]);
+  });
+
+  test('audio_url "forbidden" → downloadDisabled uyarısı; şifreli akış indirilmeye çalışılmaz', async () => {
+    const calls = [];
+    const fetchFn = async (url, options) => {
+      calls.push(url);
+      return page(rscPage(`\\"audio_url\\":\\"https://studio-api.prod.suno.com/api/forbidden\\",\\"media_urls\\":[{\\"url\\":\\"https://x.cloudfront.net/1/clip/${ID}.m4a\\"}]`))(url, options);
+    };
+    await assert.rejects(
+      ingestSunoUrl({ url: 'https://suno.com/s/KFj9r501wKVxarsv', outputDir: join(process.cwd(), 'test-temp-suno-forbidden') }, { fetchFn }),
+      (err) => err instanceof SunoIngestError && err.downloadDisabled && !err.notPublic && err.message.includes('Select Audio Files'),
+    );
+    assert.equal(calls.length, 1, 'yalnızca sayfa istenir');
+  });
+
+  test('is_public:false → notPublic uyarısı', async () => {
+    const fetchFn = page(rscPage(`\\"is_public\\":false,\\"audio_url\\":\\"https://cdn1.suno.ai/${ID}.mp3\\"`));
+    await assert.rejects(parseSunoUrl(`https://suno.com/song/${ID}`, fetchFn), (err) => err.notPublic && err.message.includes('public değil'));
+  });
+
+  test('HTTP 404/403 ya da sayfada şarkı verisi yok → notPublic uyarısı', async () => {
+    await assert.rejects(parseSunoUrl(`https://suno.com/song/${ID}`, page('', { status: 404 })), (err) => err.notPublic && err.message.includes('HTTP 404'));
+    await assert.rejects(parseSunoUrl(`https://suno.com/song/${ID}`, page('', { status: 403 })), (err) => err.notPublic);
+    await assert.rejects(parseSunoUrl(`https://suno.com/song/${ID}`, page('<html>giriş yap</html>')), (err) => err.notPublic);
+  });
 });

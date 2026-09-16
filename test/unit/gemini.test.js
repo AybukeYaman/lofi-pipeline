@@ -336,3 +336,22 @@ test('11. GEMINI_MODEL override ve varsayılan model kontrolü', () => {
   assert.equal(getModel({ GEMINI_MODEL: 'gemini-1.5-pro' }), 'gemini-1.5-pro');
   assert.equal(getApiKey({ GEMINI_API_KEY: 'secret' }), 'secret');
 });
+
+test('12. her denemede zaman aşımı sinyali; asılı istek süreci süresiz tutmaz', async () => {
+  const signals = [];
+  const fakeFetch = async (url, options) => {
+    signals.push(options.signal);
+    if (signals.length === 1) throw new Error('timeout');
+    return { ok: true, status: 200, headers: new Headers(), text: async () => '{}' };
+  };
+
+  await generateContent({
+    contents: [{ parts: [{ text: 'x' }] }],
+    apiKey: 'AIzaSyTimeoutKey',
+    options: { fetchFn: fakeFetch, sleepFn: (resolve) => resolve() },
+  });
+
+  assert.equal(signals.length, 2);
+  for (const signal of signals) assert.ok(signal instanceof AbortSignal);
+  assert.notEqual(signals[0], signals[1], 'retry yeni süre ile başlamalı');
+});

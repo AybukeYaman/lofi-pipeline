@@ -133,3 +133,15 @@ test('9. MAX_IMAGE_SIZE_BYTES ve SUPPORTED_IMAGE_EXTENSIONS sabiti', () => {
   assert.equal(MAX_IMAGE_SIZE_BYTES, 15 * 1024 * 1024);
   assert.deepEqual(SUPPORTED_IMAGE_EXTENSIONS, ['.jpg', '.jpeg', '.png', '.webp']);
 });
+
+test('10. buildMultiReferenceStylePrompt visual language ve concept doğrulaması', async () => {
+  const prompt = (await import('../../prep/describe-style.js')).buildMultiReferenceStylePrompt({
+    concept: '2:17 AM — Everyone Is Asleep',
+    ambientNames: ['heavyRain'],
+  });
+
+  assert.match(prompt, /Verilen referans görsellerin ortak visual language \/ ambience özelliklerini/);
+  assert.match(prompt, /Video Concept Context: "2:17 AM — Everyone Is Asleep"/);
+  assert.match(prompt, /Konuyu veya sahneyi \(WHAT IS HAPPENING\) ANLATMA, sadece stili ve atmosferi \(HOW IT LOOKS\) anlat/);
+  assert.match(prompt, /palette: Referans görsellerden baskın\/destekleyici 5 ila 8 renk seç/);
+});

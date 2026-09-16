@@ -51,8 +51,8 @@ describe('runNewVideo', () => {
     });
     const dir = join(env.videosDir, 'video3-Neo Tokyo & Night');
     assert.equal(result.dir, dir);
-    assert.deepEqual((await readdir(dir)).sort(), ['STYLE_BLOCK.txt', 'audio', 'project.json', 'prompts.md', 'resimler', 'videolar']);
-    for (const sub of ['audio', 'resimler', 'videolar']) assert.deepEqual(await readdir(join(dir, sub)), []);
+    assert.deepEqual((await readdir(dir)).sort(), ['STYLE_BLOCK.txt', 'audio', 'project.json', 'prompts.md', 'references', 'resimler', 'videolar']);
+    for (const sub of ['audio', 'resimler', 'videolar', 'references']) assert.deepEqual(await readdir(join(dir, sub)), []);
 
     // PowerShell 5.1 Get-Content BOM'suz UTF-8'i cp1254 okuyor ("â€”") — insan okuduğu dosyalar BOM'lu.
     const bom = Buffer.from([0xef, 0xbb, 0xbf]);
@@ -73,13 +73,17 @@ describe('runNewVideo', () => {
     assert.deepEqual(result.warnings, []);
   });
 
-  test('ambient verilmezse anahtar yok, stilin önerisi döner', async () => {
-    const result = await runNewVideo({ ...env, videoName: 'v', styleName: 'anime-cel' });
-    const project = JSON.parse(await readFile(join(result.dir, 'project.json'), 'utf8'));
-    assert.ok(!Object.hasOwn(project, 'ambient'));
-    assert.deepEqual(result.suggestion, {
-      name: 'gentleRain', ambient: { name: 'gentleRain', path: join(env.ambientDir, 'gentleRain.mp3') },
-    });
+  test('custom-generated stili ile proje oluşturulur, STYLE_BLOCK.txt başlangıçta yazılmaz, references klasörü açılır', async () => {
+    const result = await runNewVideo({ ...env, videoName: 'multi-ref-proj', styleName: 'custom-generated' });
+    const dir = join(env.videosDir, 'multi-ref-proj');
+    assert.equal(result.dir, dir);
+    const files = await readdir(dir);
+    assert.ok(!files.includes('STYLE_BLOCK.txt'), 'STYLE_BLOCK.txt başlangıçta olmamalı');
+    assert.ok(files.includes('references'), 'references klasörü oluşturulmalı');
+    
+    const project = JSON.parse(await readFile(join(dir, 'project.json'), 'utf8'));
+    assert.equal(project.style, 'custom-generated');
+    assert.equal(project.styleBlock, undefined);
   });
 
   test('ambient verilmezse okunamayan ambient klasörü durdurmaz, uyarı olur', async () => {

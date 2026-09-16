@@ -6,12 +6,13 @@
  */
 
 import assert from 'node:assert/strict';
-import { copyFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile, rename, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { after, beforeEach, describe, test } from 'node:test';
 
 import { runPanel } from '../../lofi.js';
 import { parseCli as parseNewVideoCli, runNewVideo } from '../../new-video.js';
+import { createDownloadWatcher } from '../../prep/download-watch.js';
 import { STYLES_DIR } from '../../prep/styles.js';
 import {
   addStyle, batchBuild, buildProject, chooseClip, continueProject, createSession, newProject,
@@ -26,6 +27,7 @@ import { DashboardView } from '../../ui/tui/dashboard-view.js';
 let root;
 let n = 0;
 let env;
+let fakeDownloads;
 
 beforeEach(async () => {
   root ??= await tempDir('ui-actions');
@@ -34,6 +36,9 @@ beforeEach(async () => {
   await mkdir(env.videosDir, { recursive: true });
   await mkdir(env.ambientDir);
   await mkdir(env.stylesDir);
+  // Auto Watch gerçek İndirilenler'e düşmesin: her testin kendi boş klasörü.
+  fakeDownloads = join(base, 'downloads');
+  await mkdir(fakeDownloads);
   for (const file of ['campfire.mp3', 'gentleRain.mp3', 'heavyRain.mp3']) await writeFile(join(env.ambientDir, file), '');
   for (const style of ['anime-cel', 'cozy-realistic']) {
     await copyFile(join(STYLES_DIR, `${style}.json`), join(env.stylesDir, `${style}.json`));
@@ -64,14 +69,28 @@ function makeCtx(answers = [], { code = 0, codes = [], closeWhenEmpty = false } 
     }
     return code;
   };
-  const ctx = { prompter, run, store, session: createSession(), ...env };
-  return { ctx, calls, prompter, out: () => prompter.output() };
+  // openFolderFn: gerçek openFolder testte Explorer penceresi açar (spawn detached).
+  const openedFolders = [];
+  const openFolderFn = (folderPath) => { openedFolders.push(folderPath); return true; };
+  const ctx = { prompter, run, store, session: createSession(), openFolderFn, downloadsDir: fakeDownloads, ...env };
+  return { ctx, calls, prompter, openedFolders, out: () => prompter.output() };
 }
 
 const project = (name = 'v') => runNewVideo({ videoName: name, styleName: 'anime-cel', ...env });
 const readProject = async (dir) => JSON.parse(await readFile(join(dir, 'project.json'), 'utf8'));
 const itemsOf = (prompter, questionPart) =>
   prompter.questions.find((q) => q.question.includes(questionPart))?.items.map((i) => i.label);
+
+/** Gerçek izleyici, hızlı saat; start sonrası ve n. poll'da olay tetikleyen kanca. */
+const watcherWith = ({ afterStart, onPoll }) => (options) => {
+  let now = 0;
+  let polls = 0;
+  const real = createDownloadWatcher({ ...options, nowFn: () => (now += 1000) });
+  return {
+    async start() { await real.start(); await afterStart?.(); },
+    async poll() { await onPoll?.(++polls); return real.poll(); },
+  };
+};
 
 describe('newProject', () => {
   test('geçersiz isim tekrar sorulur; öneri başta → --ambient gentleRain; devam etme', async () => {
@@ -188,16 +207,18 @@ describe('continueProject', () => {
     delete data.music;
     await writeFile(join(dir, 'project.json'), JSON.stringify(data, null, 2));
 
-    const { ctx } = makeCtx([
+    const { ctx, openedFolders } = makeCtx([
       async () => {
         await writeFile(join(dir, 'resimler', 'MASTER.png'), '');
         return pick('⏳ [ Auto Watch ]');
       },
+      pick('Son 15 dakika'),
       async () => {
         await writeFile(join(dir, 'videolar', 'in.mp4'), '');
         await writeFile(join(dir, 'audio', 'a.m4a'), '');
         return pick('Default music');
       },
+      pick('Son 15 dakika'),
       pick('no'),
       pick('Ana Menüye Dön'),
     ]);
@@ -205,11 +226,13 @@ describe('continueProject', () => {
     await continueProject(ctx, null, { pollMs: 10 });
 
     assert.equal((await readProject(dir)).clip, './videolar/in.mp4');
+    // Klasör yalnızca "Klasörü Aç" ile açılır; adıma girmek Explorer açmaz.
+    assert.deepEqual(openedFolders, []);
   });
 
   test('Klasörü Aç (dosya yok) → bekleme ekranında kalır, Yenile (dosya var) → otomatik ilerler', async () => {
     const { dir } = await project('bekleme-testi');
-    const { ctx, out } = makeCtx([
+    const { ctx, out, openedFolders } = makeCtx([
       // FAZ 1: Klasörü Aç seçilir ama dosya eklenmez
       pick('open'),
       // FAZ 1: Dosya eklendikten sonra Yenile seçilir
@@ -243,6 +266,9 @@ describe('continueProject', () => {
     assert.ok(outputText.includes('[✓ Master Görseli Algılandı]'));
     assert.ok(outputText.includes('Detected') || outputText.includes('Müzik Dosyası Algılandı'));
     assert.ok(outputText.includes('[✓ Video Klip Algılandı & Bağlandı]'));
+
+    // "Klasörü Aç" her adımda doğru klasörü açar.
+    assert.deepEqual(openedFolders, [join(dir, 'resimler'), join(dir, 'videolar')]);
   });
 
   test('proje yoksa seçim yapılamaz ve akış biter', async () => {
@@ -373,7 +399,13 @@ describe('multi-track music workflow in continueProject', () => {
     const { dir } = await project('finish-music-test');
     await writeFile(join(dir, 'resimler', 'MASTER.PNG'), '');
 
-    // Kullanıcı 15/17 track'te 'finish' seçip confirmation'a 'yes' diyor, sonraki faz3 adımında 'menu' diyerek çıkıyor
+    // "Bitir" ancak elde en az bir şarkı varken sunulur: ilk track tamamlanmış sayılır.
+    const seed = await readProject(dir);
+    Object.assign(seed.music.tracks[0], { status: 'completed', file: '01-Intro.mp3' });
+    seed.music.completedCount = 1;
+    await writeFile(join(dir, 'project.json'), JSON.stringify(seed, null, 2));
+
+    // Kullanıcı 1/17 track'te 'finish' seçip confirmation'a 'yes' diyor, sonraki faz3 adımında 'menu' diyerek çıkıyor
     const { ctx } = makeCtx([
       pick('finish'),
       pick('yes'),
@@ -386,7 +418,7 @@ describe('multi-track music workflow in continueProject', () => {
     const data = await readProject(dir);
     assert.equal(data.music.status, 'completed_by_user');
     assert.equal(data.music.totalTracks, 17);
-    assert.equal(data.music.tracks.filter((t) => t.status === 'pending').length, 17);
+    assert.equal(data.music.tracks.filter((t) => t.status === 'pending').length, 16);
 
     // project-status ile nextStep kontrol et: Artık audio değil faz3 bekleniyor
     const status = await inspectProject(dir);
@@ -442,7 +474,7 @@ describe('multi-track music workflow in continueProject', () => {
       }],
     });
 
-    const { ctx } = makeCtx([
+    const { ctx, openedFolders } = makeCtx([
       pick('open'),
       pick('refresh'),
       async () => {
@@ -457,8 +489,10 @@ describe('multi-track music workflow in continueProject', () => {
     process.env.GEMINI_API_KEY = 'mock-key';
 
     ctx.session.project = dir;
-    
+
     await continueProject(ctx);
+
+    assert.deepEqual(openedFolders, [join(dir, 'references')]);
 
     const updatedData = await readProject(dir);
     assert.equal(updatedData.style, 'custom-generated');
@@ -746,3 +780,349 @@ describe('multi-track music workflow in continueProject', () => {
 });
 
 
+
+describe('Auto Watch (İndirilenler → audio/)', () => {
+  /** Master hazır, iki bekleyen track'li proje + sahte İndirilenler klasörü. */
+  async function musicProject() {
+    const { dir } = await project('auto-watch');
+    const data = await readProject(dir);
+    data.music = {
+      concept: 'Test', status: 'in_progress', completedCount: 0, totalTracks: 2,
+      tracks: [
+        { number: 1, title: 'Intro', status: 'pending', prompt: 'p1' },
+        { number: 2, title: 'Outro', status: 'pending', prompt: 'p2' },
+      ],
+    };
+    await writeFile(join(dir, 'project.json'), JSON.stringify(data, null, 2));
+    await writeFile(join(dir, 'resimler', 'MASTER.png'), '');
+    const downloads = fakeDownloads;
+    await writeFile(join(downloads, 'eski.mp3'), 'önceden inmiş');
+    const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    await utimes(join(downloads, 'eski.mp3'), hourAgo, hourAgo);
+    return { dir, downloads };
+  }
+
+  test('iki indirme sırayla iki track\'i tamamlar: taşınır (NN-ad), yarım indirme beklenir, eski dosyaya dokunulmaz', async () => {
+    const { dir, downloads } = await musicProject();
+    const { ctx, out } = makeCtx([pick('watch'), pick('Son 15 dakika'), pick('menu')]);
+    Object.assign(ctx, {
+      downloadsDir: downloads,
+      downloadPollMs: 1,
+      createDownloadWatcherFn: watcherWith({
+        afterStart: async () => {
+          await writeFile(join(downloads, 'Quiet Moments.mp3'), 'a');
+          await writeFile(join(downloads, 'İkinci Şarkı.mp3.crdownload'), 'b');
+        },
+        onPoll: async (n) => {
+          if (n === 5) await rename(join(downloads, 'İkinci Şarkı.mp3.crdownload'), join(downloads, 'İkinci Şarkı.mp3'));
+        },
+      }),
+    });
+    ctx.session.project = dir;
+    await continueProject(ctx, null, { pollMs: 1 });
+
+    assert.deepEqual((await readdir(join(dir, 'audio'))).sort(), ['01-Quiet-Moments.mp3', '02-İkinci-Şarkı.mp3']);
+    assert.deepEqual(await readdir(downloads), ['eski.mp3'], 'taşındı (kopyalanmadı), eski dosya yerinde');
+    const music = (await readProject(dir)).music;
+    assert.deepEqual(music.tracks.map((t) => [t.status, t.file]), [['completed', '01-Quiet-Moments.mp3'], ['completed', '02-İkinci-Şarkı.mp3']]);
+    assert.equal(music.status, 'completed');
+    assert.ok(out().includes('[✓ Auto Watch Bitti]'));
+    assert.equal(ctx.store.getState().onKey, null, 'tuş kancası kaldırıldı');
+  });
+
+  test('Auto Watch açılmadan önce (son 15 dk) inmiş mp3\'ler indirilme sırasıyla alınır; 1 saatlik dosyaya dokunulmaz', async () => {
+    const { dir, downloads } = await musicProject();
+    await writeFile(join(downloads, 'Ikinci.mp3'), 'b');
+    await writeFile(join(downloads, 'Birinci.mp3'), 'a');
+    const minutesAgo = (m) => new Date(Date.now() - m * 60 * 1000);
+    await utimes(join(downloads, 'Birinci.mp3'), minutesAgo(10), minutesAgo(10));
+    await utimes(join(downloads, 'Ikinci.mp3'), minutesAgo(2), minutesAgo(2));
+
+    const { ctx } = makeCtx([pick('watch'), pick('Son 15 dakika'), pick('menu')]);
+    Object.assign(ctx, { downloadsDir: downloads, downloadPollMs: 1, createDownloadWatcherFn: watcherWith({}) });
+    ctx.session.project = dir;
+    await continueProject(ctx, null, { pollMs: 1 });
+
+    assert.deepEqual((await readProject(dir)).music.tracks.map((t) => t.file), ['01-Birinci.mp3', '02-Ikinci.mp3']);
+    assert.deepEqual(await readdir(downloads), ['eski.mp3']);
+  });
+
+  test('süre seçimi: "Son 5 dakika" 10 dk önce ineni almaz; .m4a alınır, [site] ve (1) ekleri addan atılır', async () => {
+    const { dir, downloads } = await musicProject();
+    const minutesAgo = (m) => new Date(Date.now() - m * 60 * 1000);
+    await writeFile(join(downloads, 'Eski Deneme.m4a'), 'a');
+    await utimes(join(downloads, 'Eski Deneme.m4a'), minutesAgo(10), minutesAgo(10));
+    await writeFile(join(downloads, '静かな朝の練習 [usesuno.com] (1).m4a'), 'b');
+    await utimes(join(downloads, '静かな朝の練習 [usesuno.com] (1).m4a'), minutesAgo(2), minutesAgo(2));
+
+    const { ctx, prompter } = makeCtx([pick('watch'), pick('Son 5 dakika'), pick('menu')]);
+    Object.assign(ctx, {
+      downloadsDir: downloads,
+      downloadPollMs: 1,
+      createDownloadWatcherFn: watcherWith({
+        onPoll: async (n) => {
+          if (n >= 6) ctx.store.getState().onKey?.('', { escape: true });
+        },
+      }),
+    });
+    ctx.session.project = dir;
+    await continueProject(ctx, null, { pollMs: 1 });
+
+    assert.deepEqual(itemsOf(prompter, 'ne kadar önce'), ['Son 5 dakika', 'Son 10 dakika', 'Son 15 dakika', 'Geri']);
+    const music = (await readProject(dir)).music;
+    assert.deepEqual(music.tracks.map((t) => [t.status, t.file]), [['completed', '01-静かな朝の練習.m4a'], ['pending', undefined]]);
+    assert.deepEqual((await readdir(downloads)).sort(), ['Eski Deneme.m4a', 'eski.mp3']);
+  });
+
+  test('süre sorusunda Geri → izleme başlamaz, menü tekrar gelir', async () => {
+    const { dir, downloads } = await musicProject();
+    let started = false;
+    const { ctx, prompter } = makeCtx([pick('watch'), pick('Geri'), pick('menu')]);
+    Object.assign(ctx, { downloadsDir: downloads, createDownloadWatcherFn: () => { started = true; throw new Error('başlamamalı'); } });
+    ctx.session.project = dir;
+    await continueProject(ctx, null, { pollMs: 1 });
+    assert.equal(started, false);
+    assert.equal(prompter.questions.filter((q) => q.question.startsWith('TRACK 01 READY')).length, 2);
+  });
+
+  test('B tuşu: izleme durur, onay sorulur; "Yes" → müzik aşaması eksik track\'lerle biter, sonraki adıma geçilir', async () => {
+    const { dir, downloads } = await musicProject();
+    const { ctx, out, prompter } = makeCtx([pick('watch'), pick('Son 15 dakika'), pick('Yes, Continue'), pick('menu')]);
+    Object.assign(ctx, {
+      downloadsDir: downloads,
+      downloadPollMs: 1,
+      createDownloadWatcherFn: watcherWith({
+        afterStart: () => writeFile(join(downloads, 'Tek Sarki.mp3'), 'a'),
+        onPoll: async (n) => {
+          if (n === 5) assert.equal(ctx.store.getState().onKey('B', { ctrl: false, meta: false }), true);
+        },
+      }),
+    });
+    ctx.session.project = dir;
+    await continueProject(ctx, null, { pollMs: 1 });
+
+    const music = (await readProject(dir)).music;
+    assert.equal(music.status, 'completed_by_user');
+    assert.equal(music.completedCount, 1);
+    assert.deepEqual(music.tracks.map((t) => t.status), ['completed', 'pending']);
+    assert.ok(out().includes('müzik aşamasını bitirme onayı soruluyor'));
+    assert.ok(itemsOf(prompter, '1 / 2 tracks completed'), 'onay sorusu B ile açıldı');
+    assert.ok(prompter.questions.some((q) => q.question.startsWith('CAMERA / VIDEO CLIP READY')), 'sonraki adım (klip)');
+    assert.equal(ctx.store.getState().onKey, null);
+  });
+
+  test('B tuşu + "No" → müzik aşaması sürer, track menüsüne dönülür; Ctrl+b tetiklemez', async () => {
+    const { dir, downloads } = await musicProject();
+    const { ctx, prompter } = makeCtx([pick('watch'), pick('Son 15 dakika'), pick('No, Keep Generating'), pick('menu')]);
+    Object.assign(ctx, {
+      downloadsDir: downloads,
+      downloadPollMs: 1,
+      createDownloadWatcherFn: watcherWith({
+        afterStart: () => writeFile(join(downloads, 'Tek Sarki.mp3'), 'a'),
+        onPoll: async (n) => {
+          if (n === 2) assert.equal(ctx.store.getState().onKey('b', { ctrl: true, meta: false }), false);
+          if (n === 5) ctx.store.getState().onKey('b', { ctrl: false, meta: false });
+        },
+      }),
+    });
+    ctx.session.project = dir;
+    await continueProject(ctx, null, { pollMs: 1 });
+
+    const music = (await readProject(dir)).music;
+    assert.equal(music.status, 'in_progress');
+    // Track 01 inen dosyayla tamamlandı; "No" sonrası sıradaki track'in menüsüne dönülür.
+    assert.equal(prompter.questions.filter((q) => q.question.startsWith('TRACK 02 READY')).length, 1);
+  });
+
+  test('hiç şarkı yokken B çalışmaz (eylem kutusu kapalı); ilk track gelince açılır', async () => {
+    const { dir, downloads } = await musicProject();
+    const { ctx, out, prompter } = makeCtx([pick('watch'), pick('Son 15 dakika'), pick('Yes, Continue'), pick('menu')]);
+    Object.assign(ctx, {
+      downloadsDir: downloads,
+      downloadPollMs: 1,
+      createDownloadWatcherFn: watcherWith({
+        onPoll: async (n) => {
+          if (n === 2) {
+            assert.equal(ctx.store.getState().actionHint.enabled, false, 'şarkı yokken kutu kapalı');
+            assert.equal(ctx.store.getState().onKey('b', { ctrl: false, meta: false }), true);
+            assert.ok(out().includes('Henüz şarkı eklenmedi'), 'kullanıcıya neden çalışmadığı yazılır');
+          }
+          if (n === 3) await writeFile(join(downloads, 'Tek Sarki.mp3'), 'a');
+          if (n === 6) {
+            assert.equal(ctx.store.getState().actionHint.enabled, true, 'ilk şarkıdan sonra kutu açık');
+            ctx.store.getState().onKey('b', { ctrl: false, meta: false });
+          }
+        },
+      }),
+    });
+    ctx.session.project = dir;
+    await continueProject(ctx, null, { pollMs: 1 });
+
+    const music = (await readProject(dir)).music;
+    assert.equal(music.status, 'completed_by_user');
+    assert.equal(music.completedCount, 1);
+    assert.equal(ctx.store.getState().actionHint, null, 'izleme bitince kutu kalkar');
+    assert.ok(prompter.questions.some((q) => q.question.startsWith('CAMERA / VIDEO CLIP READY')), 'sonraki adım (klip)');
+  });
+
+  test('hiç şarkı yokken track menüsünde "Finish Music & Continue" görünmez', async () => {
+    const { dir } = await musicProject();
+    const { ctx, prompter } = makeCtx([pick('menu')]);
+    ctx.session.project = dir;
+    await continueProject(ctx, null, { pollMs: 1 });
+
+    const trackMenu = prompter.questions.find((q) => q.question.startsWith('TRACK 01 READY'));
+    assert.ok(trackMenu, 'track menüsü açıldı');
+    assert.equal(trackMenu.items.some((it) => it.value === 'finish'), false);
+  });
+
+  test('tek Esc durdurmaz (alt-tab\'ın tetiklediği sahte Esc\'e karşı); art arda iki Esc durdurur', async () => {
+    const { dir, downloads } = await musicProject();
+    const { ctx, out, prompter } = makeCtx([pick('watch'), pick('Son 15 dakika'), pick('menu')]);
+    Object.assign(ctx, {
+      downloadsDir: downloads,
+      downloadPollMs: 1,
+      createDownloadWatcherFn: watcherWith({
+        onPoll: async (n) => {
+          if (n === 2) {
+            assert.equal(ctx.store.getState().onKey('', { escape: true }), true);
+            assert.ok(out().includes('Esc\'e tekrar bas'));
+            assert.equal(ctx.store.getState().footer.includes('Auto Watch'), true, 'tek Esc\'te izleme sürüyor');
+          }
+          if (n === 3) assert.equal(ctx.store.getState().onKey('', { escape: true }), true);
+        },
+      }),
+    });
+    ctx.session.project = dir;
+    await continueProject(ctx, null, { pollMs: 1 });
+
+    assert.ok(out().includes('[Auto Watch Durdu]'));
+    assert.deepEqual((await readProject(dir)).music.tracks.map((t) => t.status), ['pending', 'pending']);
+    assert.equal(ctx.store.getState().onKey, null);
+    assert.equal(ctx.store.getState().footer, '');
+    assert.equal(prompter.questions.filter((q) => q.question.startsWith('TRACK 01 READY')).length, 2, 'iki Esc sonrası menü');
+  });
+
+  test('audio/\'da aynı ad varsa taşınan dosya "(1)" alır, var olan dosyanın üzerine yazılmaz', async () => {
+    const { dir, downloads } = await musicProject();
+    await mkdir(join(dir, 'audio'), { recursive: true });
+    await writeFile(join(dir, 'audio', '02-Intro.mp3'), 'eski');
+    const data = await readProject(dir);
+    Object.assign(data.music.tracks[0], { status: 'completed', file: '02-Intro.mp3' });
+    data.music.completedCount = 1;
+    await writeFile(join(dir, 'project.json'), JSON.stringify(data, null, 2));
+
+    const { ctx } = makeCtx([pick('watch'), pick('Son 15 dakika'), pick('menu')]);
+    Object.assign(ctx, {
+      downloadsDir: downloads,
+      downloadPollMs: 1,
+      createDownloadWatcherFn: watcherWith({ afterStart: () => writeFile(join(downloads, 'Intro.mp3'), 'yeni') }),
+    });
+    ctx.session.project = dir;
+    await continueProject(ctx, null, { pollMs: 1 });
+
+    assert.equal((await readProject(dir)).music.tracks[1].file, '02-Intro (1).mp3');
+    assert.equal(await readFile(join(dir, 'audio', '02-Intro.mp3'), 'utf8'), 'eski');
+    assert.equal(await readFile(join(dir, 'audio', '02-Intro (1).mp3'), 'utf8'), 'yeni');
+  });
+});
+
+describe('Auto Watch (İndirilenler → resimler/ ve videolar/)', () => {
+  /** Müziksiz proje: akış doğrudan faz1'den (master frame) başlar. */
+  async function visualProject(name) {
+    const { dir } = await project(name);
+    const data = await readProject(dir);
+    delete data.music;
+    await writeFile(join(dir, 'project.json'), JSON.stringify(data, null, 2));
+    return dir;
+  }
+
+  test('faz1: İndirilenler\'e inen görsel resimler/MASTER.png olarak taşınır ve adım ilerler', async () => {
+    const dir = await visualProject('watch-master');
+    const { ctx, out } = makeCtx([
+      pick('⏳ [ Auto Watch ]'),
+      pick('Son 15 dakika'),
+      async () => {
+        await writeFile(join(dir, 'videolar', 'in.mp4'), '');
+        await writeFile(join(dir, 'audio', 'a.m4a'), '');
+        return pick('Default music');
+      },
+      pick('Son 15 dakika'),
+      pick('no'),
+      pick('Ana Menüye Dön'),
+    ]);
+    // Sonraki adımın (audio) Auto Watch'ı da izleyici başlatır; görsel yalnızca ilkinde insin.
+    let dropped = false;
+    Object.assign(ctx, {
+      downloadPollMs: 1,
+      createDownloadWatcherFn: watcherWith({
+        afterStart: async () => {
+          if (dropped) return;
+          dropped = true;
+          await writeFile(join(fakeDownloads, 'sahne [midjourney] (1).png'), 'görsel');
+        },
+      }),
+    });
+    ctx.session.project = dir;
+    await continueProject(ctx, null, { pollMs: 1 });
+
+    assert.equal(await readFile(join(dir, 'resimler', 'MASTER.png'), 'utf8'), 'görsel');
+    assert.deepEqual(await readdir(fakeDownloads), [], 'dosya taşınır, İndirilenler\'de kalmaz');
+    assert.ok(out().includes('[✓ İndirilen Dosya Alındı]'));
+    assert.equal(ctx.store.getState().onKey, null);
+    assert.equal(ctx.store.getState().actionHint, null);
+  });
+
+  test('faz3: İndirilenler\'e inen mp4 videolar/ altına taşınır, ad temizlenir ve klip bağlanır', async () => {
+    const dir = await visualProject('watch-clip');
+    await writeFile(join(dir, 'resimler', 'MASTER.png'), '');
+    await writeFile(join(dir, 'audio', 'a.m4a'), '');
+    const { ctx } = makeCtx([
+      pick('⏳ [ Auto Watch ]'),
+      pick('Son 15 dakika'),
+      pick('no'),
+      pick('Ana Menüye Dön'),
+    ]);
+    Object.assign(ctx, {
+      downloadPollMs: 1,
+      createDownloadWatcherFn: watcherWith({
+        afterStart: () => writeFile(join(fakeDownloads, 'Kamera Klip [kling] (1).mp4'), 'klip'),
+      }),
+    });
+    ctx.session.project = dir;
+    await continueProject(ctx, null, { pollMs: 1 });
+
+    assert.equal(await readFile(join(dir, 'videolar', 'Kamera-Klip.mp4'), 'utf8'), 'klip');
+    assert.equal((await readProject(dir)).clip, './videolar/Kamera-Klip.mp4');
+  });
+
+  test('faz1: iki Esc izlemeyi durdurur, menüye dönülür (tek Esc durdurmaz)', async () => {
+    const dir = await visualProject('watch-escape');
+    const { ctx, out, prompter } = makeCtx([
+      pick('⏳ [ Auto Watch ]'),
+      pick('Son 15 dakika'),
+      pick('Ana Menüye Dön'),
+    ]);
+    Object.assign(ctx, {
+      downloadPollMs: 1,
+      createDownloadWatcherFn: watcherWith({
+        onPoll: async (n) => {
+          if (n === 2) {
+            assert.equal(ctx.store.getState().actionHint.key, 'Esc Esc', 'kısayol ekranda görünür');
+            assert.equal(ctx.store.getState().onKey('', { escape: true }), true);
+            assert.ok(out().includes('Esc\'e tekrar bas'));
+            assert.ok(ctx.store.getState().footer.includes('Auto Watch'), 'tek Esc\'te izleme sürüyor');
+          }
+          if (n === 3) ctx.store.getState().onKey('', { escape: true });
+        },
+      }),
+    });
+    ctx.session.project = dir;
+    await continueProject(ctx, null, { pollMs: 1 });
+
+    assert.ok(out().includes('[Auto Watch Durdu]'));
+    assert.equal(ctx.store.getState().onKey, null);
+    assert.equal(ctx.store.getState().footer, '');
+    assert.equal(prompter.questions.filter((q) => q.question.startsWith('MASTER FRAME READY')).length, 2);
+  });
+});

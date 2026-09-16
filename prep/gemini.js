@@ -16,6 +16,8 @@ import process from 'node:process';
 export const DEFAULT_GEMINI_MODEL = 'gemini-1.5-flash';
 export const MAX_RETRIES = 3;
 export const MAX_BACKOFF_MS = 60000;
+/** Tek deneme üst sınırı: asılı kalan bağlantı süreci süresiz tutmasın. */
+export const REQUEST_TIMEOUT_MS = 90000;
 
 export class GeminiError extends Error {
   /**
@@ -165,7 +167,7 @@ async function fetchWithRetry(url, options, { fetchFn = fetch, sleepFn, maxRetri
     let rawText = '';
 
     try {
-      response = await fetchFn(url, options);
+      response = await fetchFn(url, { ...options, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
       rawText = await response.text();
       try {
         body = JSON.parse(rawText);

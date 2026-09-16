@@ -1,14 +1,32 @@
 ## Faz 1 — Master frame
 
 **Araç:** Google AI Studio, Gemini image (Nano Banana)
-**Ekler (sıra önemli):** Image 1 = kompozisyon referansı (sahne) · Image 2 = stil referansı (`resimler/style-ref.*` — yoksa stilin kaynak görseli)
+**Ekler:** Image 1 = kompozisyon referansı (sahne)
 **Çıktı:** `resimler/MASTER.png`
 
 ```text
-Image 1 = composition reference. Image 2 = style reference.
-Redraw the scene from Image 1 entirely in the visual style of Image 2.
-KEEP from Image 1: subject identity, object placement, framing, layout.
-TAKE from Image 2: rendering technique, color palette, lighting, line quality, texture.
+Image 1 = environment / composition reference.
+
+Recreate the scene from Image 1 using the visual language defined in the Style Block below.
+
+KEEP from Image 1:
+* subject identity
+* environment / scene
+* object placement
+* framing
+* layout
+* spatial relationships
+* camera angle
+
+TAKE from the Style Block:
+* rendering technique
+* color palette
+* lighting
+* line quality
+* texture / grain
+* contrast
+* shading
+
 Output a single still image. Do not change the camera angle.
 
 Style description:

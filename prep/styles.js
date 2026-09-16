@@ -104,6 +104,14 @@ export async function findStyleRef(name, { dir = STYLES_DIR } = {}) {
  * @returns {Promise<{ style: object, path: string, warnings: string[] }>}
  */
 export async function loadStyle(name, { dir = STYLES_DIR, ambients } = {}) {
+  if (name === 'custom-generated') {
+    return {
+      style: { name: 'custom-generated', suggestedAmbient: 'none' },
+      path: join(dir, 'custom-generated.json'),
+      warnings: [],
+    };
+  }
+
   if (typeof name !== 'string' || !NAME_PATTERN.test(name)) {
     throw new StyleError(String(name), [`stil adı küçük harf kebab-case olmalı (ör. "neo-tokyo"), verilen: ${JSON.stringify(name)}`]);
   }
@@ -212,6 +220,7 @@ export function validateStyle(json, { expectedName, ambients } = {}) {
  * @returns {string} sonunda satır sonu yok
  */
 export function renderStyleBlock(style) {
+  if (!style || !style.styleBlock) return '';
   return STYLE_FIELDS.map(({ key, label }) => {
     if (key !== 'palette') return `${label}: ${style.styleBlock[key]}`;
     const colors = style.styleBlock.palette.map((c) => `- ${c.hex.toUpperCase()} ${c.role}`);

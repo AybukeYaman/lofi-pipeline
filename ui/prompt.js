@@ -144,19 +144,24 @@ export function createPrompter({ stdin = process.stdin, stdout = process.stdout,
      * @template T
      * @param {string} title
      * @param {{ label: string, value: T, disabled?: boolean }[]} items
-     * @returns {Promise<T[] | null>} liste sırasında; Esc → null
+     * @param {{ zeroLabel?: string }} [options] listenin sonuna eklenir; seçilirse null
+     * @returns {Promise<T[] | null>} Esc → null
      */
-    async chooseMany(title, items) {
-      if (items.length === 0) return [];
+    async chooseMany(title, items, { zeroLabel } = {}) {
+      if (items.length === 0 && !zeroLabel) return [];
+      const choices = toChoices(items);
+      if (zeroLabel) choices.push({ name: ZERO, message: zeroLabel });
+
       const answer = await runPrompt(new MultiSelect({
         ...base,
         message: splitTitle(title),
-        choices: toChoices(items),
+        choices,
         limit: LIST_LIMIT,
         hint: '(Boşluk: işaretle · Enter: onayla · Esc: geri)',
         indicator: (state, choice) => (choice.enabled ? '[x]' : '[ ]'),
       }));
       if (answer === BACK) return null;
+      if (Array.isArray(answer) && answer.includes(ZERO)) return [];
       return answer.map(Number).sort((a, b) => a - b).map((i) => items[i].value);
     },
 

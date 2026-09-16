@@ -44,53 +44,104 @@ describe('nextStep — karar tablosu (sondan başa)', () => {
   });
 
   test('klip hazır + müzik var → montaj (otomatik)', () => {
-    const step = nextStep(makeStatus({ clip: readyClip, audioCount: 15 }));
+    const step = nextStep(makeStatus({ master: 'X:\\videolar\\v\\resimler\\MASTER.png', clip: readyClip, audioCount: 15 }));
     assert.deepEqual([step.id, step.kind], ['build', 'auto']);
     assert.ok(step.detail.includes('./videolar/in.mp4 · 15 parça'));
   });
 
   test('klip hazır + müzik yok → Suno (elle, atlanamaz)', () => {
-    const step = nextStep(makeStatus({ clip: readyClip }));
+    const step = nextStep(makeStatus({ master: 'X:\\videolar\\v\\resimler\\MASTER.png', clip: readyClip }));
     assert.deepEqual([step.id, step.kind, step.skippable], ['audio', 'manual', false]);
     assert.ok(step.detail.includes('X:\\videolar\\v\\audio'));
   });
 
   test('clip boş + videolar\'da klip var → klip seçimi (otomatik)', () => {
-    const step = nextStep(makeStatus({ clips: ['a.mp4', 'b.mp4'], master: null }));
+    const step = nextStep(makeStatus({ master: 'X:\\videolar\\v\\resimler\\MASTER.png', clips: ['a.mp4', 'b.mp4'], audioCount: 3 }));
     assert.deepEqual([step.id, step.kind], ['clip', 'auto']);
     assert.ok(step.detail.includes('2 klip var'));
   });
 
-  test('müzik klipten önce gelse de klip seçimi istenir', () => {
-    assert.equal(id({ clips: ['a.mp4'], audioCount: 3 }), 'clip');
+  test('multi-track müzik: tamamlanmamış parçalar varken (1/17) audio adımında kalınır', () => {
+    const musicPlan = {
+      totalTracks: 17,
+      completedCount: 1,
+      tracks: [
+        { number: 1, status: 'completed' },
+        { number: 2, status: 'pending' },
+      ],
+    };
+    const status = makeStatus({
+      master: 'X:\\videolar\\v\\resimler\\MASTER.png',
+      audioCount: 1,
+      projectJson: { ok: true, data: { music: musicPlan }, error: null },
+    });
+    assert.equal(nextStep(status).id, 'audio');
+  });
+
+  test('multi-track müzik: tüm parçalar (17/17) tamamlandığında klip adımına (faz3/clip) geçilir', () => {
+    const musicPlan = {
+      totalTracks: 2,
+      completedCount: 2,
+      status: 'completed',
+      tracks: [
+        { number: 1, status: 'completed' },
+        { number: 2, status: 'completed' },
+      ],
+    };
+    const status = makeStatus({
+      master: 'X:\\videolar\\v\\resimler\\MASTER.png',
+      audioCount: 2,
+      projectJson: { ok: true, data: { music: musicPlan }, error: null },
+    });
+    assert.equal(nextStep(status).id, 'faz3');
+  });
+
+  test('multi-track müzik: status === completed_by_user olduğunda eksik parçalara (15/17) bakılmaksızın sonraki adıma geçilir', () => {
+    const musicPlan = {
+      totalTracks: 17,
+      completedCount: 15,
+      status: 'completed_by_user',
+      tracks: [
+        { number: 1, status: 'completed' },
+        { number: 16, status: 'pending' },
+        { number: 17, status: 'pending' },
+      ],
+    };
+    const status = makeStatus({
+      master: 'X:\\videolar\\v\\resimler\\MASTER.png',
+      audioCount: 15,
+      projectJson: { ok: true, data: { music: musicPlan }, error: null },
+    });
+    assert.equal(nextStep(status).id, 'faz3');
+  });
+
+  test('müzik klipten önce gelir', () => {
+    assert.equal(id({ master: 'X:\\videolar\\v\\resimler\\MASTER.png', audioCount: 0 }), 'audio');
   });
 
   test('clip yazılı ama dosyası yok → klip seçimi, not ile', () => {
-    const step = nextStep(makeStatus({ clip: missingClip, clips: ['yeni.mp4'], audioCount: 3 }));
+    const step = nextStep(makeStatus({ master: 'X:\\videolar\\v\\resimler\\MASTER.png', clip: missingClip, clips: ['yeni.mp4'], audioCount: 3 }));
     assert.equal(step.id, 'clip');
     assert.ok(step.detail.startsWith("clip'teki dosya bulunamadı: X:\\videolar\\v\\videolar\\eski.mp4\n"));
   });
 
-  test('MASTER var, klip yok → Faz 3', () => {
+  test('MASTER var, müzik yok → Music (audio)', () => {
     const step = nextStep(makeStatus({ master: 'X:\\videolar\\v\\resimler\\MASTER.PNG' }));
-    assert.deepEqual([step.id, step.kind, step.skippable], ['faz3', 'manual', true]);
-    assert.ok(step.detail.includes('X:\\videolar\\v\\prompts.md'));
+    assert.deepEqual([step.id, step.kind, step.skippable], ['audio', 'manual', false]);
+    assert.ok(step.detail.includes('X:\\videolar\\v\\audio'));
   });
 
-  test('taze proje → Faz 1; referans görseli var/yok notu', () => {
+  test('taze proje → Faz 1; promptlar yolu notu', () => {
     const fresh = nextStep(makeStatus());
     assert.deepEqual([fresh.id, fresh.kind, fresh.skippable], ['faz1', 'manual', true]);
-    assert.ok(fresh.detail.includes("Image 2'yi elle ekle"));
-
-    const withRef = nextStep(makeStatus({ styleRef: 'X:\\videolar\\v\\resimler\\style-ref.jpg' }));
-    assert.ok(withRef.detail.includes('Image 2 (stil referansı): X:\\videolar\\v\\resimler\\style-ref.jpg'));
+    assert.ok(fresh.detail.includes('prompts.md → Faz 1 ile master frame\'i üret'));
   });
 });
 
 describe('nextStep — bu oturumda atlananlar', () => {
-  test('faz1 atlanınca faz3, ikisi atlanınca "klip bekleniyor" (atlanamaz)', () => {
-    assert.equal(id({}, { skipped: new Set(['faz1']) }), 'faz3');
-    const step = nextStep(makeStatus(), { skipped: new Set(['faz1', 'faz3']) });
+  test('faz1 atlanınca audio, audio ve faz3 atlanınca "klip bekleniyor" (atlanamaz)', () => {
+    assert.equal(id({}, { skipped: new Set(['faz1']) }), 'audio');
+    const step = nextStep(makeStatus({ audioCount: 1 }), { skipped: new Set(['faz1', 'faz3']) });
     assert.deepEqual([step.id, step.kind, step.skippable], ['clip', 'manual', false]);
   });
 

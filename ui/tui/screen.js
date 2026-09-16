@@ -87,7 +87,9 @@ export function Screen({ store, body, border = 'round' }) {
   );
 
   const question = current
-    ? h(Box, { flexDirection: 'column', marginTop: 1 },
+    // flexShrink 0: ekran dar/kısa kalınca ink satırları sıfır yüksekliğe ezip üst üste
+    // çiziyordu (menü öğesi görünmez oluyordu). Soru hiç sıkışmaz; kırpılan üstteki içerik olur.
+    ? h(Box, { flexDirection: 'column', marginTop: 1, flexShrink: 0 },
       h(Text, { bold: true }, current.widget.title),
       current.widget.kind === 'text'
         ? h(TextInputView, { state: current.state, placeholder: current.widget.placeholder })

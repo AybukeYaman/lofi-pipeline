@@ -8,7 +8,7 @@
 
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { readdir } from 'node:fs/promises';
+import { readdir, stat } from 'node:fs/promises';
 import { basename, extname, join, sep } from 'node:path';
 
 /** Varsayılan ses uzantıları. Uzantı yalnızca ön eleme içindir — */
@@ -59,6 +59,22 @@ export async function listFiles(dir, extensions = AUDIO_EXTENSIONS) {
     .map((entry) => entry.name)
     .sort(naturalCompare)
     .map((name) => join(dir, name));
+}
+
+/**
+ * Klasörde çakışmayan dosya adı: "Ad.mp3" varsa "Ad (1).mp3", "Ad (2).mp3"...
+ * @param {string} dir
+ * @param {string} name
+ * @returns {Promise<string>}
+ */
+export async function uniqueFileName(dir, name) {
+  const ext = extname(name);
+  const base = basename(name, ext);
+  let candidate = name;
+  for (let counter = 1; await stat(join(dir, candidate)).then(() => true, () => false); counter++) {
+    candidate = `${base} (${counter})${ext}`;
+  }
+  return candidate;
 }
 
 /**

@@ -56,3 +56,30 @@ export async function setProjectClip(projectPath, clipPath) {
   await writeTextFile(projectPath, JSON.stringify(json, null, 2) + '\n');
   return json.clip;
 }
+
+/**
+ * project.json'daki her hangi bir alanı yazar.
+ *
+ * @param {string} projectPath
+ * @param {string} key
+ * @param {any} value
+ */
+export async function setProjectField(projectPath, key, value) {
+  let json;
+  try {
+    json = await readJsonFile(projectPath);
+  } catch (cause) {
+    throw new ProjectFileError(
+      cause instanceof SyntaxError
+        ? `project.json ayrıştırılamadı: ${cause.message}`
+        : `project.json okunamadı: ${cause.code ?? cause.message}`,
+    );
+  }
+  if (json === null || typeof json !== 'object' || Array.isArray(json)) {
+    throw new ProjectFileError('project.json kökü bir nesne olmalı');
+  }
+
+  json[key] = value;
+  await writeTextFile(projectPath, JSON.stringify(json, null, 2) + '\n');
+  return json[key];
+}

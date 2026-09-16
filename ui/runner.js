@@ -14,6 +14,26 @@ import { fileURLToPath } from 'node:url';
 export const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 /**
+ * Paneli başlatan süreç hâlâ yaşıyor mu?
+ *
+ * `npm start` + komut sırasında Ctrl+C: npm sinyali yalnızca ara `cmd.exe`'ye
+ * iletir (Windows'ta kill = TerminateProcess, torun süreç etkilenmez) ve çıkar.
+ * SIGINT'i yok sayan panel sahipsiz kalır, terminal girdisini kabukla paylaşır
+ * ve her `npm start`'ta bir tane daha birikir. Bunu yakalamak için.
+ *
+ * @param {{ ppid?: number, killFn?: typeof process.kill }} [options]
+ * @returns {boolean}
+ */
+export function isParentAlive({ ppid = process.ppid, killFn = process.kill } = {}) {
+  try {
+    killFn(ppid, 0); // sinyal 0: yalnızca varlık kontrolü
+    return true;
+  } catch (error) {
+    return error.code === 'EPERM'; // var ama erişim yok → yaşıyor
+  }
+}
+
+/**
  * @param {string} script repo köküne göre betik (ör. "build.js")
  * @param {string[]} [args]
  * @param {{ cwd?: string, spawnFn?: typeof spawn }} [options]

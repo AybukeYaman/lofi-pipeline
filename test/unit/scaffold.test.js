@@ -64,19 +64,19 @@ describe('planProject', async () => {
 
   test('project.json ambient ile', () => {
     const plan = planProject({ ...base, ambient, styleRef: null });
-    assert.equal(plan.files[1].content, JSON.stringify({
-      clip: '',
-      audioDir: './audio',
-      ambient: 'X:\\ortak\\heavyRain.mp3',
-      video: { cropBottom: 150, aspect: '16:9' },
-      output: { dir: './out' },
-    }, null, 2) + '\n');
+    const json = JSON.parse(plan.files[1].content);
+    assert.equal(json.clip, '');
+    assert.equal(json.audioDir, './audio');
+    assert.equal(json.ambient, 'X:\\ortak\\heavyRain.mp3');
+    assert.deepEqual(json.video, { cropBottom: 150, aspect: '16:9' });
+    assert.deepEqual(json.output, { dir: './out' });
+    assert.ok(json.music);
   });
 
   test('project.json ambient yoksa anahtar hiç yok', () => {
     const json = JSON.parse(planProject({ ...base, ambient: null, styleRef: null }).files[1].content);
     assert.ok(!Object.hasOwn(json, 'ambient'));
-    assert.deepEqual(Object.keys(json), ['clip', 'audioDir', 'video', 'output']);
+    assert.deepEqual(Object.keys(json), ['clip', 'audioDir', 'video', 'output', 'music', 'style']);
   });
 
   test('referans görseli resimler/style-ref olarak kopyalanır, uzantı küçük harf', () => {

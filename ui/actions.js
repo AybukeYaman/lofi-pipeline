@@ -2,7 +2,12 @@ import { execSync, spawn } from 'node:child_process';
 import { copyFile, readFile, stat } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
 
-import { AUDIO_EXTENSIONS, listFiles } from '../core/files.js';
+import { moveFile, resolveDownloadsDir } from '../core/downloads.js';
+import { AUDIO_EXTENSIONS, listFiles, uniqueFileName } from '../core/files.js';
+import {
+  DOWNLOAD_AUDIO_EXTENSIONS, DOWNLOAD_IMAGE_EXTENSIONS, DOWNLOAD_VIDEO_EXTENSIONS,
+  RECENT_WINDOW_MINUTES, cleanDownloadName, createDownloadWatcher,
+} from '../prep/download-watch.js';
 import { AmbientError, listAmbients } from '../prep/ambients.js';
 import { ProjectFileError, setProjectClip, setProjectField } from '../prep/project-file.js';
 import { inspectProject, listProjects, nextStep } from '../prep/project-status.js';
@@ -10,11 +15,14 @@ import { describeMultiReferenceStyle } from '../prep/describe-style.js';
 import { getPhasePrompts } from '../prep/prompts.js';
 import { validateVideoName } from '../prep/scaffold.js';
 import { StyleError, findStyleRef, listStyles, loadStyle, renderStyleBlock } from '../prep/styles.js';
-import { ingestSunoUrl } from '../prep/suno-ingest.js';
+import { ingestSunoUrl, sanitizeFilename } from '../prep/suno-ingest.js';
 import { SunoIngestError } from '../prep/suno-errors.js';
 import { cleanPath } from './prompt.js';
 
 const STYLE_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/** Auto Watch: İndirilenler ve audio/ tarama aralığı. */
+const DOWNLOAD_POLL_MS = 1000;
 
 export function copyToClipboard(text) {
   try {
@@ -46,16 +54,7 @@ export async function safeCopyAudioFiles(selectedFiles, targetAudioDir, prompter
   const errors = [];
 
   for (const srcPath of selectedFiles) {
-    const ext = extname(srcPath);
-    const base = basename(srcPath, ext);
-    let targetName = basename(srcPath);
-    let counter = 1;
-
-    while (await isFile(join(targetAudioDir, targetName))) {
-      targetName = `${base} (${counter})${ext}`;
-      counter++;
-    }
-
+    const targetName = await uniqueFileName(targetAudioDir, basename(srcPath));
     const destPath = join(targetAudioDir, targetName);
     try {
       await copyFile(srcPath, destPath);
@@ -492,6 +491,7 @@ export async function continueProject(ctx, targetDir = null, { pollMs = 50 } = {
 
     // STİL REFERANSI BEKLEME (Multi-Reference Style Generation)
     if (step.id === 'style-references') {
+      const refDir = join(dir, 'references');
       let folderOpen = false;
       let styleGenerated = false;
 
@@ -524,8 +524,7 @@ export async function continueProject(ctx, targetDir = null, { pollMs = 50 } = {
         }
 
         if (choice === 'open') {
-          const refDir = join(dir, 'references');
-          openFolder(refDir);
+          (ctx.openFolderFn ?? openFolder)(refDir);
           folderOpen = true;
           ctx.store?.set({ watchNotice: { file: `references/ (${cur.references.length} görseller)`, folderOpen: true } });
           prompter.print('\x1b[32m[📂 Referans Klasörü Açıldı]\x1b[0m .jpg, .jpeg, .png, .webp görsellerini bu klasöre koyun.');
@@ -591,6 +590,7 @@ export async function continueProject(ctx, targetDir = null, { pollMs = 50 } = {
         phasePrompt = step.detail;
       }
 
+      const imgDir = join(dir, 'resimler');
       let folderOpen = false;
       let masterDetected = false;
 
@@ -626,8 +626,7 @@ export async function continueProject(ctx, targetDir = null, { pollMs = 50 } = {
         }
 
         if (choice === 'open') {
-          const imgDir = join(dir, 'resimler');
-          openFolder(imgDir);
+          (ctx.openFolderFn ?? openFolder)(imgDir);
           folderOpen = true;
           ctx.store?.set({ watchNotice: { file: 'resimler/MASTER.png', folderOpen: true } });
           prompter.print('\x1b[32m[📂 Klasör Açıldı]\x1b[0m resimler/ klasörü Windows Explorer\'da açıldı.');
@@ -646,15 +645,23 @@ export async function continueProject(ctx, targetDir = null, { pollMs = 50 } = {
           await prompter.choose('Prompt Overlay', [{ label: 'Overlay Kapat', value: 'close' }]);
           ctx.store?.set({ promptDetail: null });
         } else if (choice === 'watch') {
-          prompter.print('\x1b[36m[⏳ Auto Watch Aktif]\x1b[0m resimler/MASTER.png bekleniyor...');
-          while (!masterDetected) {
-            const pollStatus = await inspectProject(dir);
-            if (pollStatus.master) {
-              masterDetected = true;
-              break;
-            }
-            await new Promise((r) => setTimeout(r, pollMs));
-          }
+          const recentMinutes = await prompter.choose(
+            'Auto Watch — İndirilenler\'de ne kadar önce inmiş dosyalar da alınsın?',
+            RECENT_WINDOW_MINUTES.map((minutes) => ({ label: `Son ${minutes} dakika`, value: minutes })),
+            { zeroLabel: 'Geri' },
+          );
+          if (!recentMinutes) continue;
+          const { detected } = await autoWatchAsset(ctx, {
+            targetDir: imgDir,
+            extensions: DOWNLOAD_IMAGE_EXTENSIONS,
+            nameFor: (src) => `MASTER${extname(src).toLowerCase()}`,
+            recentMinutes,
+            pollMs: ctx.downloadPollMs ?? pollMs,
+            label: 'resimler/MASTER.png',
+            folderLabel: 'resimler/',
+            detect: async () => (await inspectProject(dir)).master,
+          });
+          if (detected) masterDetected = true;
         }
       }
 
@@ -675,6 +682,7 @@ export async function continueProject(ctx, targetDir = null, { pollMs = 50 } = {
         phasePrompt = step.detail;
       }
 
+      const vidDir = join(dir, 'videolar');
       let folderOpen = false;
       let detectedClip = null;
 
@@ -710,8 +718,7 @@ export async function continueProject(ctx, targetDir = null, { pollMs = 50 } = {
         }
 
         if (choice === 'open') {
-          const vidDir = join(dir, 'videolar');
-          openFolder(vidDir);
+          (ctx.openFolderFn ?? openFolder)(vidDir);
           folderOpen = true;
           ctx.store?.set({ watchNotice: { file: 'videolar/*.mp4', folderOpen: true } });
           prompter.print('\x1b[32m[📂 Klasör Açıldı]\x1b[0m videolar/ klasörü Windows Explorer\'da açıldı.');
@@ -730,15 +737,23 @@ export async function continueProject(ctx, targetDir = null, { pollMs = 50 } = {
           await prompter.choose('Prompt Overlay', [{ label: 'Overlay Kapat', value: 'close' }]);
           ctx.store?.set({ promptDetail: null });
         } else if (choice === 'watch') {
-          prompter.print('\x1b[36m[⏳ Auto Watch Aktif]\x1b[0m videolar/*.mp4 bekleniyor...');
-          while (!detectedClip) {
-            const pollStatus = await inspectProject(dir);
-            if (pollStatus.clips.length > 0) {
-              detectedClip = pollStatus.clips[0];
-              break;
-            }
-            await new Promise((r) => setTimeout(r, pollMs));
-          }
+          const recentMinutes = await prompter.choose(
+            'Auto Watch — İndirilenler\'de ne kadar önce inmiş dosyalar da alınsın?',
+            RECENT_WINDOW_MINUTES.map((minutes) => ({ label: `Son ${minutes} dakika`, value: minutes })),
+            { zeroLabel: 'Geri' },
+          );
+          if (!recentMinutes) continue;
+          const { detected } = await autoWatchAsset(ctx, {
+            targetDir: vidDir,
+            extensions: DOWNLOAD_VIDEO_EXTENSIONS,
+            nameFor: (src) => `${sanitizeFilename(cleanDownloadName(basename(src, extname(src))))}${extname(src).toLowerCase()}`,
+            recentMinutes,
+            pollMs: ctx.downloadPollMs ?? pollMs,
+            label: 'videolar/*.mp4',
+            folderLabel: 'videolar/',
+            detect: async () => (await inspectProject(dir)).clips[0] ?? null,
+          });
+          if (detected) detectedClip = detected;
         }
       }
 
@@ -772,6 +787,7 @@ export async function continueProject(ctx, targetDir = null, { pollMs = 50 } = {
         if (pendingTrack) {
           let folderOpen = false;
           let detectedFile = null;
+          let autoWatched = false;
           const initialAudioCount = status.audioCount;
 
           const completedCount = musicData.tracks.filter((t) => t.status === 'completed').length;
@@ -805,7 +821,10 @@ export async function continueProject(ctx, targetDir = null, { pollMs = 50 } = {
               { label: '🔄 [ Refresh ] - Klasörü Yeniden Tara', value: 'refresh' },
               { label: '👁 [ View Prompt ] - Prompt Overlay Aç', value: 'view' },
               { label: '⏳ [ Auto Watch ] - MP3 Bekle', value: 'watch' },
-              { label: '⏭ [ Finish Music & Continue ] - Müzik Aşamasını Bitir ve Devam Et', value: 'finish' },
+              // Eksik track'lerle devam etmek ancak elde en az bir şarkı varken anlamlı.
+              ...(musicData.tracks.some((t) => t.status === 'completed')
+                ? [{ label: '⏭ [ Finish Music & Continue ] - Müzik Aşamasını Bitir ve Devam Et', value: 'finish' }]
+                : []),
               { label: '🏠 Ana Menüye Dön', value: 'menu' },
             ]);
 
@@ -839,7 +858,13 @@ export async function continueProject(ctx, targetDir = null, { pollMs = 50 } = {
                     break;
                   }
                 } catch (err) {
-                  prompter.print(`\x1b[31m[! Suno İndirme Hatası]\x1b[0m ${err.message}`);
+                  if (err instanceof SunoIngestError && err.notPublic) {
+                    prompter.print(`\x1b[33m[! Link Public Değil]\x1b[0m ${err.message}`);
+                  } else if (err instanceof SunoIngestError && err.downloadDisabled) {
+                    prompter.print(`\x1b[33m[! İndirme Kapalı]\x1b[0m ${err.message}`);
+                  } else {
+                    prompter.print(`\x1b[31m[! Suno İndirme Hatası]\x1b[0m ${err.message}`);
+                  }
                 }
               }
             }
@@ -890,28 +915,12 @@ export async function continueProject(ctx, targetDir = null, { pollMs = 50 } = {
             }
 
             if (choice === 'finish') {
-              const completedCnt = musicData.tracks.filter((t) => t.status === 'completed').length;
-              const confirmChoice = await prompter.choose(
-                `${completedCnt} / ${musicData.totalTracks} tracks completed.\n\nFinish music generation and continue to the next step?`,
-                [
-                  { label: 'Yes, Continue', value: 'yes' },
-                  { label: 'No, Keep Generating', value: 'no' },
-                ]
-              );
-              if (confirmChoice === 'yes') {
-                musicData.status = 'completed_by_user';
-                musicData.completedCount = completedCnt;
-                await setProjectField(status.projectPath, 'music', musicData);
-                ctx.store?.set({ watchNotice: null });
-                prompter.print('\x1b[32m[✓ Müzik Aşaması Kullanıcı Tarafından Tamamlandı]\x1b[0m Sonraki adıma geçiliyor...');
-                break;
-              } else {
-                continue;
-              }
+              if (await finishMusicStage(ctx, { status, musicData })) break;
+              continue;
             }
 
             if (choice === 'open') {
-              openFolder(status.audioDir);
+              (ctx.openFolderFn ?? openFolder)(status.audioDir);
               folderOpen = true;
               ctx.store?.set({
                 watchNotice: { file: `audio/ (Track ${String(pendingTrack.number).padStart(2, '0')}: "${pendingTrack.title}")`, folderOpen: true },
@@ -935,45 +944,23 @@ export async function continueProject(ctx, targetDir = null, { pollMs = 50 } = {
               await prompter.choose('Prompt Overlay', [{ label: 'Overlay Kapat', value: 'close' }]);
               ctx.store?.set({ promptDetail: null });
             } else if (choice === 'watch') {
-              prompter.print(`\x1b[36m[⏳ Auto Watch Aktif]\x1b[0m Track ${pendingTrack.number} MP3 bekleniyor...`);
-              while (!detectedFile) {
-                const pollStatus = await inspectProject(dir);
-                if (pollStatus.audioCount > completedCount) {
-                  const files = await listFiles(status.audioDir, AUDIO_EXTENSIONS).catch(() => []);
-                  if (files.length > completedCount) {
-                    detectedFile = basename(files[files.length - 1]);
-                    break;
-                  }
-                }
-                await new Promise((r) => setTimeout(r, pollMs));
-              }
+              const recentMinutes = await prompter.choose(
+                'Auto Watch — İndirilenler\'de ne kadar önce inmiş dosyalar da alınsın?',
+                RECENT_WINDOW_MINUTES.map((minutes) => ({ label: `Son ${minutes} dakika`, value: minutes })),
+                { zeroLabel: 'Geri' },
+              );
+              if (!recentMinutes) continue;
+              const { finishRequested } = await autoWatchMusic(ctx, { status, musicData, recentMinutes, pollMs: ctx.downloadPollMs ?? DOWNLOAD_POLL_MS });
+              if (finishRequested) await finishMusicStage(ctx, { status, musicData });
+              autoWatched = true;
+              break;
             }
           }
 
+          if (autoWatched) continue;
+
           if (detectedFile) {
-            pendingTrack.status = 'completed';
-            pendingTrack.file = detectedFile;
-            musicData.completedCount = musicData.tracks.filter((t) => t.status === 'completed').length;
-            if (musicData.completedCount === musicData.totalTracks) {
-              musicData.status = 'completed';
-            } else {
-              musicData.status = 'in_progress';
-            }
-            await setProjectField(status.projectPath, 'music', musicData);
-
-            const nextPendingTrack = musicData.tracks.find((t) => t.status === 'pending');
-            ctx.store?.set({
-              view: 'music',
-              musicState: {
-                concept: musicData.concept,
-                currentTrack: nextPendingTrack ?? pendingTrack,
-                completedCount: musicData.completedCount,
-                totalTracks: musicData.totalTracks,
-                tracks: musicData.tracks,
-              },
-            });
-
-            prompter.print(`\x1b[32m[✓ Track ${String(pendingTrack.number).padStart(2, '0')} Detected — Müzik Dosyası Algılandı]\x1b[0m ${detectedFile} — Preparing next track...`);
+            await markTrackCompleted(ctx, { status, musicData, track: pendingTrack, file: detectedFile });
             continue;
           }
         }
@@ -1003,7 +990,7 @@ export async function continueProject(ctx, targetDir = null, { pollMs = 50 } = {
             { label: '🎵 [ Select Audio Files ] - Audio Seç (Native Dialog)', value: 'folder' },
             { label: '📂 [ Klasörü Aç ] - Müzik Klasörünü Windows\'ta Aç', value: 'open' },
             { label: '🔄 [ Refresh ] - Klasörü Yeniden Tara', value: 'refresh' },
-            { label: 'Default music (audio/ klasörünü kullan)', value: 'default' },
+            { label: '⏳ [ Auto Watch ] - Default music (İndirilenler ve audio/ izlensin)', value: 'default' },
             { label: '🏠 Ana Menüye Dön', value: 'menu' },
           ]);
 
@@ -1013,7 +1000,7 @@ export async function continueProject(ctx, targetDir = null, { pollMs = 50 } = {
           }
 
           if (musicSource === 'open') {
-            openFolder(status.audioDir);
+            (ctx.openFolderFn ?? openFolder)(status.audioDir);
             folderOpen = true;
             ctx.store?.set({ watchNotice: { file: 'audio/*.mp3|m4a|wav', folderOpen: true } });
             prompter.print('\x1b[32m[📂 Klasör Açıldı]\x1b[0m Müzik klasörü Windows Explorer\'da açıldı.');
@@ -1025,15 +1012,23 @@ export async function continueProject(ctx, targetDir = null, { pollMs = 50 } = {
             }
             prompter.print('\x1b[33m[! Müzik Dosyası Henüz Bulunamadı]\x1b[0m audio/ bekleniyor...');
           } else if (musicSource === 'default') {
-            prompter.print('\x1b[36m[⏳ Auto Watch Aktif]\x1b[0m audio/ bekleniyor...');
-            while (!audioDetected) {
-              const pollStatus = await inspectProject(dir);
-              if (pollStatus.audioCount > 0) {
-                audioDetected = true;
-                break;
-              }
-              await new Promise((r) => setTimeout(r, pollMs));
-            }
+            const recentMinutes = await prompter.choose(
+              'Auto Watch — İndirilenler\'de ne kadar önce inmiş dosyalar da alınsın?',
+              RECENT_WINDOW_MINUTES.map((minutes) => ({ label: `Son ${minutes} dakika`, value: minutes })),
+              { zeroLabel: 'Geri' },
+            );
+            if (!recentMinutes) continue;
+            const { detected } = await autoWatchAsset(ctx, {
+              targetDir: status.audioDir,
+              extensions: DOWNLOAD_AUDIO_EXTENSIONS,
+              nameFor: (src) => `${sanitizeFilename(cleanDownloadName(basename(src, extname(src))))}${extname(src).toLowerCase()}`,
+              recentMinutes,
+              pollMs: ctx.downloadPollMs ?? pollMs,
+              label: 'audio/*.mp3',
+              folderLabel: 'audio/',
+              detect: async () => (await inspectProject(dir)).audioCount > 0,
+            });
+            if (detected) audioDetected = true;
           } else if (musicSource === 'folder') {
             let selectedFiles = null;
             if (typeof ctx.pickAudioFilesFn === 'function') {
@@ -1110,6 +1105,254 @@ async function ambientsOrEmpty(ctx) {
     ctx.prompter.print(error.message);
     return [];
   }
+}
+
+/**
+ * "Müziği bitir ve devam et": onay sorar; evet ise müzik aşaması kullanıcı tarafından
+ * tamamlanmış sayılır (eksik track'lerle devam). Menü ve Auto Watch (B tuşu) kullanır.
+ * @param {object} ctx
+ * @param {{ status: object, musicData: object }} params
+ * @returns {Promise<boolean>} onaylandı mı
+ */
+async function finishMusicStage(ctx, { status, musicData }) {
+  const completedCnt = musicData.tracks.filter((t) => t.status === 'completed').length;
+  const confirmChoice = await ctx.prompter.choose(
+    `${completedCnt} / ${musicData.totalTracks} tracks completed.\n\nFinish music generation and continue to the next step?`,
+    [
+      { label: 'Yes, Continue', value: 'yes' },
+      { label: 'No, Keep Generating', value: 'no' },
+    ],
+  );
+  if (confirmChoice !== 'yes') return false;
+  musicData.status = 'completed_by_user';
+  musicData.completedCount = completedCnt;
+  await setProjectField(status.projectPath, 'music', musicData);
+  ctx.store?.set({ watchNotice: null });
+  ctx.prompter.print('\x1b[32m[✓ Müzik Aşaması Kullanıcı Tarafından Tamamlandı]\x1b[0m Sonraki adıma geçiliyor...');
+  return true;
+}
+
+/**
+ * Track'i dosyayla tamamlar: project.json (music) ve ekrandaki sayaç güncellenir.
+ * @param {object} ctx
+ * @param {{ status: object, musicData: object, track: object, file: string }} params
+ */
+async function markTrackCompleted(ctx, { status, musicData, track, file }) {
+  track.status = 'completed';
+  track.file = file;
+  musicData.completedCount = musicData.tracks.filter((t) => t.status === 'completed').length;
+  musicData.status = musicData.completedCount === musicData.totalTracks ? 'completed' : 'in_progress';
+  await setProjectField(status.projectPath, 'music', musicData);
+
+  const nextPendingTrack = musicData.tracks.find((t) => t.status === 'pending');
+  ctx.store?.set({
+    view: 'music',
+    musicState: {
+      concept: musicData.concept,
+      currentTrack: nextPendingTrack ?? track,
+      completedCount: musicData.completedCount,
+      totalTracks: musicData.totalTracks,
+      tracks: musicData.tracks,
+    },
+  });
+  ctx.prompter.print(`\x1b[32m[✓ Track ${String(track.number).padStart(2, '0')} Detected — Müzik Dosyası Algılandı]\x1b[0m ${file} — Preparing next track...`);
+}
+
+/**
+ * Auto Watch (müzik): İndirilenler'deki ses dosyalarını (.mp3/.m4a/.wav) projenin audio/ klasörüne taşır
+ * ("NN-Ad.mp3"), audio/'ya elle konan dosyaları da algılar; her dosya sıradaki bekleyen
+ * track'i indirilme sırasıyla tamamlar. Tüm track'ler bitince ya da çift Esc ile durur.
+ * Açılırken seçilen süre (son 5/10/15 dk) içinde inmiş dosyalar da alınır; daha eskilerine dokunulmaz.
+ *
+ * @param {object} ctx downloadsDir / createDownloadWatcherFn testte verilebilir
+ * @param {{ status: object, musicData: object, pollMs: number }} params
+ * @returns {Promise<{ completed: number, finishRequested: boolean }>} finishRequested: B ile "müziği bitir" istendi
+ */
+async function autoWatchMusic(ctx, { status, musicData, recentMinutes, pollMs }) {
+  const { prompter } = ctx;
+  const downloadsDir = ctx.downloadsDir ?? resolveDownloadsDir();
+  const watcher = (ctx.createDownloadWatcherFn ?? createDownloadWatcher)({ dir: downloadsDir, recentMs: recentMinutes * 60 * 1000 });
+  await watcher.start();
+  const knownAudio = new Set((await filesOrEmpty(status.audioDir, AUDIO_EXTENSIONS)).map((path) => basename(path)));
+  const nextPending = () => musicData.tracks.find((t) => t.status === 'pending');
+
+  const escape = createEscapeGuard(prompter);
+  let finishRequested = false;
+  const stopped = () => finishRequested || escape.stopped();
+
+  // "Bitir" ancak en az bir track tamamlandıysa anlamlı; kutu o zamana kadar sönük durur.
+  const doneCount = () => musicData.tracks.filter((t) => t.status === 'completed').length;
+  const refreshHint = () => {
+    const done = doneCount();
+    ctx.store?.set({
+      actionHint: {
+        key: 'B',
+        label: 'Müziği bitir ve devam et',
+        enabled: done > 0,
+        hint: done > 0
+          ? `${done} / ${musicData.totalTracks} track hazır — B'ye bas, sonraki adıma geç.`
+          : 'Henüz şarkı eklenmedi. İlk ses dosyası algılanınca bu seçenek açılır.',
+      },
+    });
+  };
+  refreshHint();
+
+  ctx.store?.set({
+    onKey: (input, key) => {
+      // B (Bitir): harf tuşu kaçış dizisi tuzağına düşmez; asıl onay finishMusicStage'de sorulur.
+      if (!key.ctrl && !key.meta && input.toLowerCase() === 'b') {
+        if (doneCount() === 0) {
+          prompter.print('\x1b[33m[B]\x1b[0m Henüz şarkı eklenmedi — en az bir ses dosyası algılanınca bitirebilirsin.');
+          return true;
+        }
+        finishRequested = true;
+        return true;
+      }
+      return escape.handle(key);
+    },
+    footer: 'Auto Watch · B müziği bitir ve devam et (şarkı eklendiyse) · Esc Esc menüye dön · Ctrl+C çık',
+  });
+  prompter.print(`\x1b[36m[⏳ Auto Watch Aktif]\x1b[0m İndirilenler (${downloadsDir}) ve audio/ izleniyor, son ${recentMinutes} dk içinde inenler de alınıyor — Esc Esc: menüye dön`);
+
+  let completed = 0;
+  try {
+    while (!stopped() && nextPending()) {
+      for (const src of await watcher.poll()) {
+        const track = nextPending();
+        if (!track) break;
+        const wanted = `${String(track.number).padStart(2, '0')}-${sanitizeFilename(cleanDownloadName(basename(src, extname(src))))}${extname(src).toLowerCase()}`;
+        let file;
+        try {
+          file = await moveFile(src, status.audioDir, wanted);
+        } catch (error) {
+          prompter.print(`\x1b[33m[! Taşınamadı]\x1b[0m ${basename(src)}: ${error.message} — tekrar denenecek`);
+          continue;
+        }
+        knownAudio.add(file);
+        await markTrackCompleted(ctx, { status, musicData, track, file });
+        refreshHint();
+        completed++;
+      }
+
+      for (const path of await filesOrEmpty(status.audioDir, AUDIO_EXTENSIONS)) {
+        const file = basename(path);
+        if (knownAudio.has(file)) continue;
+        const track = nextPending();
+        if (!track) break;
+        knownAudio.add(file);
+        await markTrackCompleted(ctx, { status, musicData, track, file });
+        refreshHint();
+        completed++;
+      }
+
+      if (!stopped() && nextPending()) await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
+  } finally {
+    ctx.store?.set({ onKey: null, footer: '', actionHint: null });
+  }
+
+  if (!stopped()) prompter.print('\x1b[32m[✓ Auto Watch Bitti]\x1b[0m Tüm track\'ler tamamlandı.');
+  else if (finishRequested) prompter.print(`\x1b[33m[Auto Watch Durdu]\x1b[0m ${completed} track tamamlandı — müzik aşamasını bitirme onayı soruluyor.`);
+  else prompter.print(`\x1b[33m[Auto Watch Durdu]\x1b[0m ${completed} track tamamlandı — menüye dönülüyor.`);
+  return { completed, finishRequested };
+}
+
+/**
+ * Auto Watch ekranlarının çıkış tuşu: çift Esc.
+ *
+ * Neden çift: terminal pencere odağı değişince (alt-tab) bazen yarım kalan bir kontrol
+ * dizisi geliyor, ink bunu 20ms içinde tamamlanmazsa tek başına Esc sanıyor (ink #943
+ * tuzağının bir başka biçimi — bkz. ui/tui/keys.js başı). Tek sahte Esc izlemeyi
+ * durdurmaz; art arda iki gerçek Esc gerekir.
+ *
+ * @param {{ print: (text: string) => void }} prompter
+ * @returns {{ handle: (key: object) => boolean, stopped: () => boolean }} handle: tuş yutuldu mu
+ */
+function createEscapeGuard(prompter) {
+  const CONFIRM_MS = 1500;
+  let lastEscapeAt = 0;
+  let stopped = false;
+  return {
+    stopped: () => stopped,
+    handle(key) {
+      if (!key.escape) return false;
+      const now = Date.now();
+      if (now - lastEscapeAt <= CONFIRM_MS) {
+        stopped = true;
+      } else {
+        lastEscapeAt = now;
+        prompter.print('\x1b[33m[Esc]\x1b[0m Durdurmak için Esc\'e tekrar bas (1.5 sn içinde).');
+      }
+      return true;
+    },
+  };
+}
+
+/**
+ * Auto Watch (tek dosyalık varlıklar: MASTER görseli / video klip).
+ *
+ * autoWatchMusic ile aynı iş akışının tek hedefli hâli: İndirilenler izlenir, inen ilk
+ * uygun dosya proje klasörüne TAŞINIR ve beklenen adla kaydedilir; klasöre elle konan
+ * dosya da algılanır. Çift Esc ile durur (gerekçe: autoWatchMusic'teki ink #943 notu),
+ * kısayol footer'da ve ekrandaki eylem kutusunda görünür.
+ *
+ * @param {object} ctx downloadsDir / createDownloadWatcherFn testte verilebilir
+ * @param {{
+ *   targetDir: string, extensions: string[], nameFor: (src: string) => string,
+ *   recentMinutes: number, pollMs: number, label: string, folderLabel: string,
+ *   detect: () => Promise<unknown>,
+ * }} params detect: dosya geldiyse değerini, gelmediyse null/undefined döndürür
+ * @returns {Promise<{ detected: unknown }>} detected null ise kullanıcı Esc Esc ile durdurdu
+ */
+async function autoWatchAsset(ctx, { targetDir, extensions, nameFor, recentMinutes, pollMs, label, folderLabel, detect }) {
+  const { prompter } = ctx;
+  const downloadsDir = ctx.downloadsDir ?? resolveDownloadsDir();
+  const watcher = (ctx.createDownloadWatcherFn ?? createDownloadWatcher)({
+    dir: downloadsDir, extensions, recentMs: recentMinutes * 60 * 1000,
+  });
+  await watcher.start();
+
+  const escape = createEscapeGuard(prompter);
+  ctx.store?.set({
+    onKey: (input, key) => escape.handle(key),
+    footer: `Auto Watch · ${label} bekleniyor · Esc Esc menüye dön · Ctrl+C çık`,
+    actionHint: {
+      key: 'Esc Esc',
+      label: 'Auto Watch\'ı durdur, menüye dön',
+      enabled: true,
+      hint: `${label} bekleniyor — İndirilenler'e inen dosya ${folderLabel} klasörüne otomatik taşınır.`,
+    },
+  });
+  prompter.print(`\x1b[36m[⏳ Auto Watch Aktif]\x1b[0m ${label} bekleniyor — İndirilenler (${downloadsDir}) ve ${folderLabel} izleniyor, son ${recentMinutes} dk içinde inenler de alınıyor — Esc Esc: menüye dön`);
+
+  let detected = null;
+  try {
+    while (!escape.stopped()) {
+      detected = (await detect()) ?? null;
+      if (detected) break;
+
+      for (const src of await watcher.poll()) {
+        let file;
+        try {
+          file = await moveFile(src, targetDir, nameFor(src));
+        } catch (error) {
+          prompter.print(`\x1b[33m[! Taşınamadı]\x1b[0m ${basename(src)}: ${error.message} — tekrar denenecek`);
+          continue;
+        }
+        prompter.print(`\x1b[32m[✓ İndirilen Dosya Alındı]\x1b[0m ${basename(src)} → ${folderLabel}${file}`);
+        break; // tek dosya yeter; kalanlar İndirilenler'de kalsın
+      }
+
+      detected = (await detect()) ?? null;
+      if (detected) break;
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
+  } finally {
+    ctx.store?.set({ onKey: null, footer: '', actionHint: null });
+  }
+
+  if (!detected) prompter.print('\x1b[33m[Auto Watch Durdu]\x1b[0m Dosya alınmadı — menüye dönülüyor.');
+  return { detected };
 }
 
 async function filesOrEmpty(dir, extensions) {

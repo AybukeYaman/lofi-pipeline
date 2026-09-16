@@ -12,16 +12,26 @@
 import { basename, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import { render } from 'ink';
+
 import { DEFAULT_AMBIENT_DIR } from './prep/ambients.js';
-import { inspectProject, nextStep } from './prep/project-status.js';
+import { inspectProject, listProjects, nextStep } from './prep/project-status.js';
 import { DEFAULT_VIDEOS_DIR } from './prep/scaffold.js';
 import { STYLES_DIR } from './prep/styles.js';
 import {
   addStyle, batchBuild, buildProject, chooseClip, continueProject, createSession, newProject,
   selectProject, showLibrary, showStatus,
 } from './ui/actions.js';
+import { createInkPrompter } from './ui/ink-prompter.js';
 import { PromptClosedError, createPrompter } from './ui/prompt.js';
-import { runScript } from './ui/runner.js';
+import { isParentAlive, runScript } from './ui/runner.js';
+import { DashboardView } from './ui/tui/dashboard-view.js';
+import { h } from './ui/tui/h.js';
+import { Screen } from './ui/tui/screen.js';
+import { createTuiStore } from './ui/tui/store.js';
+
+/** Ctrl+C'den sonra panelin kendi yolundan çıkması için tanınan süre. */
+const CLOSE_GRACE_MS = 500;
 
 /** Proje isteyen akış: seçili proje yoksa önce seçtirir. */
 const withProject = (flow) => async (ctx) => {
@@ -30,15 +40,10 @@ const withProject = (flow) => async (ctx) => {
 };
 
 const MENU = [
-  { label: 'Projeye devam et (kaldığı yerden)', run: continueProject },
-  { label: 'Yeni proje oluştur', run: newProject },
-  { label: 'Stil ekle (görselden, Gemini)', run: addStyle },
-  { label: 'Klibi seç (project.json → clip)', run: withProject(chooseClip) },
-  { label: 'Montaj (build)', run: withProject(buildProject) },
-  { label: 'Toplu montaj (birden fazla proje)', run: batchBuild },
-  { label: 'Proje durumu', run: withProject(showStatus) },
-  { label: "Stiller ve ambient'ler", run: showLibrary },
-  { label: 'Başka proje seç', run: (ctx) => selectProject(ctx, { force: true }) },
+  { label: 'Create new video', run: newProject },
+  { label: 'Continue existing project', run: continueProject },
+  { label: 'Projects', run: withProject(showStatus) },
+  { label: 'Settings', run: showLibrary },
 ];
 
 /**
@@ -53,10 +58,33 @@ export async function runPanel(ctx, { menu = MENU } = {}) {
   const { prompter } = ctx;
   for (;;) {
     try {
+      if (ctx.store) {
+        ctx.store.set({ view: 'main' });
+        try {
+          const projects = await listProjects(ctx.videosDir);
+          ctx.store.set({ projectsList: projects });
+        } catch {}
+        if (ctx.session.project) {
+          try {
+            const status = await inspectProject(ctx.session.project);
+            const skipped = ctx.session.skipped.get(ctx.session.project);
+            const step = nextStep(status, { skipped });
+            ctx.store.set({
+              activeProject: {
+                name: basename(ctx.session.project),
+                dir: ctx.session.project,
+                step: step.title,
+              },
+            });
+          } catch {}
+        } else {
+          ctx.store.set({ activeProject: null });
+        }
+      }
       const entry = await prompter.choose(
         await header(ctx),
         menu.map((item) => ({ label: item.label, value: item })),
-        { zeroLabel: 'Çık' },
+        { zeroLabel: 'Quit' },
       );
       if (!entry) return 0;
       await entry.run(ctx);
@@ -71,35 +99,88 @@ export async function runPanel(ctx, { menu = MENU } = {}) {
 }
 
 async function header(ctx) {
-  const lines = ['', 'lofi — üretim paneli'];
-  const dir = ctx.session.project;
-  if (dir) {
-    const status = await inspectProject(dir);
-    const skipped = ctx.session.skipped.get(dir);
-    lines.push(`Proje: ${basename(dir)} — sıradaki: ${nextStep(status, { skipped }).title}`);
-  }
-  return lines.join('\n');
+  return 'lofi — üretim paneli';
 }
 
 /** @returns {Promise<number>} 0 · 2 terminal etkileşimli değil */
 export async function main() {
-  // enquirer TTY olmayan stdin'de yakalanamayan hatayla süreci çökertir: önce denetle.
+  if (process.platform === 'win32') {
+    try {
+      const { execSync } = await import('node:child_process');
+      execSync('chcp 65001', { stdio: 'ignore' });
+    } catch {}
+  }
+
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     console.error('Panel etkileşimli terminal gerektirir — PowerShell\'de "npm start" ile çalıştır.');
     return 2;
   }
 
-  // enquirer okuyucuyu her soruda açıp kapatır; komut çalışırken açık prompt yok.
-  return runPanel({
-    prompter: createPrompter(),
-    run: runScript,
+  const store = createTuiStore({
+    header: { title: 'lofi CLI', step: 'Ana Menü' },
+    view: 'main',
+  });
+
+  const prompter = createInkPrompter(store);
+  const session = createSession();
+
+  let inkApp = null;
+  const mountInk = () => {
+    if (!inkApp) {
+      // exitOnCtrlC kapalı: açıkken ink Ctrl+C'yi useInput'a iletmeden kendini söküyor,
+      // store.close() hiç çağrılmıyor ve panel süreci ekransız asılı kalabiliyordu.
+      inkApp = render(h(Screen, { store, body: (snap, size) => h(DashboardView, { snap, size }) }), { exitOnCtrlC: false });
+    }
+  };
+  const unmountInk = () => {
+    if (inkApp) {
+      inkApp.unmount();
+      inkApp = null;
+    }
+  };
+
+  // Ctrl+C: bekleyen soru varsa runPanel normal yoldan çıkar. Soru yokken bir iş
+  // sürüyorsa (Gemini, Suno indirme) onu beklemeden kapat. unref: normal çıkışı geciktirmez.
+  let closing = false;
+  store.subscribe(() => {
+    if (closing || !store.getState().closed) return;
+    closing = true;
+    setTimeout(() => {
+      unmountInk();
+      process.exit(130);
+    }, CLOSE_GRACE_MS).unref();
+  });
+
+  mountInk();
+
+  const ctx = {
+    prompter,
+    run: async (script, args, opts) => {
+      unmountInk();
+      const code = await runScript(script, args, opts);
+      if (!isParentAlive()) process.exit(code);
+      mountInk();
+      return code;
+    },
     videosDir: DEFAULT_VIDEOS_DIR,
     ambientDir: DEFAULT_AMBIENT_DIR,
     stylesDir: STYLES_DIR,
-    session: createSession(),
-  });
+    session,
+    store,
+  };
+
+  try {
+    const exitCode = await runPanel(ctx);
+    unmountInk();
+    return exitCode;
+  } catch (error) {
+    unmountInk();
+    throw error;
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  process.exitCode = await main();
+  const code = await main();
+  process.exit(code ?? 0);
 }
+

@@ -7,7 +7,7 @@ import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 
-import { REPO_ROOT, runScript } from '../../ui/runner.js';
+import { REPO_ROOT, isParentAlive, runScript } from '../../ui/runner.js';
 
 describe('runScript', () => {
   test('gerçek alt süreç: --help → 0, bilinmeyen bayrak → 2', async () => {
@@ -59,5 +59,21 @@ describe('runScript', () => {
     assert.equal(await p3, 1);
 
     assert.equal(process.listenerCount('SIGINT'), before);
+  });
+});
+
+describe('isParentAlive', () => {
+  const failWith = (code) => () => { throw Object.assign(new Error(code), { code }); };
+
+  test('gerçek üst süreç (test çalıştırıcısı) yaşıyor', () => {
+    assert.equal(isParentAlive(), true);
+  });
+
+  test('sinyal 0 ile sorar; ESRCH → sahipsiz, EPERM → yaşıyor', () => {
+    const calls = [];
+    assert.equal(isParentAlive({ ppid: 42, killFn: (...args) => { calls.push(args); } }), true);
+    assert.deepEqual(calls, [[42, 0]]);
+    assert.equal(isParentAlive({ ppid: 42, killFn: failWith('ESRCH') }), false);
+    assert.equal(isParentAlive({ ppid: 42, killFn: failWith('EPERM') }), true);
   });
 });

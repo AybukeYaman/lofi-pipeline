@@ -55,6 +55,31 @@ export function buildStylePrompt({ ambientNames = [] } = {}) {
 }
 
 /**
+ * Birden fazla referans görsel ve video konsepti ile Gemini'ye gönderilecek prompt metnini kurar.
+ * @param {{ concept?: string, ambientNames?: string[] }} options
+ * @returns {string}
+ */
+export function buildMultiReferenceStylePrompt({ concept = '', ambientNames = [] } = {}) {
+  const ambientListStr = ambientNames.length > 0 ? ambientNames.join(', ') : 'hiçbiri';
+  const conceptPart = concept ? `Video Concept Context: "${concept}"\n` : '';
+
+  return (
+    'Verilen referans görsellerin ortak visual language / ambience özelliklerini ve görsel stilini sentezle.\n' +
+    conceptPart +
+    'Kurallar:\n' +
+    '- Çıktı tamamen İngilizce olacak.\n' +
+    '- Görsellerin ortak ve baskın görsel dilini (production technique, line quality, palette, lighting, texture, contrast, shading, mood) çıkar.\n' +
+    '- Bir görseldeki rastgele/aykırı bir detayı global stile taşıma; ortak patternleri ve genel ambience ortamını esas al.\n' +
+    '- Konuyu veya sahneyi (WHAT IS HAPPENING) ANLATMA, sadece stili ve atmosferi (HOW IT LOOKS) anlat.\n' +
+    '- palette: Referans görsellerden baskın/destekleyici 5 ila 8 renk seç. Her renk hex (#RRGGBB) formatında olmalı ve rolü (role) belirtilmeli.\n' +
+    `- suggestedAmbient: Yalnızca şu listeden seçilmelidir: [${ambientListStr}].\n` +
+    '- motionHints: 4 ila 6 adet döngüye (loop) uygun subtle hareket ipucu tarif et (camera static kalmalı, pan/zoom yok).\n' +
+    '- Metinlerde "<", ">", "{{" veya markdown ("**", "*") kullanılmayacak.\n' +
+    '- Konu ve kompozisyon detayları styleBlock alanlarına asla sızmayacak.'
+  );
+}
+
+/**
  * Gemini API için Structured Outputs JSON Şeması kurar.
  * @param {{ ambientNames: string[] }} options
  * @returns {object}
@@ -146,4 +171,90 @@ export function toStyle(responseText, name, { ambients } = {}) {
   }
 
   return { style: styleObj, warnings };
+}
+
+/**
+ * Birden fazla görsel dosyası ve konsept parametresi alarak Gemini API ile stil analizi yapar.
+ * @param {object} params
+ * @param {string[]} params.imagePaths
+ * @param {string} [params.concept]
+ * @param {string} [params.name]
+ * @param {object} [params.options]
+ * @returns {Promise<{ style: object, warnings: string[] }>}
+ */
+export async function describeMultiReferenceStyle({
+  imagePaths = [],
+  concept = '',
+  name = 'custom-generated',
+  options = {},
+} = {}) {
+  const { extname } = await import('node:path');
+  const { readFile } = await import('node:fs/promises');
+  const { listAmbients } = await import('./ambients.js');
+  const { generateContent, getApiKey, getModel, loadEnv } = await import('./gemini.js');
+
+  if (!Array.isArray(imagePaths) || imagePaths.length === 0) {
+    throw new Error('At least one reference image path is required for style synthesis.');
+  }
+
+  const repoRoot = options.repoRoot || process.cwd();
+  const loadEnvFn = options.loadEnvFn || loadEnv;
+  loadEnvFn(repoRoot);
+
+  const env = options.env || process.env;
+  const apiKey = getApiKey(env);
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY bulunamadı. Lütfen .env dosyasına veya ortam değişkenlerine GEMINI_API_KEY ekleyin.');
+  }
+
+  const targetModelName = getModel(env);
+  const listAmbientsFn = options.listAmbientsFn || listAmbients;
+  let ambients = [];
+  try {
+    ambients = await listAmbientsFn(options.ambientDir);
+  } catch {}
+  const ambientNames = ambients.map((a) => a.name);
+
+  const readFileFn = options.readFileFn || readFile;
+  const parts = [];
+
+  const promptText = buildMultiReferenceStylePrompt({ concept, ambientNames });
+  parts.push({ text: promptText });
+
+  for (const imgPath of imagePaths) {
+    const ext = extname(imgPath).toLowerCase();
+    const mimeType = getImageMimeType(ext);
+    if (!mimeType) continue;
+
+    const buffer = await readFileFn(imgPath);
+    parts.push({
+      inline_data: {
+        mime_type: mimeType,
+        data: buffer.toString('base64'),
+      },
+    });
+  }
+
+  const responseSchema = buildResponseSchema({ ambientNames });
+  const contents = [{ parts }];
+  const generationConfig = {
+    responseMimeType: 'application/json',
+    responseSchema,
+  };
+
+  const generateContentFn = options.generateContentFn || generateContent;
+  const apiRes = await generateContentFn({
+    contents,
+    model: targetModelName,
+    generationConfig,
+    apiKey,
+    options: { env, repoRoot, fetchFn: options.fetchFn, sleepFn: options.sleepFn },
+  });
+
+  const candidateText = apiRes.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!candidateText) {
+    throw new Error('Gemini beklenmeyen boş bir cevap döndürdü.');
+  }
+
+  return toStyle(candidateText, name, { ambients });
 }

@@ -10,6 +10,7 @@ import { copyFile, mkdir, rm } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 
 import { writeTextFile } from '../core/workspace.js';
+import { generateMusicPlan, generateMusicPlanAsync } from './music-planner.js';
 import { buildPromptsMd } from './prompts.js';
 import { renderStyleBlock } from './styles.js';
 
@@ -17,7 +18,7 @@ import { renderStyleBlock } from './styles.js';
 export const DEFAULT_VIDEOS_DIR = 'C:\\Users\\Aybuke Yeni\\Desktop\\Youtube\\videolar';
 
 /** Kullanıcının mevcut düzeni (HANDOFF bölüm 9). */
-export const PROJECT_SUBDIRS = ['audio', 'resimler', 'videolar'];
+export const PROJECT_SUBDIRS = ['audio', 'resimler', 'videolar', 'references'];
 
 /** Watermark kırpması — Hailuo'da ölçülen değer (bölüm 4). */
 const CROP_BOTTOM = 150;
@@ -61,6 +62,9 @@ export function validateVideoName(name) {
  *   ambient: { name: string, path: string } | null,
  *   styleRef: string | null,
  *   templates: { file: string, text: string }[],
+ *   concept?: string,
+ *   totalTracks?: number,
+ *   musicPlan?: object,
  * }} input style doğrulanmış (loadStyle), isim doğrulanmış (validateVideoName)
  * @returns {{
  *   dir: string,
@@ -69,24 +73,32 @@ export function validateVideoName(name) {
  *   copies: { from: string, path: string }[],
  * }}
  */
-export function planProject({ videosDir, videoName, style, ambient, styleRef, templates }) {
+export function planProject({ videosDir, videoName, style, ambient, styleRef, templates, concept, totalTracks, musicPlan }) {
   const dir = join(videosDir, videoName);
 
-  // Anahtar sırası okunuş sırası. `clip` bilerek boş: klip Faz 3'ten sonra
-  // gelir; build o zamana kadar "clip: boş olmayan bir metin olmalı" der.
+  const ambientVal = Array.isArray(ambient)
+    ? ambient.map((a) => a.path)
+    : (ambient ? ambient.path : null);
+
+  const plan = musicPlan || generateMusicPlan({
+    concept: concept || `${videoName} Album Concept`,
+    style: style.name,
+    totalTracks: totalTracks || 17,
+  });
+
   const project = {
     clip: '',
     audioDir: './audio',
-    ...(ambient ? { ambient: ambient.path } : {}),
+    ...(ambientVal ? { ambient: ambientVal } : {}),
     video: { cropBottom: CROP_BOTTOM, aspect: '16:9' },
     output: { dir: './out' },
+    music: plan,
+    style: style.name,
+    ...(style.name === 'custom-generated' && style.styleBlock ? { styleBlock: style.styleBlock, motionHints: style.motionHints } : {}),
   };
 
-  // bom: insanın okuduğu metinler BOM'lu — PowerShell 5.1 Get-Content BOM'suz
-  // UTF-8'i cp1254 sanıyor. project.json BOM'suz: JSON'da BOM standart dışı
-  // (readJsonFile iki biçimi de okur).
   const files = [
-    { name: 'STYLE_BLOCK.txt', content: renderStyleBlock(style) + '\n', bom: true },
+    ...(style.name === 'custom-generated' && !style.styleBlock ? [] : [{ name: 'STYLE_BLOCK.txt', content: renderStyleBlock(style) + '\n', bom: true }]),
     { name: 'project.json', content: JSON.stringify(project, null, 2) + '\n', bom: false },
     { name: 'prompts.md', content: buildPromptsMd({ videoName, style, templates }), bom: true },
   ];
@@ -99,6 +111,15 @@ export function planProject({ videosDir, videoName, style, ambient, styleRef, te
       ? [{ from: styleRef, path: join(dir, 'resimler', `style-ref${extname(styleRef).toLowerCase()}`) }]
       : [],
   };
+}
+
+export async function planProjectAsync(options) {
+  const musicPlan = await generateMusicPlanAsync({
+    concept: options.concept || `${options.videoName} Album Concept`,
+    style: options.style.name,
+    totalTracks: options.totalTracks || 17,
+  });
+  return planProject({ ...options, musicPlan });
 }
 
 /**

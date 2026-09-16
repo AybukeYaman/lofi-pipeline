@@ -85,9 +85,14 @@ export function createFakePrompter(answers = [], { closeWhenEmpty = false } = {}
       return resolveItem(items, answer.pick, title).value;
     },
 
-    async chooseMany(title, items) {
-      const answer = await next('chooseMany', title, items);
+    async chooseMany(title, items, { zeroLabel } = {}) {
+      const allItems = zeroLabel ? [...items, { label: zeroLabel, value: null }] : items;
+      const answer = await next('chooseMany', title, allItems);
       if (answer === BACK) return null;
+      if (answer && typeof answer === 'object' && 'pick' in answer) {
+        if (zeroLabel && answer.pick === zeroLabel) return [];
+        return [resolveItem(items, answer.pick, title).value];
+      }
       if (!answer || typeof answer !== 'object' || !('picks' in answer)) throw wrongKind('chooseMany', title, answer);
       const chosen = new Set(answer.picks.map((m) => resolveItem(items, m, title)));
       return items.filter((it) => chosen.has(it)).map((it) => it.value);
