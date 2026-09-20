@@ -1,0 +1,48 @@
+{
+  "name": "icerden-bakan-goz",
+  "styleBlock": {
+    "medium": "Analog-feeling still image of a lived-in apartment interior, as if shot on high-ISO film at night; static medium shot from inside the room, looking at a corner, a wall or a window, never from outdoors; soft optical bloom around the single warm light, slight lens softness, no crisp digital sharpness.",
+    "lines": "Soft, slightly smeared edges with no vector outlines; forms read as large simple masses; gentle halation where warm light meets dark surfaces.",
+    "palette": [
+      {
+        "hex": "#E8A04A",
+        "role": "the single warm light source, amber core"
+      },
+      {
+        "hex": "#F2C98A",
+        "role": "soft warm highlight on nearby surfaces lit by that source"
+      },
+      {
+        "hex": "#8A6B4F",
+        "role": "warm wood and fabric tone, only inside the warm pool"
+      },
+      {
+        "hex": "#2F4356",
+        "role": "cool steel-blue mid shadow"
+      },
+      {
+        "hex": "#1B2733",
+        "role": "deep cool blue-slate shadow, never pure black"
+      },
+      {
+        "hex": "#6B7F8E",
+        "role": "dusty grey-blue for walls and window glass outside the warm pool"
+      },
+      {
+        "hex": "#B9C6CF",
+        "role": "pale cool haze for rain, steam and dawn sky"
+      }
+    ],
+    "light": "Exactly one warm light source in the frame (lamp, stove, hood light, screen or street lamp) casting a single warm pool; everything outside that pool falls into cool blue-grey shadow. The hue of the source may shift with the season, the logic never changes: one warm point, cool surroundings.",
+    "texture": "Medium-to-high film grain across the whole frame, slight analog softness, faint dust; no clean digital gradients.",
+    "contrast": "Medium-high local contrast around the warm pool, low contrast elsewhere; shadows stay cool and never fully close; the warm point stays readable even when the frame is shrunk to thumbnail size.",
+    "shading": "Soft falloff from the warm source, cool tinted shadows, no hard-edged cast shadows, no second rim light."
+  },
+  "suggestedAmbient": "gentleRain",
+  "motionHints": [
+    "the single warm light source flickering gently",
+    "rain trails sliding down a window pane",
+    "steam rising slowly from a kettle or cup",
+    "a curtain swaying faintly in a draft"
+  ]
+}
