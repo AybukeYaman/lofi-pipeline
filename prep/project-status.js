@@ -18,8 +18,12 @@ import { readJsonFile } from '../core/workspace.js';
 import { CUSTOM_STYLE_NAME, STYLE_REF_EXTENSIONS } from './styles.js';
 
 /** Faz 1 çıktısı: resimler/MASTER.<uzantı>. Master1.jpg gibi açı varyantları sayılmaz. */
-const MASTER_PATTERN = /^master\.[a-z0-9]+$/i;
+export const MASTER_PATTERN = /^master\.[a-z0-9]+$/i;
 const STYLE_REF_PATTERN = /^style-ref\.[a-z0-9]+$/i;
+/** Adım 3 (sahne referansı): resimler/scene-ref.<uzantı>. */
+export const SCENE_REF_PATTERN = /^scene-ref\.[a-z0-9]+$/i;
+/** Adım 5 (kamera açıları): resimler/Master1.jpg … — Faz 2 şablonunun adları. */
+export const ANGLE_PATTERN = /^master(\d+)\.[a-z0-9]+$/i;
 
 /** Sıralı modda "bu oturumda atla" denebilen adımlar — kanıt gerektirmeyen elle işler. */
 export const SKIPPABLE_STEPS = ['faz1', 'faz3'];
@@ -38,6 +42,10 @@ export async function inspectProject(dir) {
   const images = await fileNames(join(dir, 'resimler'));
   const master = images.find((n) => MASTER_PATTERN.test(n));
   const styleRef = images.find((n) => STYLE_REF_PATTERN.test(n));
+  const sceneRef = images.find((n) => SCENE_REF_PATTERN.test(n));
+  const angles = images
+    .filter((n) => ANGLE_PATTERN.test(n))
+    .sort((a, b) => Number(ANGLE_PATTERN.exec(a)[1]) - Number(ANGLE_PATTERN.exec(b)[1]));
 
   const clipValue = typeof data.clip === 'string' ? data.clip.trim() : '';
   const clipPath = clipValue ? at(clipValue) : null;
@@ -63,6 +71,8 @@ export async function inspectProject(dir) {
     style: data.style || data.music?.style || '-',
     master: master ? join(dir, 'resimler', master) : null,
     styleRef: styleRef ? join(dir, 'resimler', styleRef) : null,
+    sceneRef: sceneRef ? join(dir, 'resimler', sceneRef) : null,
+    angles: angles.map((n) => join(dir, 'resimler', n)),
     clips: await filesOrEmpty(join(dir, 'videolar'), ['.mp4']),
     clip: { value: clipValue, path: clipPath, exists: clipPath ? await isFile(clipPath) : false },
     audioDir,
@@ -110,11 +120,22 @@ export function nextStep(s, { skipped = new Set() } = {}) {
       `Promptlar: ${s.promptsPath}`);
   }
 
-  const musicCompleted = isMusicCompleted(s);
-
-  if (s.clip.exists && musicCompleted) {
-    return step('build', 'auto', 'Montaj', `Klip: ${s.clip.value} · ${s.audioCount} parça\nÇıktı: ${s.output.path}`);
+  // 10 Adımlı Akış: 6. Adım Video (Klip), 7. Adım Müzik'ten önce gelir!
+  if (s.clips.length > 0 && !s.clip.exists) {
+    return step('clip', 'auto', 'Klibi seç', `${missingClip}videolar\\ altında ${s.clips.length} klip var — kullanılacak olanı seç.`);
   }
+
+  if (!s.clip.exists && !skipped.has('faz3')) {
+    return step('faz3', 'manual', 'Faz 3 — Klip (image-to-video)',
+      `${missingClip}prompts.md → Faz 3 ile 5 sn'lik döngü klibini üret, videolar\\ altına .mp4 olarak koy.\n` +
+      `(Faz 2 açı varyantları isteğe bağlı.) Promptlar: ${s.promptsPath}`);
+  }
+
+  if (!s.clip.exists) {
+    return step('clip', 'manual', 'Klip bekleniyor', `${missingClip}videolar\\ altına klibi (.mp4) koy: ${join(s.dir, 'videolar')}`);
+  }
+
+  const musicCompleted = isMusicCompleted(s);
 
   if (!musicCompleted) {
     return step('audio', 'manual', 'Müzik (Suno)',
@@ -122,17 +143,80 @@ export function nextStep(s, { skipped = new Set() } = {}) {
       'Sıra için project.json\'a "order" eklenebilir; yoksa alfabetik sıralanır.');
   }
 
-  if (s.clips.length > 0) {
-    return step('clip', 'auto', 'Klibi seç', `${missingClip}videolar\\ altında ${s.clips.length} klip var — kullanılacak olanı seç.`);
-  }
-
-  if (!skipped.has('faz3')) {
-    return step('faz3', 'manual', 'Faz 3 — Klip (image-to-video)',
-      `${missingClip}prompts.md → Faz 3 ile 5 sn'lik döngü klibini üret, videolar\\ altına .mp4 olarak koy.\n` +
-      `(Faz 2 açı varyantları isteğe bağlı.) Promptlar: ${s.promptsPath}`);
+  if (s.clip.exists && musicCompleted) {
+    return step('build', 'auto', 'Montaj', `Klip: ${s.clip.value} · ${s.audioCount} parça\nÇıktı: ${s.output.path}`);
   }
 
   return step('clip', 'manual', 'Klip bekleniyor', `${missingClip}videolar\\ altına klibi (.mp4) koy: ${join(s.dir, 'videolar')}`);
+}
+
+/**
+ * Canonical kullanıcı akışı — 10 adım, sırası sabit. Her adımın "tamam"
+ * olması yalnızca diskteki kanıttan (dosyalar + project.json) hesaplanır;
+ * UI'nin son tıklanan durumu kullanılmaz. `current` ilk tamamlanmamış adım,
+ * hepsi tamamsa `publish`.
+ *
+ * Eski projelerde kaydı olmayan adımlar sonraki adımın kanıtından çıkarılır:
+ * master varsa sahne referansı, klip varsa açı kararı, çıktı varsa her şey.
+ */
+export const WORKFLOW_STEPS = [
+  { id: 'project', title: 'Proje başlat', kind: 'manual', optional: false },
+  { id: 'style', title: 'Stil görseli', kind: 'manual', optional: false },
+  { id: 'reference', title: 'Referans görsel', kind: 'manual', optional: false },
+  { id: 'master', title: 'Master Frame', kind: 'manual', optional: false },
+  { id: 'angles', title: 'Kamera açıları', kind: 'manual', optional: true },
+  { id: 'video', title: 'Video', kind: 'manual', optional: false },
+  { id: 'music', title: 'Müzik', kind: 'manual', optional: false },
+  { id: 'order', title: 'Sıralama', kind: 'manual', optional: false },
+  { id: 'build', title: 'Montaj', kind: 'auto', optional: false },
+  { id: 'publish', title: 'Yayın', kind: 'done', optional: false },
+];
+
+/**
+ * @param {Awaited<ReturnType<typeof inspectProject>>} s
+ * @returns {{ current: string, currentTitle: string, steps: Array<typeof WORKFLOW_STEPS[number] & { number: number, status: 'done'|'current'|'pending', skipped: boolean }> }}
+ */
+export function canonicalWorkflow(s) {
+  const data = s.projectJson.data ?? {};
+  const workflow = isPlainObject(data.workflow) ? data.workflow : {};
+  const angles = isPlainObject(workflow.angles) ? workflow.angles : null;
+  const built = s.output.exists;
+  const cropBottom = data.video?.cropBottom;
+  const cropReady = Number.isSafeInteger(cropBottom) && cropBottom >= 0;
+  const hasOrder = Array.isArray(data.order) && data.order.length > 0;
+  const anglesSkipped = angles?.wanted === false || (!angles && (s.clip.exists || built) && s.angles.length === 0);
+
+  const done = {
+    project: s.projectJson.ok,
+    style: s.projectJson.ok && !(s.style === CUSTOM_STYLE_NAME && !s.styleBlockExists),
+    reference: Boolean(s.sceneRef || s.master) || built,
+    master: Boolean(s.master) || built,
+    angles: angles?.wanted === false
+      || (angles?.wanted === true && s.angles.length >= Math.max(1, Number(angles.count) || 1))
+      || s.clip.exists || built,
+    video: (s.clip.exists && cropReady) || built,
+    music: isMusicCompleted(s) || built,
+    order: hasOrder || built,
+    build: built,
+    publish: built,
+  };
+
+  const firstOpen = WORKFLOW_STEPS.find((step) => step.id !== 'publish' && !done[step.id]);
+  const current = firstOpen?.id ?? 'publish';
+  return {
+    current,
+    currentTitle: WORKFLOW_STEPS.find((step) => step.id === current).title,
+    steps: WORKFLOW_STEPS.map((step, index) => ({
+      ...step,
+      number: index + 1,
+      status: step.id === current ? 'current' : done[step.id] ? 'done' : 'pending',
+      skipped: step.id === 'angles' && done.angles && anglesSkipped,
+    })),
+  };
+}
+
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 /**
@@ -175,11 +259,13 @@ export async function listProjects(videosDir) {
     const projectInfo = await stat(join(dir, 'project.json')).catch(() => null);
     if (!projectInfo?.isFile()) continue;
     const dirInfo = await stat(dir);
+    const status = await inspectProject(dir);
     projects.push({
       name: entry.name,
       dir,
       mtimeMs: Math.max(dirInfo.mtimeMs, projectInfo.mtimeMs),
-      step: nextStep(await inspectProject(dir)),
+      step: nextStep(status),
+      workflow: canonicalWorkflow(status),
     });
   }
   return projects.sort((a, b) => b.mtimeMs - a.mtimeMs);

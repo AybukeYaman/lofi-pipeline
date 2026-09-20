@@ -3,14 +3,22 @@ import { useCallback, useEffect, useState } from 'react';
 import { AppLayout } from './components/AppLayout';
 import { AmbientLibrary } from './pages/AmbientLibrary';
 import { Dashboard } from './pages/Dashboard';
+import { MusicHub } from './pages/MusicHub';
 import { NewProject } from './pages/NewProject';
 import { ProjectWorkspace } from './pages/ProjectWorkspace';
+import { Settings } from './pages/Settings';
 import { StyleLibrary } from './pages/StyleLibrary';
 import { parseRoute, paths, projectPath } from './router';
+import { applyTheme, getStoredTheme } from './theme';
+import { ToastContainer } from './toast';
 import type { Navigate, Route } from './types';
 
 export function App() {
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.pathname));
+
+  useEffect(() => {
+    applyTheme(getStoredTheme());
+  }, []);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -29,9 +37,12 @@ export function App() {
   }, []);
 
   return (
-    <AppLayout route={route} navigate={navigate}>
-      {renderRoute(route, navigate)}
-    </AppLayout>
+    <>
+      <AppLayout route={route} navigate={navigate}>
+        {renderRoute(route, navigate)}
+      </AppLayout>
+      <ToastContainer />
+    </>
   );
 }
 
@@ -48,6 +59,8 @@ function renderRoute(route: Route, navigate: Navigate) {
           onCreated={(id) => navigate(projectPath(id))}
         />
       );
+    case 'music':
+      return <MusicHub />;
     case 'styles':
       return (
         <StyleLibrary
@@ -56,6 +69,8 @@ function renderRoute(route: Route, navigate: Navigate) {
       );
     case 'ambient':
       return <AmbientLibrary />;
+    case 'settings':
+      return <Settings />;
     case 'dashboard':
       return (
         <Dashboard
@@ -65,3 +80,4 @@ function renderRoute(route: Route, navigate: Navigate) {
       );
   }
 }
+

@@ -76,27 +76,59 @@ export async function listStyles({ dir = STYLES_DIR } = {}) {
 }
 
 /**
- * Stilin referans görseli. Klasör ya da görsel yoksa `path: null` —
- * elle eklenen stillerin (başlangıç seti) görseli yok.
+ * Stilin tüm referans görsellerini bulur (styles/refs/<ad>.*, styles/refs/<ad>-*.*, styles/refs/<ad>_*.*).
+ *
+ * @param {string} name doğrulanmış stil adı
+ * @param {{ dir?: string }} [options] stil klasörü; görseller `<dir>/refs/`
+ * @returns {Promise<{ paths: string[], warnings: string[] }>}
+ */
+export async function findStyleRefs(name, { dir = STYLES_DIR } = {}) {
+  let paths;
+  try {
+    paths = await listFiles(join(dir, 'refs'), STYLE_REF_EXTENSIONS);
+  } catch (cause) {
+    if (cause.code === 'ENOENT') return { paths: [], warnings: [] };
+    throw cause;
+  }
+
+  const exactMatches = paths.filter((path) => basename(path, extname(path)) === name);
+  exactMatches.sort((a, b) => {
+    const extA = extname(a).toLowerCase();
+    const extB = extname(b).toLowerCase();
+    return STYLE_REF_EXTENSIONS.indexOf(extA) - STYLE_REF_EXTENSIONS.indexOf(extB);
+  });
+
+  const secondaryMatches = paths.filter((path) => {
+    const base = basename(path, extname(path));
+    return base.startsWith(`${name}-`) || base.startsWith(`${name}_`);
+  });
+  secondaryMatches.sort((a, b) => {
+    const baseA = basename(a, extname(a));
+    const baseB = basename(b, extname(b));
+    return baseA.localeCompare(baseB, undefined, { numeric: true });
+  });
+
+  const warnings = [];
+  if (exactMatches.length > 1) {
+    warnings.push(
+      `"${name}" için birden fazla referans görseli bulundu (${exactMatches.map((p) => basename(p)).join(', ')}), ` +
+      `"${basename(exactMatches[0])}" kullanılacak`,
+    );
+  }
+
+  return { paths: [...exactMatches, ...secondaryMatches], warnings };
+}
+
+/**
+ * Stilin birincil referans görseli. Klasör ya da görsel yoksa `path: null`.
  *
  * @param {string} name doğrulanmış stil adı
  * @param {{ dir?: string }} [options] stil klasörü; görseller `<dir>/refs/`
  * @returns {Promise<{ path: string | null, warnings: string[] }>}
  */
 export async function findStyleRef(name, { dir = STYLES_DIR } = {}) {
-  let paths;
-  try {
-    paths = await listFiles(join(dir, 'refs'), STYLE_REF_EXTENSIONS);
-  } catch (cause) {
-    if (cause.code === 'ENOENT') return { path: null, warnings: [] };
-    throw cause;
-  }
-
-  const matches = paths.filter((path) => basename(path, extname(path)) === name);
-  const warnings = matches.length > 1
-    ? [`"${name}" için birden fazla referans görseli var, ilki kullanıldı: ${matches.map((p) => basename(p)).join(', ')}`]
-    : [];
-  return { path: matches[0] ?? null, warnings };
+  const { paths, warnings } = await findStyleRefs(name, { dir });
+  return { path: paths[0] ?? null, warnings };
 }
 
 /**

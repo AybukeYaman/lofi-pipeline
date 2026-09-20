@@ -1,15 +1,30 @@
 /** Localhost HTTP server for the web UI. */
 
 import { createReadStream } from 'node:fs';
+import { realpath, stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import { extname, isAbsolute, join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { BuildAlreadyRunningError, createBuildJobs } from './build-jobs.js';
 import {
+  assignAlbumToProject,
+  createAlbum,
+  deleteAlbum,
+  deleteAlbumTrack,
+  getMusicAsset,
+  getMusicLibrary,
+  ingestSuno,
+  openMusicFolder,
+  uploadAlbumTrack,
+} from './music-library-api.js';
+import {
+  addProjectReference,
   ApiError,
   completeMusic,
   createLibraryStyle,
   createProject,
+  deleteProjectReference,
   generateStyle,
   getAsset,
   getBuild,
@@ -17,16 +32,31 @@ import {
   getMaster,
   getMusic,
   getProject,
+  getProjectPrompts,
   getProjects,
   InvalidProjectIdError,
   listClips,
+  openProjectFolder,
   ProjectNotFoundError,
   selectClip,
   startBuild,
   updateCrop,
+  updateTrackOrder,
+  updateWorkflow,
+  uploadProjectAudio,
+  uploadProjectClip,
+  uploadProjectImage,
+  getStyle,
+  getStyleAsset,
+  updateLibraryStyle,
+  deleteLibraryStyle,
 } from './project-api.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
+const MAX_UPLOAD_BODY_BYTES = 25 * 1024 * 1024;
+const MAX_AUDIO_UPLOAD_BODY_BYTES = 100 * 1024 * 1024;
+/** base64 ~%33 büyütür: 200 MB klip için gövde sınırı. */
+const MAX_CLIP_UPLOAD_BODY_BYTES = 280 * 1024 * 1024;
 /** Yalnızca bu makineden: DNS rebinding ile başka bir sitenin API'yi okumasını engeller. */
 const LOCAL_HOST = /^(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/i;
 
@@ -37,8 +67,20 @@ export function createDefaultProjectApi({ buildJobs = createBuildJobs() } = {}) 
     createProject: (body) => createProject(body),
     getLibrary: () => getLibrary(),
     createLibraryStyle: (body) => createLibraryStyle(body),
+    getStyle: (id) => getStyle(id),
+    getStyleAsset: (id) => getStyleAsset(id),
+    updateLibraryStyle: (id, body) => updateLibraryStyle(id, body),
+    deleteLibraryStyle: (id) => deleteLibraryStyle(id),
     generateStyle: (id, body) => generateStyle(id, body),
+    addProjectReference: (id, body) => addProjectReference(id, body),
+    deleteProjectReference: (id, name) => deleteProjectReference(id, name),
     getMaster: (id) => getMaster(id),
+    getProjectPrompts: (id) => getProjectPrompts(id),
+    uploadProjectImage: (id, body) => uploadProjectImage(id, body),
+    uploadProjectClip: (id, body) => uploadProjectClip(id, body),
+    uploadProjectAudio: (id, body) => uploadProjectAudio(id, body),
+    updateWorkflow: (id, body) => updateWorkflow(id, body),
+    updateTrackOrder: (id, body) => updateTrackOrder(id, body),
     listClips: (id) => listClips(id),
     getMusic: (id) => getMusic(id),
     selectClip: (id, body) => selectClip(id, body),
@@ -47,6 +89,16 @@ export function createDefaultProjectApi({ buildJobs = createBuildJobs() } = {}) 
     startBuild: (id, body) => startBuild(id, body, { buildJobs }),
     getBuild: (id) => getBuild(id, { buildJobs }),
     getAsset: (id, assetType, filename) => getAsset(id, assetType, filename),
+    openProjectFolder: (id, body) => openProjectFolder(id, body),
+    getMusicLibrary: () => getMusicLibrary(),
+    createAlbum: (body) => createAlbum(body),
+    deleteAlbum: (albumId) => deleteAlbum(albumId),
+    deleteAlbumTrack: (albumId, filename) => deleteAlbumTrack(albumId, filename),
+    uploadAlbumTrack: (albumId, body) => uploadAlbumTrack(albumId, body),
+    openMusicFolder: (body) => openMusicFolder(body),
+    ingestSuno: (body) => ingestSuno(body),
+    assignAlbumToProject: (body) => assignAlbumToProject(body),
+    getMusicAsset: (albumId, filename) => getMusicAsset(albumId, filename),
   };
 }
 
@@ -61,7 +113,36 @@ const ROUTES = [
   {
     method: 'POST',
     pattern: /^\/api\/styles$/,
+    maxBodyBytes: MAX_UPLOAD_BODY_BYTES,
     handle: async (api, { body }) => [201, await api.createLibraryStyle(body)],
+  },
+  {
+    method: 'GET',
+    pattern: /^\/api\/styles\/([^/]+)$/,
+    handle: async (api, { id }) => [200, await api.getStyle(id)],
+  },
+  {
+    method: 'GET',
+    pattern: /^\/api\/styles\/([^/]+)\/image$/,
+    file: true,
+    handle: async (api, { id, query }) => [200, await api.getStyleAsset(id, query)],
+  },
+  {
+    method: 'GET',
+    pattern: /^\/api\/styles\/([^/]+)\/images\/([^/]+)$/,
+    file: true,
+    handle: async (api, { id, params }) => [200, await api.getStyleAsset(id, { file: params[0] })],
+  },
+  {
+    method: 'PUT',
+    pattern: /^\/api\/styles\/([^/]+)$/,
+    maxBodyBytes: MAX_UPLOAD_BODY_BYTES,
+    handle: async (api, { id, body }) => [200, await api.updateLibraryStyle(id, body)],
+  },
+  {
+    method: 'DELETE',
+    pattern: /^\/api\/styles\/([^/]+)$/,
+    handle: async (api, { id }) => [200, await api.deleteLibraryStyle(id)],
   },
   { method: 'GET', pattern: /^\/api\/projects$/, handle: async (api) => [200, await api.getProjects()] },
   {
@@ -80,9 +161,53 @@ const ROUTES = [
     handle: async (api, { id }) => [200, await api.getMaster(id)],
   },
   {
+    method: 'GET',
+    pattern: /^\/api\/projects\/([^/]*)\/prompts$/,
+    handle: async (api, { id }) => [200, await api.getProjectPrompts(id)],
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/projects\/([^/]*)\/images$/,
+    maxBodyBytes: MAX_UPLOAD_BODY_BYTES,
+    handle: async (api, { id, body }) => [200, await api.uploadProjectImage(id, body)],
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/projects\/([^/]*)\/clips$/,
+    maxBodyBytes: MAX_CLIP_UPLOAD_BODY_BYTES,
+    handle: async (api, { id, body }) => [200, await api.uploadProjectClip(id, body)],
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/projects\/([^/]*)\/audio$/,
+    maxBodyBytes: MAX_AUDIO_UPLOAD_BODY_BYTES,
+    handle: async (api, { id, body }) => [200, await api.uploadProjectAudio(id, body)],
+  },
+  {
+    method: 'PUT',
+    pattern: /^\/api\/projects\/([^/]*)\/workflow$/,
+    handle: async (api, { id, body }) => [200, await api.updateWorkflow(id, body)],
+  },
+  {
+    method: 'PUT',
+    pattern: /^\/api\/projects\/([^/]*)\/order$/,
+    handle: async (api, { id, body }) => [200, await api.updateTrackOrder(id, body)],
+  },
+  {
     method: 'POST',
     pattern: /^\/api\/projects\/([^/]*)\/style\/generate$/,
     handle: async (api, { id, body }) => [200, await api.generateStyle(id, body)],
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/projects\/([^/]*)\/references$/,
+    maxBodyBytes: MAX_UPLOAD_BODY_BYTES,
+    handle: async (api, { id, body }) => [200, await api.addProjectReference(id, body)],
+  },
+  {
+    method: 'DELETE',
+    pattern: /^\/api\/projects\/([^/]*)\/references\/([^/]*)$/,
+    handle: async (api, { id, params }) => [200, await api.deleteProjectReference(id, params[0])],
   },
   {
     method: 'GET',
@@ -120,14 +245,113 @@ const ROUTES = [
     handle: async (api, { id, body }) => [202, await api.startBuild(id, body)],
   },
   {
+    method: 'POST',
+    pattern: /^\/api\/projects\/([^/]*)\/open-folder$/,
+    handle: async (api, { id, body }) => [200, await api.openProjectFolder(id, body)],
+  },
+  {
     method: 'GET',
     pattern: /^\/api\/projects\/([^/]*)\/assets\/([^/]*)\/([^/]*)$/,
     file: true,
     handle: async (api, { id, params }) => [200, await api.getAsset(id, ...params)],
   },
+  {
+    method: 'POST',
+    pattern: /^\/api\/projects\/([^/]*)\/music\/ingest-suno$/,
+    handle: async (api, { id, body }) => [200, await api.ingestSuno({ ...body, targetType: 'project', targetId: id })],
+  },
+  {
+    method: 'GET',
+    pattern: /^\/api\/music-library$/,
+    handle: async (api) => [200, await api.getMusicLibrary()],
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/music-library\/albums$/,
+    handle: async (api, { body }) => [201, await api.createAlbum(body)],
+  },
+  {
+    method: 'DELETE',
+    pattern: /^\/api\/music-library\/albums\/([^/]*)$/,
+    handle: async (api, { params }) => [200, await api.deleteAlbum(params[0])],
+  },
+  {
+    method: 'DELETE',
+    pattern: /^\/api\/music-library\/tracks\/([^/]*)\/([^/]*)$/,
+    handle: async (api, { params }) => [200, await api.deleteAlbumTrack(params[0], params[1])],
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/music-library\/upload$/,
+    maxBodyBytes: MAX_AUDIO_UPLOAD_BODY_BYTES,
+    handle: async (api, { body }) => [200, await api.uploadAlbumTrack(body?.albumId, body)],
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/music-library\/open-folder$/,
+    handle: async (api, { body }) => [200, await api.openMusicFolder(body)],
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/music-library\/ingest-suno$/,
+    handle: async (api, { body }) => [200, await api.ingestSuno(body)],
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/music-library\/assign-to-project$/,
+    handle: async (api, { body }) => [200, await api.assignAlbumToProject(body)],
+  },
+  {
+    method: 'GET',
+    pattern: /^\/api\/music-library\/assets\/([^/]*)\/([^/]*)$/,
+    file: true,
+    handle: async (api, { params }) => [200, await api.getMusicAsset(params[0], params[1])],
+  },
 ];
 
-export function createWebServer({ projectApi = createDefaultProjectApi() } = {}) {
+const STATIC_MIMES = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
+};
+
+function isInsideDir(parent, candidate) {
+  const rel = relative(parent, candidate);
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
+async function serveStaticFile(request, response, staticDir, urlPath) {
+  const realStatic = await realpath(staticDir).catch(() => null);
+  if (!realStatic) return false;
+
+  const normalized = urlPath.replace(/^\/+/, '');
+  let filePath = join(realStatic, normalized);
+  let statResult = await stat(filePath).catch(() => null);
+
+  // If directory or missing, fallback to index.html for SPA client-side routing
+  if (!statResult || statResult.isDirectory()) {
+    filePath = join(realStatic, 'index.html');
+    statResult = await stat(filePath).catch(() => null);
+  }
+
+  if (!statResult || !statResult.isFile()) return false;
+  const realFile = await realpath(filePath).catch(() => null);
+  if (!realFile || !isInsideDir(realStatic, realFile)) return false;
+
+  const ext = extname(realFile).toLowerCase();
+  const contentType = STATIC_MIMES[ext] || 'application/octet-stream';
+  sendFile(request, response, { path: realFile, size: statResult.size, contentType });
+  return true;
+}
+
+export function createWebServer({ projectApi = createDefaultProjectApi(), staticDir } = {}) {
   return createServer(async (request, response) => {
     try {
       if (!LOCAL_HOST.test(request.headers.host ?? '')) {
@@ -135,11 +359,22 @@ export function createWebServer({ projectApi = createDefaultProjectApi() } = {})
         return;
       }
 
-      const path = request.url?.split('?')[0] ?? '/';
+      const rawUrl = request.url ?? '/';
+      const path = rawUrl.split('?')[0] || '/';
+      let query = {};
+      try {
+        const parsedUrl = new URL(rawUrl, 'http://127.0.0.1');
+        query = Object.fromEntries(parsedUrl.searchParams);
+      } catch {}
+
       const matches = ROUTES
         .map((route) => ({ route, match: route.pattern.exec(path) }))
         .filter(({ match }) => match !== null);
       if (matches.length === 0) {
+        if (staticDir && request.method === 'GET' && !path.startsWith('/api/')) {
+          const served = await serveStaticFile(request, response, staticDir, path);
+          if (served) return;
+        }
         sendJson(response, 404, { error: 'Not found' });
         return;
       }
@@ -154,10 +389,12 @@ export function createWebServer({ projectApi = createDefaultProjectApi() } = {})
       let body;
       if (request.method !== 'GET') {
         assertSafeWrite(request);
-        body = await readJsonBody(request);
+        if (request.method !== 'DELETE' || request.headers['content-type']) {
+          body = await readJsonBody(request, found.route.maxBodyBytes ?? MAX_BODY_BYTES);
+        }
       }
 
-      const [status, payload] = await found.route.handle(projectApi, { id, params, body });
+      const [status, payload] = await found.route.handle(projectApi, { id, params, body, query });
       if (found.route.file) sendFile(request, response, payload);
       else sendJson(response, status, payload);
     } catch (error) {
@@ -199,18 +436,21 @@ function assertSafeWrite(request) {
     }
     if (!LOCAL_HOST.test(host)) throw new ApiError(403, 'Forbidden origin');
   }
+  if (request.method === 'DELETE' && !request.headers['content-type']) {
+    return;
+  }
   const type = (request.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
   if (type !== 'application/json') {
     throw new ApiError(415, 'Content-Type must be application/json');
   }
 }
 
-async function readJsonBody(request) {
+async function readJsonBody(request, maxBytes = MAX_BODY_BYTES) {
   const chunks = [];
   let size = 0;
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > MAX_BODY_BYTES) throw new ApiError(413, 'Request body too large');
+    if (size > maxBytes) throw new ApiError(413, 'Request body too large');
     chunks.push(chunk);
   }
   const text = Buffer.concat(chunks).toString('utf8');

@@ -8,8 +8,11 @@ export type LibraryStyle = {
   id: string;
   name: string;
   description: string;
-  palette: [string, string, string];
+  palette: string[];
   suggestedAmbient: string[];
+  refUrl?: string | null;
+  refUrls?: string[];
+  references?: { name: string; url: string }[];
   isLocalDraft?: boolean;
 };
 

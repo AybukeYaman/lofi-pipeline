@@ -84,7 +84,12 @@ export function createBuildJobs({ spawnFn = spawn, repoRoot = REPO_ROOT, now = D
       child = spawnFn(
         process.execPath,
         [join(repoRoot, 'build.js'), '--project', projectPath, ...(overwrite ? ['--overwrite'] : [])],
-        { cwd: repoRoot, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true },
+        {
+          cwd: repoRoot,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+          env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+        },
       );
     } catch (error) {
       finish('failed', { error: `build could not be started: ${error.message}` });

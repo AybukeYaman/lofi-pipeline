@@ -37,8 +37,8 @@ export const CONFIG_DEFAULTS = {
 
 /** Bilinen anahtarlar — yazım hatası ("cropbottom") sessizce yok sayılmasın. */
 const KNOWN_KEYS = {
-  root: ['clip', 'audioDir', 'ambient', 'order', 'names', 'video', 'audio', 'output', 'music', 'style', 'styleBlock', 'motionHints'],
-  video: ['cropBottom', 'aspect', 'crf', 'preset', 'fadeOut', 'scaleWidth', 'crossfadeSeconds'],
+  root: ['clip', 'audioDir', 'ambient', 'order', 'names', 'video', 'audio', 'output', 'music', 'style', 'styleBlock', 'motionHints', 'workflow'],
+  video: ['cropBottom', 'cropTop', 'cropLeft', 'cropRight', 'watermark', 'aspect', 'crf', 'preset', 'fadeOut', 'scaleWidth', 'crossfadeSeconds'],
   audio: ['bitrate', 'ambientOffsetDb'],
   output: ['dir', 'name', 'tracklist'],
 };
@@ -139,11 +139,15 @@ async function resolveProject(json, { projectPath, overrides = {} }) {
   // --- kırpma: bayrak konfigi ezer; ezilen değer konfigden gelmemiş sayılır
   const configCrop = video.cropBottom;
   if (configCrop !== undefined) nonNegativeInt(configCrop, 'video.cropBottom', problems);
+  if (video.cropTop !== undefined) nonNegativeInt(video.cropTop, 'video.cropTop', problems);
+  if (video.cropLeft !== undefined) nonNegativeInt(video.cropLeft, 'video.cropLeft', problems);
+  if (video.cropRight !== undefined) nonNegativeInt(video.cropRight, 'video.cropRight', problems);
+
   const cropFromFlag = overrides.cropBottom !== undefined;
   if (cropFromFlag) nonNegativeInt(overrides.cropBottom, '--crop-bottom', problems);
 
-  const cropBottom = cropFromFlag ? overrides.cropBottom : configCrop;
-  if (cropBottom === undefined) {
+  const cropBottom = cropFromFlag ? overrides.cropBottom : (configCrop ?? 0);
+  if (cropBottom === undefined && video.cropTop === undefined && video.cropLeft === undefined && video.cropRight === undefined) {
     problems.push(
       'kırpma değeri yok: project.json\'da "video.cropBottom" ya da --crop-bottom N ' +
       'bayrağı gerekli (değer uydurulmaz; bayrakla verilen değer için kontrol karesi onayı istenir)',
@@ -211,6 +215,9 @@ async function resolveProject(json, { projectPath, overrides = {} }) {
     names: json.names ?? {},
     video: {
       cropBottom,
+      cropTop: video.cropTop ?? 0,
+      cropLeft: video.cropLeft ?? 0,
+      cropRight: video.cropRight ?? 0,
       cropFromConfig: !cropFromFlag,
       verifyCrop: Boolean(overrides.verifyCrop),
       aspect,

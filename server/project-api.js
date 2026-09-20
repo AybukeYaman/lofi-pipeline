@@ -6,26 +6,35 @@
  * (ui/actions.js) kullandigi domain fonksiyonlarinin aynisini cagirir.
  */
 
-import { realpath, stat } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { mkdir, readdir, readFile, realpath, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+
+import {
+  MAX_IMAGE_SIZE_BYTES, SUPPORTED_IMAGE_EXTENSIONS, describeMultiReferenceStyle, getImageMimeType,
+} from '../prep/describe-style.js';
 
 import { AddStyleError, runAddStyle } from '../add-style.js';
 import { AUDIO_EXTENSIONS, listFiles } from '../core/files.js';
 import { probe } from '../core/probe.js';
+import { readJsonFile, writeTextFile } from '../core/workspace.js';
 import { NewVideoError, runNewVideo } from '../new-video.js';
 import { AmbientError, DEFAULT_AMBIENT_DIR, listAmbients } from '../prep/ambients.js';
 import { GeminiError, getApiKey, loadEnv } from '../prep/gemini.js';
 import {
-  DEFAULT_CROP_BOTTOM, ProjectFileError, completeMusicByUser, cropForWatermark, setProjectClip, setProjectCropBottom,
+  DEFAULT_CROP_BOTTOM, ProjectFileError, completeMusicByUser, cropForWatermark, setProjectClip, setProjectCrop, setProjectCropBottom,
+  setProjectField,
 } from '../prep/project-file.js';
-import { inspectProject, isMusicCompleted, listProjects, nextStep } from '../prep/project-status.js';
+import {
+  ANGLE_PATTERN, MASTER_PATTERN, SCENE_REF_PATTERN, canonicalWorkflow, inspectProject, isMusicCompleted, listProjects, nextStep,
+} from '../prep/project-status.js';
 import {
   ProjectStyleError, StyleGenerationError, generateProjectStyle, projectPromptStyle,
 } from '../prep/project-style.js';
-import { getPhasePrompts } from '../prep/prompts.js';
+import { codeBlocks, getPhasePrompts } from '../prep/prompts.js';
 import { DEFAULT_VIDEOS_DIR, ProjectExistsError, validateVideoName } from '../prep/scaffold.js';
 import {
-  CUSTOM_STYLE_NAME, STYLES_DIR, STYLE_NAME_PATTERN, StyleError, findStyleRef, listStyles, loadStyle,
+  CUSTOM_STYLE_NAME, STYLES_DIR, STYLE_NAME_PATTERN, StyleError, findStyleRef, findStyleRefs, listStyles, loadStyle, validateStyle,
 } from '../prep/styles.js';
 import { REPO_ROOT } from './build-jobs.js';
 
@@ -38,6 +47,8 @@ const MAX_CONCEPT_LENGTH = 300;
  */
 const ASSET_TYPES = {
   master: { kind: 'image/', files: (status) => (status.master ? [status.master] : []) },
+  scene: { kind: 'image/', files: (status) => (status.sceneRef ? [status.sceneRef] : []) },
+  angle: { kind: 'image/', files: (status) => status.angles },
   reference: {
     kind: 'image/',
     files: (status) => [...status.references, ...(status.styleRef ? [status.styleRef] : [])],
@@ -103,11 +114,12 @@ export class ApiError extends Error {
 /** Mevcut proje klasorlerini UI'nin liste gorunumune uyarlar. */
 export async function getProjects({ videosDir = DEFAULT_VIDEOS_DIR } = {}) {
   const projects = await listProjects(videosDir);
-  return projects.map(({ name, mtimeMs, step }) => ({
+  return projects.map(({ name, mtimeMs, step, workflow }) => ({
     id: name,
     name,
     mtimeMs,
     step,
+    workflow,
   }));
 }
 
@@ -121,6 +133,7 @@ export async function getProject(id, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
     id,
     ...status,
     step: nextStep(status),
+    workflow: canonicalWorkflow(status),
     readiness,
   };
 }
@@ -202,12 +215,48 @@ export async function getLibrary({ stylesDir = STYLES_DIR, ambientDir = DEFAULT_
 }
 
 /**
- * Kutuphaneye stil ekler — add-style.js (runAddStyle) ile; CLI/panelle ayni
- * dosyalar: styles/<name>.json + styles/refs/<name>.<uzanti>. Yukleme yok:
- * kaynak gorsel bir projenin references/ (ya da resimler/style-ref.*) dosyasi.
+ * Stilin referans görsellerini kaydeder.
+ */
+async function saveStyleReferences(name, refInput, stylesDir) {
+  const refsDir = join(stylesDir, 'refs');
+  await mkdir(refsDir, { recursive: true });
+
+  const refList = Array.isArray(refInput)
+    ? refInput
+    : refInput && typeof refInput === 'object'
+      ? [refInput]
+      : [];
+
+  if (refList.length === 0) return [];
+
+  const existingRefs = await findStyleRefs(name, { dir: stylesDir });
+  for (const p of existingRefs.paths) {
+    await unlink(p).catch(() => {});
+  }
+
+  const savedPaths = [];
+  for (let i = 0; i < refList.length; i++) {
+    const ref = refList[i];
+    if (typeof ref === 'object' && ref !== null && typeof ref.data === 'string' && ref.data) {
+      const originalName = typeof ref.name === 'string' ? ref.name : `ref-${i + 1}.png`;
+      const ext = extname(originalName).toLowerCase() || '.png';
+      if (SUPPORTED_IMAGE_EXTENSIONS.includes(ext)) {
+        const buffer = decodeUpload(ref.data, MAX_IMAGE_SIZE_BYTES, `Reference image ${originalName}`);
+        const saveFilename = i === 0 ? `${name}${ext}` : `${name}-${i + 1}${ext}`;
+        const targetPath = join(refsDir, saveFilename);
+        await writeFile(targetPath, buffer);
+        savedPaths.push(targetPath);
+      }
+    }
+  }
+  return savedPaths;
+}
+
+/**
+ * Kutuphaneye stil ekler — add-style.js (runAddStyle) ile veya dogrudan stil tanimiyla.
  *
- * @param {unknown} body `{ name, projectId, reference, overwrite? }`
- * @param {{ gemini?: object }} [options] gemini: runAddStyle ortam/test secenekleri
+ * @param {unknown} body `{ name, projectId?, reference?, styleBlock?, suggestedAmbient?, motionHints?, music?, referenceImages?, referenceImage?, overwrite? }`
+ * @param {{ gemini?: object, videosDir?: string, stylesDir?: string, ambientDir?: string }} [options]
  * @returns {Promise<{ style: object }>} GET /api/library'deki stil girdisiyle ayni bicim
  */
 export async function createLibraryStyle(body, {
@@ -216,43 +265,334 @@ export async function createLibraryStyle(body, {
   ambientDir = DEFAULT_AMBIENT_DIR,
   gemini = {},
 } = {}) {
-  const { name, projectId, reference, overwrite = false } = parseBody(
-    body,
-    { name: 'string', projectId: 'string', reference: 'string', overwrite: 'boolean' },
-    ['name', 'projectId', 'reference'],
-  );
+  const name = typeof body?.name === 'string' ? body.name.trim() : '';
+  const overwrite = Boolean(body?.overwrite);
   if (!STYLE_NAME_PATTERN.test(name)) {
     throw new ApiError(400, 'name must be lowercase kebab-case (e.g. neo-tokyo)');
   }
   if (name === CUSTOM_STYLE_NAME) throw new ApiError(400, `name "${CUSTOM_STYLE_NAME}" is reserved`);
-  if (!isPlainName(reference)) throw new ApiError(400, 'Invalid reference');
-  const projectDir = await resolveProjectDir(projectId, videosDir);
 
   return exclusive(`style:${name}`, async () => {
-    const status = await inspectProject(projectDir);
-    const candidates = ASSET_TYPES.reference.files(status);
-    const source = candidates.find((path) => basename(path) === reference);
-    const imagePath = source && await realPathInside(projectDir, source);
-    if (!imagePath) {
-      throw new ApiError(422, 'Reference image not found in the project', {
-        available: candidates.map((path) => basename(path)),
-      });
-    }
+    const stylePath = join(stylesDir, `${name}.json`);
     if (!overwrite && (await listStyles({ dir: stylesDir })).includes(name)) {
       throw new ApiError(409, 'Style already exists', { name });
     }
 
-    const options = geminiOptions(gemini);
-    try {
-      await runAddStyle({ imagePath, name, overwrite, ambientDir, stylesDir, options });
-    } catch (error) {
-      if (error instanceof AddStyleError) {
-        throw new ApiError(422, 'Style could not be generated', { problem: error.message });
+    const ambients = await ambientsOrEmpty(ambientDir);
+
+    // Direct manual style definition
+    if (body.styleBlock && typeof body.styleBlock === 'object') {
+      const newStyle = {
+        name,
+        styleBlock: body.styleBlock,
+        suggestedAmbient: typeof body.suggestedAmbient === 'string'
+          ? body.suggestedAmbient
+          : Array.isArray(body.suggestedAmbient) && body.suggestedAmbient.length > 0
+            ? body.suggestedAmbient[0]
+            : 'gentleRain',
+        motionHints: Array.isArray(body.motionHints) ? body.motionHints : [],
+        music: body.music || undefined,
+      };
+      const { problems } = validateStyle(newStyle, { expectedName: name, ambients });
+      if (problems.length > 0) {
+        throw new ApiError(422, 'Style validation failed', { problems });
       }
+      await writeTextFile(stylePath, JSON.stringify(newStyle, null, 2) + '\n');
+      if (body.referenceImages || body.referenceImage) {
+        await saveStyleReferences(name, body.referenceImages || body.referenceImage, stylesDir);
+      }
+      return { style: await describeLibraryStyle(name, { stylesDir, ambients }) };
+    }
+
+    // AI synthesis from project reference image
+    if (body.projectId !== undefined || body.reference !== undefined) {
+      const { projectId, reference } = parseBody(
+        body,
+        { name: 'string', projectId: 'string', reference: 'string', overwrite: 'boolean' },
+        ['name', 'projectId', 'reference'],
+      );
+      if (!isPlainName(reference)) throw new ApiError(400, 'Invalid reference');
+      const projectDir = await resolveProjectDir(projectId, videosDir);
+
+      const status = await inspectProject(projectDir);
+      const candidates = ASSET_TYPES.reference.files(status);
+      const source = candidates.find((path) => basename(path) === reference);
+      const imagePath = source && await realPathInside(projectDir, source);
+      if (!imagePath) {
+        throw new ApiError(422, 'Reference image not found in the project', {
+          available: candidates.map((path) => basename(path)),
+        });
+      }
+
+      const options = geminiOptions(gemini);
+      try {
+        await runAddStyle({ imagePath, name, overwrite, ambientDir, stylesDir, options });
+      } catch (error) {
+        if (error instanceof AddStyleError) {
+          throw new ApiError(422, 'Style could not be generated', { problem: error.message });
+        }
+        throw generationApiError(error);
+      }
+      return { style: await describeLibraryStyle(name, { stylesDir, ambients }) };
+    }
+
+    // AI synthesis from concept and/or uploaded reference images (Style Library modal)
+    const normalizedBody = {
+      ...body,
+      suggestedAmbient: typeof body?.suggestedAmbient === 'string'
+        ? [body.suggestedAmbient]
+        : body?.suggestedAmbient,
+    };
+    const input = parseBody(
+      normalizedBody,
+      { name: 'string', concept: 'string', referenceImages: 'array', suggestedAmbient: 'array', overwrite: 'boolean' },
+      ['name'],
+    );
+
+    const options = geminiOptions(gemini);
+    const concept = typeof input.concept === 'string' ? input.concept.trim() : '';
+    const referenceImages = Array.isArray(input.referenceImages) ? input.referenceImages : [];
+
+    const rawImages = [];
+    const refsDir = join(stylesDir, 'refs');
+    await mkdir(refsDir, { recursive: true });
+
+    if (overwrite) {
+      const existingRefs = await findStyleRefs(name, { dir: stylesDir });
+      for (const p of existingRefs.paths) {
+        await unlink(p).catch(() => {});
+      }
+    }
+
+    for (let i = 0; i < referenceImages.length; i++) {
+      const ref = referenceImages[i];
+      if (typeof ref === 'object' && ref !== null && typeof ref.data === 'string' && ref.data) {
+        const refName = typeof ref.name === 'string' ? ref.name : `ref-${i + 1}.png`;
+        const ext = extname(refName).toLowerCase() || '.png';
+        if (SUPPORTED_IMAGE_EXTENSIONS.includes(ext)) {
+          const buffer = decodeUpload(ref.data, MAX_IMAGE_SIZE_BYTES, `Reference image ${refName}`);
+          const mimeType = getImageMimeType(ext);
+          if (mimeType) {
+            rawImages.push({ mimeType, buffer });
+            const saveFilename = i === 0 ? `${name}${ext}` : `${name}-${i + 1}${ext}`;
+            await writeFile(join(refsDir, saveFilename), buffer);
+          }
+        }
+      }
+    }
+
+    try {
+      const result = await describeMultiReferenceStyle({
+        imagePaths: [],
+        rawImages,
+        concept,
+        name,
+        options: { ambientDir, ...options },
+      });
+
+      const newStyle = {
+        ...result.style,
+        suggestedAmbient: (Array.isArray(input.suggestedAmbient) && input.suggestedAmbient.length > 0)
+          ? input.suggestedAmbient[0]
+          : (result.style.suggestedAmbient || (ambients[0]?.name ?? 'gentleRain')),
+      };
+
+      const { problems } = validateStyle(newStyle, { expectedName: name, ambients });
+      if (problems.length > 0) {
+        throw new ApiError(422, 'Style validation failed', { problems });
+      }
+
+      await writeTextFile(stylePath, JSON.stringify(newStyle, null, 2) + '\n');
+      return { style: await describeLibraryStyle(name, { stylesDir, ambients }) };
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
       throw generationApiError(error);
     }
+  });
+}
+
+/**
+ * Tek bir stilin ayrintisini dondurur.
+ */
+export async function getStyle(name, { stylesDir = STYLES_DIR, ambientDir = DEFAULT_AMBIENT_DIR } = {}) {
+  if (name === CUSTOM_STYLE_NAME) {
+    return {
+      name: CUSTOM_STYLE_NAME,
+      kind: 'custom',
+      valid: true,
+      suggestedAmbient: null,
+      hasReference: false,
+    };
+  }
+  const exists = (await listStyles({ dir: stylesDir })).includes(name);
+  if (!exists) {
+    throw new ApiError(404, `Style "${name}" not found`);
+  }
+  const ambients = await ambientsOrEmpty(ambientDir);
+  const detail = await describeLibraryStyle(name, { stylesDir, ambients });
+  return detail;
+}
+
+/**
+ * Var olan stili gunceller (yeniden adlandirma dahil).
+ */
+export async function updateLibraryStyle(name, body, {
+  stylesDir = STYLES_DIR,
+  ambientDir = DEFAULT_AMBIENT_DIR,
+  gemini = {},
+} = {}) {
+  if (name === CUSTOM_STYLE_NAME) {
+    throw new ApiError(400, `Style "${CUSTOM_STYLE_NAME}" is reserved and cannot be modified`);
+  }
+  if (!STYLE_NAME_PATTERN.test(name)) {
+    throw new ApiError(400, 'name must be lowercase kebab-case (e.g. neo-tokyo)');
+  }
+
+  const targetName = (typeof body?.name === 'string' && body.name.trim() !== '') ? body.name.trim() : name;
+  if (!STYLE_NAME_PATTERN.test(targetName)) {
+    throw new ApiError(400, 'name must be lowercase kebab-case (e.g. neo-tokyo)');
+  }
+  if (targetName === CUSTOM_STYLE_NAME) {
+    throw new ApiError(400, `name "${CUSTOM_STYLE_NAME}" is reserved`);
+  }
+
+  return exclusive(`style:${name}`, async () => {
+    const stylePath = join(stylesDir, `${name}.json`);
+    const exists = (await listStyles({ dir: stylesDir })).includes(name);
+    if (!exists) {
+      throw new ApiError(404, `Style "${name}" not found`);
+    }
+
+    if (targetName !== name) {
+      const targetExists = (await listStyles({ dir: stylesDir })).includes(targetName);
+      if (targetExists) {
+        throw new ApiError(409, `Style with name "${targetName}" already exists`);
+      }
+    }
+
     const ambients = await ambientsOrEmpty(ambientDir);
-    return { style: await describeLibraryStyle(name, { stylesDir, ambients }) };
+    const existing = await readJsonFile(stylePath).catch(() => ({}));
+
+    // Handle new reference image(s) upload during edit if provided
+    const refList = body.referenceImages !== undefined
+      ? body.referenceImages
+      : body.referenceImage !== undefined
+        ? (body.referenceImage ? [body.referenceImage] : [])
+        : undefined;
+
+    if (refList !== undefined) {
+      await saveStyleReferences(targetName, refList, stylesDir);
+      if (targetName !== name) {
+        const oldRefs = await findStyleRefs(name, { dir: stylesDir });
+        for (const p of oldRefs.paths) await unlink(p).catch(() => {});
+      }
+    } else if (targetName !== name) {
+      // If renamed without replacing images, move ALL existing ref images
+      const refsDir = join(stylesDir, 'refs');
+      const oldRefs = await findStyleRefs(name, { dir: stylesDir });
+      for (const oldPath of oldRefs.paths) {
+        const oldFilename = basename(oldPath);
+        const newFilename = oldFilename.startsWith(name)
+          ? `${targetName}${oldFilename.slice(name.length)}`
+          : `${targetName}-${oldFilename}`;
+        const newPath = join(refsDir, newFilename);
+        await writeFile(newPath, await readFile(oldPath));
+        await unlink(oldPath).catch(() => {});
+      }
+    }
+
+    let updated;
+
+    // Eğer regenerate: true ise Gemini ile referans görsellerden yeniden analiz yap
+    if (body.regenerate === true) {
+      const { paths: refPaths } = await findStyleRefs(targetName !== name ? targetName : name, { dir: stylesDir });
+      if (refPaths.length === 0) {
+        throw new ApiError(422, 'No reference images found for regeneration. Please add at least one reference image.');
+      }
+
+      const options = geminiOptions(gemini);
+      try {
+        const result = await describeMultiReferenceStyle({
+          imagePaths: refPaths,
+          rawImages: [],
+          concept: typeof body.concept === 'string' ? body.concept.trim() : '',
+          name: targetName !== name ? targetName : name,
+          options: { ambientDir, ...options },
+        });
+
+        updated = {
+          ...existing,
+          name: targetName,
+          styleBlock: result.style.styleBlock ?? existing.styleBlock,
+          suggestedAmbient: result.style.suggestedAmbient ?? existing.suggestedAmbient,
+          motionHints: result.style.motionHints ?? existing.motionHints,
+          music: body.music !== undefined ? body.music : existing.music,
+        };
+      } catch (error) {
+        if (error instanceof ApiError) throw error;
+        throw generationApiError(error);
+      }
+    } else {
+      updated = {
+        ...existing,
+        name: targetName,
+        styleBlock: body.styleBlock !== undefined ? body.styleBlock : existing.styleBlock,
+        suggestedAmbient: body.suggestedAmbient !== undefined
+          ? (Array.isArray(body.suggestedAmbient) ? body.suggestedAmbient[0] : body.suggestedAmbient)
+          : existing.suggestedAmbient,
+        motionHints: body.motionHints !== undefined
+          ? (Array.isArray(body.motionHints)
+            ? body.motionHints
+            : typeof body.motionHints === 'string'
+              ? body.motionHints.split('\n').map((h) => h.trim()).filter(Boolean)
+              : [])
+          : existing.motionHints,
+        music: body.music !== undefined ? body.music : existing.music,
+      };
+    }
+
+    const { problems } = validateStyle(updated, { expectedName: targetName, ambients });
+    if (problems.length > 0) {
+      throw new ApiError(422, 'Style validation failed', { problems });
+    }
+
+    const targetStylePath = join(stylesDir, `${targetName}.json`);
+    await writeTextFile(targetStylePath, JSON.stringify(updated, null, 2) + '\n');
+    if (targetName !== name) {
+      await unlink(stylePath).catch(() => {});
+    }
+
+    return { style: await describeLibraryStyle(targetName, { stylesDir, ambients }) };
+  });
+}
+
+/**
+ * Kutuphaneden stil siler.
+ */
+export async function deleteLibraryStyle(name, { stylesDir = STYLES_DIR } = {}) {
+  if (name === CUSTOM_STYLE_NAME) {
+    throw new ApiError(400, `Style "${CUSTOM_STYLE_NAME}" is reserved and cannot be deleted`);
+  }
+  if (!STYLE_NAME_PATTERN.test(name)) {
+    throw new ApiError(400, 'Invalid style name');
+  }
+
+  return exclusive(`style:${name}`, async () => {
+    const stylePath = join(stylesDir, `${name}.json`);
+    const exists = (await listStyles({ dir: stylesDir })).includes(name);
+    if (!exists) {
+      throw new ApiError(404, `Style "${name}" not found`);
+    }
+
+    await rm(stylePath, { force: true });
+
+    // Referans gorselleri varsa sil
+    const refs = await findStyleRefs(name, { dir: stylesDir });
+    for (const p of refs.paths) {
+      await rm(p, { force: true });
+    }
+
+    return { ok: true, deleted: name };
   });
 }
 
@@ -515,14 +855,29 @@ export async function getMusic(id, { videosDir = DEFAULT_VIDEOS_DIR, probeFn = p
  */
 export async function updateCrop(id, body, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
   const projectDir = await resolveProjectDir(id, videosDir);
-  const { watermark, cropBottom } = parseBody(body, { watermark: 'boolean', cropBottom: 'number' });
-  if (watermark === undefined && cropBottom === undefined) {
+  const { watermark, cropBottom, cropTop, cropLeft, cropRight } = parseBody(body, {
+    watermark: 'boolean',
+    cropBottom: 'number',
+    cropTop: 'number',
+    cropLeft: 'number',
+    cropRight: 'number',
+  });
+  if (watermark === undefined && cropBottom === undefined && cropTop === undefined && cropLeft === undefined && cropRight === undefined) {
     throw new ApiError(400, 'Missing field: watermark or cropBottom');
   }
   if (cropBottom !== undefined && !isCropBottom(cropBottom)) {
     throw new ApiError(400, 'cropBottom must be a non-negative integer');
   }
-  if (watermark !== undefined && cropBottom !== undefined && watermark !== cropBottom > 0) {
+  if (cropTop !== undefined && !isCropBottom(cropTop)) {
+    throw new ApiError(400, 'cropTop must be a non-negative integer');
+  }
+  if (cropLeft !== undefined && !isCropBottom(cropLeft)) {
+    throw new ApiError(400, 'cropLeft must be a non-negative integer');
+  }
+  if (cropRight !== undefined && !isCropBottom(cropRight)) {
+    throw new ApiError(400, 'cropRight must be a non-negative integer');
+  }
+  if (watermark !== undefined && cropBottom !== undefined && cropTop === undefined && cropLeft === undefined && cropRight === undefined && watermark !== (cropBottom > 0)) {
     throw new ApiError(400, 'watermark must be true exactly when cropBottom > 0');
   }
 
@@ -530,9 +885,32 @@ export async function updateCrop(id, body, { videosDir = DEFAULT_VIDEOS_DIR } = 
   if (!status.projectJson.ok) {
     throw new ApiError(409, 'project.json is invalid', { problem: status.projectJson.error });
   }
-  const value = cropBottom ?? cropForWatermark(watermark, status.projectJson.data.video?.cropBottom);
+
+  const currentVideo = status.projectJson.data?.video ?? {};
+  const currentBottom = isCropBottom(currentVideo.cropBottom) ? currentVideo.cropBottom : 0;
+  const currentTop = isCropBottom(currentVideo.cropTop) ? currentVideo.cropTop : 0;
+  const currentLeft = isCropBottom(currentVideo.cropLeft) ? currentVideo.cropLeft : 0;
+  const currentRight = isCropBottom(currentVideo.cropRight) ? currentVideo.cropRight : 0;
+
+  let effectiveBottom = cropBottom !== undefined ? cropBottom : (watermark !== undefined ? cropForWatermark(watermark, currentBottom) : currentBottom);
+  let effectiveTop = cropTop !== undefined ? cropTop : (watermark === false && cropBottom === undefined ? 0 : currentTop);
+  let effectiveLeft = cropLeft !== undefined ? cropLeft : (watermark === false && cropBottom === undefined ? 0 : currentLeft);
+  let effectiveRight = cropRight !== undefined ? cropRight : (watermark === false && cropBottom === undefined ? 0 : currentRight);
+
+  if (watermark === false && cropBottom === undefined && cropTop === undefined && cropLeft === undefined && cropRight === undefined) {
+    effectiveBottom = 0;
+    effectiveTop = 0;
+    effectiveLeft = 0;
+    effectiveRight = 0;
+  }
+
   try {
-    await setProjectCropBottom(status.projectPath, value);
+    await setProjectCrop(status.projectPath, {
+      cropBottom: effectiveBottom,
+      cropTop: effectiveTop > 0 ? effectiveTop : (cropTop !== undefined || (watermark === false && currentTop > 0) ? 0 : undefined),
+      cropLeft: effectiveLeft > 0 ? effectiveLeft : (cropLeft !== undefined || (watermark === false && currentLeft > 0) ? 0 : undefined),
+      cropRight: effectiveRight > 0 ? effectiveRight : (cropRight !== undefined || (watermark === false && currentRight > 0) ? 0 : undefined),
+    });
   } catch (error) {
     if (!(error instanceof ProjectFileError)) throw error;
     throw new ApiError(409, 'project.json is invalid', { problem: error.message });
@@ -656,7 +1034,11 @@ export function describeReadiness(status) {
   const tracks = Array.isArray(music?.tracks) ? music.tracks : [];
   const musicReady = isMusicCompleted(status);
   const clipReady = status.clip.exists;
-  const cropBottom = status.projectJson.data?.video?.cropBottom;
+  const videoData = status.projectJson.data?.video ?? {};
+  const cropBottom = videoData.cropBottom;
+  const cropTop = videoData.cropTop ?? 0;
+  const cropLeft = videoData.cropLeft ?? 0;
+  const cropRight = videoData.cropRight ?? 0;
   const cropReady = isCropBottom(cropBottom);
 
   const missing = [];
@@ -740,9 +1122,13 @@ async function describeOutput(id, projectDir, status) {
       previewUrl: servable ? assetUrl(id, assetType, file) : null,
     };
   };
+  const tracklist = await describe('tracklist', status.output.tracklistPath, status.output.tracklistExists);
+  const tracklistText = tracklist.exists && await realPathInside(projectDir, status.output.tracklistPath)
+    ? await readFile(status.output.tracklistPath, 'utf8').catch(() => null)
+    : null;
   return {
     ...await describe('output', status.output.path, status.output.exists),
-    tracklist: await describe('tracklist', status.output.tracklistPath, status.output.tracklistExists),
+    tracklist: { ...tracklist, text: tracklistText },
   };
 }
 
@@ -764,21 +1150,55 @@ async function durationOf(probeFn, path) {
 async function describeLibraryStyle(name, { stylesDir, ambients }) {
   try {
     const { style, warnings } = await loadStyle(name, { dir: stylesDir, ambients });
-    const ref = await findStyleRef(name, { dir: stylesDir });
+    const { paths } = await findStyleRefs(name, { dir: stylesDir });
+    const references = paths.map((p, idx) => {
+      const filename = basename(p);
+      return {
+        name: filename,
+        url: `/api/styles/${encodeURIComponent(name)}/images/${encodeURIComponent(filename)}?t=${Date.now()}`,
+      };
+    });
     return {
       name,
       kind: 'library',
       valid: true,
       suggestedAmbient: style.suggestedAmbient,
-      hasReference: ref.path !== null,
+      hasReference: paths.length > 0,
+      refUrl: paths.length > 0 ? `/api/styles/${encodeURIComponent(name)}/images/${encodeURIComponent(basename(paths[0]))}?t=${Date.now()}` : null,
+      refUrls: references.map((r) => r.url),
+      references,
       styleBlock: style.styleBlock,
       motionHints: style.motionHints,
-      warnings: [...warnings, ...ref.warnings],
+      music: style.music,
+      warnings: [...warnings],
     };
   } catch (error) {
     if (!(error instanceof StyleError)) throw error;
     return { name, kind: 'library', valid: false, problems: error.problems };
   }
+}
+
+/**
+ * Stilin referans görselini sunar.
+ */
+export async function getStyleAsset(name, options = {}) {
+  const { stylesDir = STYLES_DIR, file, idx } = typeof options === 'string' ? { file: options } : options;
+  const { paths } = await findStyleRefs(name, { dir: stylesDir });
+  if (paths.length === 0) throw new ApiError(404, 'Style reference image not found');
+
+  let targetPath = paths[0];
+  if (file) {
+    const found = paths.find((p) => basename(p) === file);
+    if (found) targetPath = found;
+  } else if (idx !== undefined && !Number.isNaN(Number(idx))) {
+    const num = Number(idx);
+    if (paths[num]) targetPath = paths[num];
+  }
+
+  const info = await stat(targetPath);
+  const ext = extname(targetPath).toLowerCase();
+  const contentType = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+  return { path: targetPath, size: info.size, contentType };
 }
 
 async function ambientsOrEmpty(ambientDir) {
@@ -923,4 +1343,277 @@ function isInside(root, path) {
   return pathRelativeToRoot !== '' &&
     pathRelativeToRoot.split(sep)[0] !== '..' &&
     !isAbsolute(pathRelativeToRoot);
+}
+
+export function openFolderOnOs(targetPath) {
+  try {
+    if (process.platform === 'win32') {
+      const child = spawn('explorer.exe', [targetPath], { detached: true, stdio: 'ignore' });
+      child.unref();
+      return true;
+    } else if (process.platform === 'darwin') {
+      const child = spawn('open', [targetPath], { detached: true, stdio: 'ignore' });
+      child.unref();
+      return true;
+    } else {
+      const child = spawn('xdg-open', [targetPath], { detached: true, stdio: 'ignore' });
+      child.unref();
+      return true;
+    }
+  } catch {
+    return false;
+  }
+}
+
+export async function openProjectFolder(id, body = {}, {
+  videosDir = DEFAULT_VIDEOS_DIR,
+  openFn = openFolderOnOs,
+} = {}) {
+  const projectDir = await resolveProjectDir(id, videosDir);
+  const { folder } = parseBody(body ?? {}, { folder: 'string' });
+  const targetDir = folder ? join(projectDir, folder) : projectDir;
+
+  const realProject = await realpath(projectDir).catch(() => resolve(projectDir));
+  const realTarget = await realpath(targetDir).catch(() => resolve(targetDir));
+  const rel = relative(realProject, realTarget);
+  if (rel.startsWith('..') && !isAbsolute(rel) && rel !== '') {
+    throw new ApiError(400, 'Invalid folder path');
+  }
+
+  const ok = openFn(realTarget);
+  return { ok, path: realTarget };
+}
+
+export async function addProjectReference(id, body, {
+  videosDir = DEFAULT_VIDEOS_DIR,
+} = {}) {
+  const projectDir = await resolveProjectDir(id, videosDir);
+  const { name, data } = uploadName(body, SUPPORTED_IMAGE_EXTENSIONS, 'reference');
+  const buffer = decodeUpload(data, MAX_IMAGE_SIZE_BYTES, 'Reference image');
+
+  const refDir = join(projectDir, 'references');
+  await mkdir(refDir, { recursive: true });
+  const targetPath = join(refDir, name);
+  await writeFile(targetPath, buffer);
+
+  return getProject(id, { videosDir });
+}
+
+export async function deleteProjectReference(id, name, {
+  videosDir = DEFAULT_VIDEOS_DIR,
+} = {}) {
+  const projectDir = await resolveProjectDir(id, videosDir);
+  if (!isPlainName(name)) throw new ApiError(400, 'Invalid reference file name');
+
+  const targetPath = join(projectDir, 'references', name);
+  await unlink(targetPath).catch(() => null);
+
+  return getProject(id, { videosDir });
+}
+
+/** Tarayıcıdan gelen base64 (data: URL olabilir) dosya içeriği; boş ya da sınır üstü reddedilir. */
+function decodeUpload(data, maxBytes, label) {
+  const base64Clean = data.includes(',') ? data.split(',')[1] : data;
+  const buffer = Buffer.from(base64Clean, 'base64');
+  if (buffer.length === 0) throw new ApiError(400, `${label} data is empty`);
+  if (buffer.length > maxBytes) {
+    throw new ApiError(422, `${label} exceeds ${Math.round(maxBytes / 1024 / 1024)} MB limit`);
+  }
+  return buffer;
+}
+
+/** Yüklenen dosyanın `{ name, data }` alanları; ad düz, uzantı izinli listede olmalı. */
+function uploadName(body, extensions, label, extraFields = {}) {
+  const { name, data } = parseBody(body ?? {}, { name: 'string', data: 'string', ...extraFields }, ['name', 'data']);
+  if (!isPlainName(name)) throw new ApiError(400, `Invalid ${label} file name`);
+  const ext = extname(name).toLowerCase();
+  if (!extensions.includes(ext)) {
+    throw new ApiError(400, `Unsupported ${label} format (${ext}). Supported: ${extensions.join(', ')}`);
+  }
+  return { name, data, ext };
+}
+
+/** project.json `workflow` nesnesi (yoksa boş). */
+function workflowOf(status) {
+  const value = status.projectJson.data?.workflow;
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+const MAX_ANGLES = 5;
+const MAX_CLIP_UPLOAD_BYTES = 200 * 1024 * 1024;
+const MAX_AUDIO_UPLOAD_BYTES = 100 * 1024 * 1024;
+
+/**
+ * Adım 3/4/5 görsel yüklemesi → resimler/. Dosya adı yuvaya göre sabittir
+ * (inspectProject bu adlarla bulur): scene-ref.*, MASTER.*, Master<N>.*.
+ * Aynı yuvadaki başka uzantılı eski dosya kaldırılır — iki MASTER olmasın.
+ *
+ * @param {unknown} body `{ slot: 'scene'|'master'|'angle', index?, name, data }`
+ */
+export async function uploadProjectImage(id, body, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
+  const projectDir = await resolveProjectDir(id, videosDir);
+  const { data, ext } = uploadName(body, SUPPORTED_IMAGE_EXTENSIONS, 'image', { slot: 'string', index: 'number' });
+  const { slot, index } = body;
+
+  let base;
+  let sameSlot;
+  if (slot === 'scene') {
+    base = 'scene-ref';
+    sameSlot = (file) => SCENE_REF_PATTERN.test(file);
+  } else if (slot === 'master') {
+    base = 'MASTER';
+    sameSlot = (file) => MASTER_PATTERN.test(file);
+  } else if (slot === 'angle') {
+    if (!Number.isInteger(index) || index < 1 || index > MAX_ANGLES) {
+      throw new ApiError(400, `index must be an integer between 1 and ${MAX_ANGLES}`);
+    }
+    base = `Master${index}`;
+    sameSlot = (file) => ANGLE_PATTERN.exec(file)?.[1] === String(index);
+  } else {
+    throw new ApiError(400, 'slot must be scene, master or angle');
+  }
+  const buffer = decodeUpload(data, MAX_IMAGE_SIZE_BYTES, 'Image');
+
+  const imagesDir = join(projectDir, 'resimler');
+  await mkdir(imagesDir, { recursive: true });
+  const target = `${base}${ext}`;
+  for (const existing of await readdir(imagesDir)) {
+    if (existing !== target && sameSlot(existing)) await unlink(join(imagesDir, existing));
+  }
+  await writeFile(join(imagesDir, target), buffer);
+  return getProject(id, { videosDir });
+}
+
+/**
+ * Adım 6 klip yüklemesi → videolar/<ad>.mp4. Seçim (ve kırpma) Video
+ * adımında selectClip/updateCrop ile kaydedilir.
+ *
+ * @param {unknown} body `{ name, data }`
+ */
+export async function uploadProjectClip(id, body, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
+  const projectDir = await resolveProjectDir(id, videosDir);
+  const { name, data } = uploadName(body, ['.mp4'], 'video');
+  const buffer = decodeUpload(data, MAX_CLIP_UPLOAD_BYTES, 'Video');
+  const clipsDir = join(projectDir, 'videolar');
+  await mkdir(clipsDir, { recursive: true });
+  await writeFile(join(clipsDir, name), buffer);
+  return getProject(id, { videosDir });
+}
+
+/**
+ * Adım 7 müzik yüklemesi → projenin audioDir'i. audioDir proje dışını
+ * gösteriyorsa yazılmaz.
+ *
+ * @param {unknown} body `{ name, data }`
+ */
+export async function uploadProjectAudio(id, body, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
+  const projectDir = await resolveProjectDir(id, videosDir);
+  const { name, data } = uploadName(body, AUDIO_EXTENSIONS, 'audio');
+  const buffer = decodeUpload(data, MAX_AUDIO_UPLOAD_BYTES, 'Audio');
+  const status = await inspectProject(projectDir);
+  const outside = new ApiError(409, 'audioDir is outside the project folder', { audioDir: status.audioDir });
+  if (!isInside(resolve(projectDir), resolve(status.audioDir))) throw outside;
+  await mkdir(status.audioDir, { recursive: true });
+  if (!(await realPathInside(projectDir, status.audioDir))) throw outside;
+  await writeFile(join(status.audioDir, name), buffer);
+  return getProject(id, { videosDir });
+}
+
+/**
+ * Adım 5 kararı → project.json `workflow.angles`. Build bu alanı okumaz.
+ *
+ * @param {unknown} body `{ angles: { wanted: boolean, count?: number } }`
+ */
+export async function updateWorkflow(id, body, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
+  const projectDir = await resolveProjectDir(id, videosDir);
+  const { angles } = parseBody(body ?? {}, { angles: 'object' }, ['angles']);
+  if (angles === null || Array.isArray(angles) || typeof angles.wanted !== 'boolean') {
+    throw new ApiError(400, 'angles.wanted must be a boolean');
+  }
+  let next = { wanted: false };
+  if (angles.wanted) {
+    if (!Number.isInteger(angles.count) || angles.count < 1 || angles.count > MAX_ANGLES) {
+      throw new ApiError(400, `angles.count must be an integer between 1 and ${MAX_ANGLES}`);
+    }
+    next = { wanted: true, count: angles.count };
+  }
+
+  const status = await inspectProject(projectDir);
+  if (!status.projectJson.ok) {
+    throw new ApiError(409, 'project.json is invalid', { problem: status.projectJson.error });
+  }
+  await setProjectField(status.projectPath, 'workflow', { ...workflowOf(status), angles: next });
+  return getProject(id, { videosDir });
+}
+
+/**
+ * Adım 8 → project.json `order` (build.js'in okuduğu alan) ve
+ * `workflow.order` (seçilen yöntem). Alfabetik: audioDir'in doğal sırası
+ * (build'in sırasız düşüşüyle aynı listFiles sırası).
+ *
+ * @param {unknown} body `{ mode: 'alphabetical'|'manual', order?: string[] }`
+ */
+export async function updateTrackOrder(id, body, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
+  const projectDir = await resolveProjectDir(id, videosDir);
+  const { mode, order } = parseBody(body ?? {}, { mode: 'string', order: 'object' }, ['mode']);
+  if (mode !== 'alphabetical' && mode !== 'manual') {
+    throw new ApiError(400, 'mode must be alphabetical or manual');
+  }
+
+  const status = await inspectProject(projectDir);
+  if (!status.projectJson.ok) {
+    throw new ApiError(409, 'project.json is invalid', { problem: status.projectJson.error });
+  }
+  const files = (await audioFilesOf(status)).map((path) => basename(path));
+  if (files.length === 0) {
+    throw new ApiError(409, 'No audio files in the project audio folder', { audioDir: status.audioDir });
+  }
+
+  let names = files;
+  if (mode === 'manual') {
+    const valid = Array.isArray(order)
+      && order.length === files.length
+      && new Set(order).size === order.length
+      && order.every((name) => files.includes(name));
+    if (!valid) {
+      throw new ApiError(422, 'order must list every audio file exactly once', { available: files });
+    }
+    names = order;
+  }
+
+  try {
+    await setProjectField(status.projectPath, 'order', names);
+    await setProjectField(status.projectPath, 'workflow', { ...workflowOf(status), order: mode });
+  } catch (error) {
+    if (!(error instanceof ProjectFileError)) throw error;
+    throw new ApiError(409, 'project.json is invalid', { problem: error.message });
+  }
+  return getProject(id, { videosDir });
+}
+
+/**
+ * Kopyalanacak promptlar — yalnızca kod blokları (başlık/not metni değil):
+ * Faz 1 master, Faz 2 açı listesi (başlık + metin), Faz 3 hareket.
+ */
+export async function getProjectPrompts(id, { videosDir = DEFAULT_VIDEOS_DIR, stylesDir = STYLES_DIR } = {}) {
+  const projectDir = await resolveProjectDir(id, videosDir);
+  const status = await inspectProject(projectDir);
+  const style = await projectPromptStyle(status, { stylesDir });
+  const phases = await getPhasePrompts({ videoName: status.name, style });
+
+  const firstBlock = (md) => codeBlocks(md).blocks[0]?.trim() || null;
+  const angles = phases.faz2
+    .split(/^### /m)
+    .slice(1)
+    .map((section) => ({
+      title: section.split('\n')[0].replace(/^\d+\s*[—-]\s*/, '').trim(),
+      prompt: firstBlock(section),
+    }))
+    .filter((angle) => angle.prompt);
+
+  return {
+    master: firstBlock(phases.faz1),
+    angles,
+    video: firstBlock(phases.faz3),
+  };
 }

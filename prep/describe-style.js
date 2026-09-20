@@ -56,22 +56,25 @@ export function buildStylePrompt({ ambientNames = [] } = {}) {
 
 /**
  * Birden fazla referans görsel ve video konsepti ile Gemini'ye gönderilecek prompt metnini kurar.
- * @param {{ concept?: string, ambientNames?: string[] }} options
+ * @param {{ concept?: string, ambientNames?: string[], hasImages?: boolean }} options
  * @returns {string}
  */
-export function buildMultiReferenceStylePrompt({ concept = '', ambientNames = [] } = {}) {
+export function buildMultiReferenceStylePrompt({ concept = '', ambientNames = [], hasImages = true } = {}) {
   const ambientListStr = ambientNames.length > 0 ? ambientNames.join(', ') : 'hiçbiri';
   const conceptPart = concept ? `Video Concept Context: "${concept}"\n` : '';
+  const intro = hasImages
+    ? 'Verilen referans görsellerin ortak visual language / ambience özelliklerini ve görsel stilini sentezle.\n'
+    : 'Verilen video ve görsel stili konseptine uygun visual language / ambience özelliklerini ve görsel stil kartını sentezle.\n';
 
   return (
-    'Verilen referans görsellerin ortak visual language / ambience özelliklerini ve görsel stilini sentezle.\n' +
+    intro +
     conceptPart +
     'Kurallar:\n' +
     '- Çıktı tamamen İngilizce olacak.\n' +
-    '- Görsellerin ortak ve baskın görsel dilini (production technique, line quality, palette, lighting, texture, contrast, shading, mood) çıkar.\n' +
-    '- Bir görseldeki rastgele/aykırı bir detayı global stile taşıma; ortak patternleri ve genel ambience ortamını esas al.\n' +
+    '- ' + (hasImages ? 'Görsellerin ortak ve baskın görsel dilini' : 'Konsepte uygun baskın görsel dili') + ' (production technique, line quality, palette, lighting, texture, contrast, shading, mood) çıkar.\n' +
+    '- ' + (hasImages ? 'Bir görseldeki rastgele/aykırı bir detayı global stile taşıma; ortak patternleri ve genel ambience ortamını esas al.' : 'Rastgele/aykırı detaylardan kaçın; genel ambience ortamını ve görsel dil uyumunu esas al.') + '\n' +
     '- Konuyu veya sahneyi (WHAT IS HAPPENING) ANLATMA, sadece stili ve atmosferi (HOW IT LOOKS) anlat.\n' +
-    '- palette: Referans görsellerden baskın/destekleyici 5 ila 8 renk seç. Her renk hex (#RRGGBB) formatında olmalı ve rolü (role) belirtilmeli.\n' +
+    '- ' + (hasImages ? 'palette: Referans görsellerden baskın/destekleyici 5 ila 8 renk seç. Her renk hex (#RRGGBB) formatında olmalı ve rolü (role) belirtilmeli.' : 'palette: 5 ila 8 renk seç. Her renk hex (#RRGGBB) formatında olmalı ve rolü (role) belirtilmeli.') + '\n' +
     `- suggestedAmbient: Yalnızca şu listeden seçilmelidir: [${ambientListStr}].\n` +
     '- motionHints: 4 ila 6 adet döngüye (loop) uygun subtle hareket ipucu tarif et (camera static kalmalı, pan/zoom yok).\n' +
     '- Metinlerde "<", ">", "{{" veya markdown ("**", "*") kullanılmayacak.\n' +
@@ -176,7 +179,8 @@ export function toStyle(responseText, name, { ambients } = {}) {
 /**
  * Birden fazla görsel dosyası ve konsept parametresi alarak Gemini API ile stil analizi yapar.
  * @param {object} params
- * @param {string[]} params.imagePaths
+ * @param {string[]} [params.imagePaths]
+ * @param {Array<{ mimeType: string, buffer?: Buffer, data?: string }>} [params.rawImages]
  * @param {string} [params.concept]
  * @param {string} [params.name]
  * @param {object} [params.options]
@@ -184,6 +188,7 @@ export function toStyle(responseText, name, { ambients } = {}) {
  */
 export async function describeMultiReferenceStyle({
   imagePaths = [],
+  rawImages = [],
   concept = '',
   name = CUSTOM_STYLE_NAME,
   options = {},
@@ -193,8 +198,13 @@ export async function describeMultiReferenceStyle({
   const { listAmbients } = await import('./ambients.js');
   const { generateContent, getApiKey, getModel, loadEnv } = await import('./gemini.js');
 
-  if (!Array.isArray(imagePaths) || imagePaths.length === 0) {
-    throw new Error('At least one reference image path is required for style synthesis.');
+  const validPaths = Array.isArray(imagePaths) ? imagePaths : [];
+  const validRaw = Array.isArray(rawImages) ? rawImages : [];
+  const hasImages = validPaths.length > 0 || validRaw.length > 0;
+  const hasConcept = typeof concept === 'string' && concept.trim().length > 0;
+
+  if (!hasImages && !hasConcept) {
+    throw new Error('At least one reference image or a style concept is required for style synthesis.');
   }
 
   const repoRoot = options.repoRoot || process.cwd();
@@ -218,10 +228,10 @@ export async function describeMultiReferenceStyle({
   const readFileFn = options.readFileFn || readFile;
   const parts = [];
 
-  const promptText = buildMultiReferenceStylePrompt({ concept, ambientNames });
+  const promptText = buildMultiReferenceStylePrompt({ concept: concept.trim(), ambientNames, hasImages });
   parts.push({ text: promptText });
 
-  for (const imgPath of imagePaths) {
+  for (const imgPath of validPaths) {
     const ext = extname(imgPath).toLowerCase();
     const mimeType = getImageMimeType(ext);
     if (!mimeType) continue;
@@ -231,6 +241,18 @@ export async function describeMultiReferenceStyle({
       inline_data: {
         mime_type: mimeType,
         data: buffer.toString('base64'),
+      },
+    });
+  }
+
+  for (const raw of validRaw) {
+    if (!raw || !raw.mimeType) continue;
+    const base64Data = raw.buffer ? raw.buffer.toString('base64') : (raw.data?.includes(',') ? raw.data.split(',')[1] : raw.data);
+    if (!base64Data) continue;
+    parts.push({
+      inline_data: {
+        mime_type: raw.mimeType,
+        data: base64Data,
       },
     });
   }

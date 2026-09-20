@@ -75,14 +75,14 @@ export class CropSizeError extends Error {
  *
  * @param {{ height: number, cropBottom: number }} p height: ham klip
  */
-export function checkCropHeight({ height, cropBottom }) {
-  const croppedHeight = height - cropBottom;
+export function checkCropHeight({ height, cropBottom = 0, cropTop = 0 }) {
+  const croppedHeight = height - (cropBottom + cropTop);
 
   if (croppedHeight % 2 !== 0) {
     const suggestions = [cropBottom - 1, cropBottom + 1]
-      .filter((v) => v >= 0 && height - v > 0);
+      .filter((v) => v >= 0 && height - (v + cropTop) > 0);
     throw new CropSizeError(
-      `cropBottom ${cropBottom} kırpılmış yüksekliği tek sayı yapıyor (${height} − ${cropBottom} = ` +
+      `cropBottom ${cropBottom} kırpılmış yüksekliği tek sayı yapıyor (${height} − ${cropBottom + cropTop} = ` +
       `${croppedHeight}); h264/yuv420p çift sayı ister ve ffmpeg bunu sessizce bir piksel ` +
       `daha kırparak "düzeltirdi". Değer değiştirilmedi — ${suggestions.join(' ya da ')} kullan.`,
       { cropBottom, suggestions },
@@ -93,61 +93,77 @@ export function checkCropHeight({ height, cropBottom }) {
 /**
  * Watermark kırpması SONRASI boyuttan en-boy kırpmasını hesaplar.
  *
- * Kırpma modu (dolgu değil): yükseklik korunur, genişlik yükseklik × oran olur,
- * fark soldan ve sağdan eşit kesilir — kadrajın merkezi yerinde kalır.
- * Sabit piksel değeri yazılmaz; her klibin kendi boyutundan türetilir.
- *
- * h264 (yuv420p) çift genişlik istediği için hedef genişlik çifte yuvarlanır.
- * Kaynak genişliği de çiftse fark çift çıkar ve iki yan tam eşit kesilir.
+ * Kırpma modu: kadrajın merkezi yerinde kalacak şekilde istenen orana
+ * (varsayılan 16:9) kırpar. Geniş ya da dar her türlü oranda çift sayı
+ * garanti edilir.
  *
  * @param {{ width: number, height: number, aspect: string }} p
  * @returns {{
  *   skipped: boolean, reason: string|null, aspect: string,
  *   before: { width: number, height: number },
  *   after: { width: number, height: number },
- *   left: number, right: number, filter: string|null,
+ *   left: number, right: number, top: number, bottom: number, filter: string|null,
  * }}
  */
 export function planAspectCrop({ width, height, aspect }) {
   const ratio = parseAspect(aspect);
-  const exact = (height * ratio.w) / ratio.h;
-  const targetWidth = 2 * Math.round(exact / 2);
+  const targetRatio = ratio.w / ratio.h;
+  const currentRatio = width / height;
   const before = { width, height };
 
+  const exactW = (height * ratio.w) / ratio.h;
+
   // Çift sayıya yuvarlama en fazla 1 px sapma getirir; o kadarı "zaten bu oranda".
-  if (Math.abs(width - exact) <= 1) {
+  if (Math.abs(width - exactW) <= 1) {
     return {
       skipped: true, reason: `kaynak zaten ${ratio.label}`, aspect: ratio.label,
-      before, after: before, left: 0, right: 0, filter: null,
+      before, after: before, left: 0, right: 0, top: 0, bottom: 0, filter: null,
     };
   }
 
-  if (targetWidth > width) {
-    throw new AspectError(
-      `Kaynak ${ratio.label} için fazla dar: ${width}×${height}, hedef genişlik ` +
-      `${targetWidth} px (yükseklik × ${ratio.w}/${ratio.h}). Kırpma modu genişlik ` +
-      'ekleyemez — farklı bir oran ver ya da en-boy adımını kapat.',
-    );
+  // 16:9'dan genişse: yanlardan eşit kes
+  if (currentRatio >= targetRatio) {
+    const targetHeight = 2 * Math.floor(height / 2);
+    const exactTargetW = (targetHeight * ratio.w) / ratio.h;
+    let targetWidth = 2 * Math.round(exactTargetW / 2);
+    if (targetWidth > width) targetWidth = 2 * Math.floor(width / 2);
+    const removed = width - targetWidth;
+    const left = Math.floor(removed / 4) * 2;
+    const right = removed - left;
+    return {
+      skipped: false,
+      reason: null,
+      aspect: ratio.label,
+      before,
+      after: { width: targetWidth, height: targetHeight },
+      left,
+      right,
+      top: 0,
+      bottom: 0,
+      filter: `crop=${targetWidth}:${targetHeight}:${left}:0`,
+    };
+  } else {
+    // 16:9'dan darsa (daha uzunsa): üstten ve alttan eşit keserek 16:9 kadraj oluştur
+    const targetWidth = 2 * Math.floor(width / 2);
+    const exactTargetH = (targetWidth * ratio.h) / ratio.w;
+    let targetHeight = 2 * Math.round(exactTargetH / 2);
+    if (targetHeight > height) targetHeight = 2 * Math.floor(height / 2);
+    const removed = height - targetHeight;
+    const top = Math.floor(removed / 4) * 2;
+    const bottom = removed - top;
+    return {
+      skipped: false,
+      reason: null,
+      aspect: ratio.label,
+      before,
+      after: { width: targetWidth, height: targetHeight },
+      left: 0,
+      right: 0,
+      top,
+      bottom,
+      filter: `crop=${targetWidth}:${targetHeight}:0:${top}`,
+    };
   }
-
-  const removed = width - targetWidth;
-  // yuv420p'de ffmpeg crop x ofsetini çift sayıya İNDİRİR (ölçüldü: x=496 ve
-  // x=497 aynı kareyi verir). Tek sayı yazılırsa rapor gerçeği söylemez; bu
-  // yüzden sol kesim baştan çifte indirilir. Kesilen fark tek-çift ise iki yan
-  // arasında en fazla 2 px fark kalır — merkez en fazla 1 px kayar.
-  const left = Math.floor(removed / 4) * 2;
-  const right = removed - left;
-
-  return {
-    skipped: false,
-    reason: null,
-    aspect: ratio.label,
-    before,
-    after: { width: targetWidth, height },
-    left,
-    right,
-    filter: `crop=${targetWidth}:${height}:${left}:0`,
-  };
 }
 
 /**
@@ -157,7 +173,10 @@ export function planAspectCrop({ width, height, aspect }) {
  * @param {string} options.clipPath ham klip (watermark'lı, sesli)
  * @param {string} options.outputPath üretilecek base.mp4
  * @param {object} options.workspace core/workspace.js örneği
- * @param {number} options.cropBottom alttan kırpılacak piksel
+ * @param {number} [options.cropBottom] alttan kırpılacak piksel
+ * @param {number} [options.cropTop] üstten kırpılacak piksel
+ * @param {number} [options.cropLeft] soldan kırpılacak piksel
+ * @param {number} [options.cropRight] sağdan kırpılacak piksel
  * @param {boolean} [options.cropFromConfig] cropBottom konfigden mi geldi
  * @param {boolean} [options.verifyCrop] true ise konfigde değer olsa da onay iste
  * @param {boolean} [options.assumeApproved] onayı atla (testler ve otomasyon)
@@ -179,7 +198,10 @@ export async function prepareVideo(options) {
     clipPath,
     outputPath,
     workspace,
-    cropBottom,
+    cropBottom = 0,
+    cropTop = 0,
+    cropLeft = 0,
+    cropRight = 0,
     cropFromConfig = false,
     verifyCrop = false,
     assumeApproved = false,
@@ -206,26 +228,40 @@ export async function prepareVideo(options) {
     throw new Error(`Video akışı yok: ${clipPath}`);
   }
 
-  const croppedHeight = source.height - cropBottom;
+  const topCrop = Number.isSafeInteger(cropTop) && cropTop > 0 ? cropTop : 0;
+  const bottomCrop = Number.isSafeInteger(cropBottom) && cropBottom > 0 ? cropBottom : 0;
+  const leftCrop = Number.isSafeInteger(cropLeft) && cropLeft > 0 ? cropLeft : 0;
+  const rightCrop = Number.isSafeInteger(cropRight) && cropRight > 0 ? cropRight : 0;
+
+  const croppedWidth = source.width - (leftCrop + rightCrop);
+  const croppedHeight = source.height - (topCrop + bottomCrop);
+
+  if (croppedWidth <= 0) {
+    throw new Error(
+      `Soldan ve sağdan kırpma (${leftCrop} + ${rightCrop} = ${leftCrop + rightCrop}) klip genişliğinden (${source.width}) büyük.`,
+    );
+  }
   if (croppedHeight <= 0) {
     throw new Error(
-      `cropBottom (${cropBottom}) klip yüksekliğinden (${source.height}) büyük.`,
+      `Üstten ve alttan kırpma (${topCrop} + ${bottomCrop} = ${topCrop + bottomCrop}) klip yüksekliğinden (${source.height}) büyük.`,
     );
   }
   // Onaydan ve encode'dan önce: tek sayılı yükseklik sessizce bir piksel daha kırpılırdı.
-  checkCropHeight({ height: source.height, cropBottom });
+  checkCropHeight({ height: source.height, cropBottom: bottomCrop, cropTop: topCrop });
 
-  // 1 — En-boy planı: watermark kırpması SONRASI boyuttan hesaplanır.
-  // Onaydan önce, çünkü dar kaynak hatası kimseye kare göstermeden fırlamalı.
+  // 1 — En-boy planı: watermark/kenar kırpması SONRASI boyuttan hesaplanır.
   const aspectPlan = aspect
-    ? planAspectCrop({ width: source.width, height: croppedHeight, aspect })
+    ? planAspectCrop({ width: croppedWidth, height: croppedHeight, aspect })
     : null;
 
-  const filters = [`crop=iw:ih-${cropBottom}:0:0`];
-  if (aspectPlan && !aspectPlan.skipped) {
+  const filters = [];
+  if (topCrop > 0 || bottomCrop > 0 || leftCrop > 0 || rightCrop > 0) {
+    filters.push(`crop=${croppedWidth}:${croppedHeight}:${leftCrop}:${topCrop}`);
+  }
+  if (aspectPlan && !aspectPlan.skipped && aspectPlan.filter) {
     filters.push(aspectPlan.filter);
   }
-  const expected = aspectPlan ? aspectPlan.after : { width: source.width, height: croppedHeight };
+  const expected = aspectPlan ? aspectPlan.after : { width: croppedWidth, height: croppedHeight };
 
   // Genişlik yalnızca en-boy adımı KIRPMADIĞINDA tek kalabilir (adım kapalı ya da
   // kaynak ±1 px ile zaten bu oranda). Kırpan plan her zaman çift genişlik verir.
@@ -234,8 +270,11 @@ export async function prepareVideo(options) {
       `Çıktı genişliği tek sayı (${expected.width}): kaynak genişliği kırpılmadan kalıyor ve ` +
       'h264/yuv420p çift sayı ister — ffmpeg sessizce bir piksel kırpardı. ' +
       (aspect ? '' : 'En-boy adımını aç (--aspect 16:9) ya da ') + '--scale ile çift genişlik ver.',
-      { cropBottom, suggestions: [] },
+      { cropBottom: bottomCrop, suggestions: [] },
     );
+  }
+  if (expected.height % 2 !== 0 && !scaleWidth) {
+    expected.height = 2 * Math.floor(expected.height / 2);
   }
 
   if (aspectPlan?.skipped) {
@@ -243,7 +282,7 @@ export async function prepareVideo(options) {
   } else if (aspectPlan) {
     logger.info(
       `En-boy ${aspectPlan.aspect}: ${source.width}×${croppedHeight} → ` +
-      `${expected.width}×${expected.height} (soldan ${aspectPlan.left}, sağdan ${aspectPlan.right} px)`,
+      `${expected.width}×${expected.height} (soldan ${aspectPlan.left}, sağdan ${aspectPlan.right}, üstten ${aspectPlan.top || 0}, alttan ${aspectPlan.bottom || 0} px)`,
     );
   }
 

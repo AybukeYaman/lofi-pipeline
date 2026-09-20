@@ -213,13 +213,20 @@ describe('continueProject', () => {
         return pick('⏳ [ Auto Watch ]');
       },
       pick('Son 15 dakika'),
+      // Adım 6: Video klip
       async () => {
         await writeFile(join(dir, 'videolar', 'in.mp4'), '');
+        return pick('⏳ [ Auto Watch ]');
+      },
+      pick('Son 15 dakika'),
+      pick('no'),
+      // Adım 7: Müzik
+      async () => {
         await writeFile(join(dir, 'audio', 'a.m4a'), '');
         return pick('Default music');
       },
       pick('Son 15 dakika'),
-      pick('no'),
+      // Adım 10: Yayın
       pick('Ana Menüye Dön'),
     ]);
     ctx.session.project = dir;
@@ -243,19 +250,22 @@ describe('continueProject', () => {
         await writeFile(join(dir, 'project.json'), JSON.stringify(data, null, 2));
         return pick('refresh');
       },
-      // Audio: Müzik eklendikten sonra Yenile seçilir
-      async () => {
-        await writeFile(join(dir, 'audio', 'track1.mp3'), '');
-        return pick('refresh');
-      },
-      // FAZ 3: Klasörü Aç seçilir ama dosya eklenmez
+      // FAZ 3 (Video): Klasörü Aç seçilir ama dosya eklenmez
       pick('open'),
-      // FAZ 3: Klip eklendikten sonra Yenile seçilir
+      // FAZ 3 (Video): Klip eklendikten sonra Yenile seçilir
       async () => {
         await writeFile(join(dir, 'videolar', 'in.mp4'), '');
         return pick('refresh');
       },
       pick('no'),
+      // Audio (Müzik): Klasörü Aç seçilir ama dosya eklenmez
+      pick('open'),
+      // Audio (Müzik): Müzik eklendikten sonra Yenile seçilir
+      async () => {
+        await writeFile(join(dir, 'audio', 'track1.mp3'), '');
+        return pick('refresh');
+      },
+      // Yayın: Ana Menüye Dön
       pick('Ana Menüye Dön'),
     ]);
     ctx.session.project = dir;
@@ -264,11 +274,11 @@ describe('continueProject', () => {
     const outputText = out();
     assert.ok(outputText.includes('[📂 Klasör Açıldı]'));
     assert.ok(outputText.includes('[✓ Master Görseli Algılandı]'));
-    assert.ok(outputText.includes('Detected') || outputText.includes('Müzik Dosyası Algılandı'));
+    assert.ok(outputText.includes('Müzik') || outputText.includes('audio') || outputText.includes('Default music'));
     assert.ok(outputText.includes('[✓ Video Klip Algılandı & Bağlandı]'));
 
     // "Klasörü Aç" her adımda doğru klasörü açar.
-    assert.deepEqual(openedFolders, [join(dir, 'resimler'), join(dir, 'videolar')]);
+    assert.deepEqual(openedFolders, [join(dir, 'resimler'), join(dir, 'videolar'), join(dir, 'audio')]);
   });
 
   test('proje yoksa seçim yapılamaz ve akış biter', async () => {
@@ -362,9 +372,14 @@ describe('runPanel', () => {
 });
 
 describe('multi-track music workflow in continueProject', () => {
-  test('Track 01 algılanınca Track 02 aktifleşir, store güncellenir, 17/17 dolmadan klip adımına geçilmez', async () => {
+  test('Track 01 algılanınca Track 02 aktifleşir, store güncellenir, 17/17 dolmadan montaj adımına geçilmez', async () => {
     const { dir } = await project('multi-track-test');
     await writeFile(join(dir, 'resimler', 'MASTER.PNG'), '');
+    await writeFile(join(dir, 'videolar', 'in.mp4'), '');
+    const p = await readProject(dir);
+    p.clip = './videolar/in.mp4';
+    p.video = { cropBottom: 150 };
+    await writeFile(join(dir, 'project.json'), JSON.stringify(p, null, 2));
 
     // Sahte kullanıcının adımları:
     // 1. Track 01 için 'open' (klasör aç) -> State değişmez, 0/17 kalır
@@ -398,18 +413,22 @@ describe('multi-track music workflow in continueProject', () => {
   test('Finish Music & Continue seçildiğinde completed_by_user kaydedilir ve sonraki adıma geçilir', async () => {
     const { dir } = await project('finish-music-test');
     await writeFile(join(dir, 'resimler', 'MASTER.PNG'), '');
+    await writeFile(join(dir, 'videolar', 'in.mp4'), '');
+    await writeFile(join(dir, 'audio', '01-Intro.mp3'), '');
 
     // "Bitir" ancak elde en az bir şarkı varken sunulur: ilk track tamamlanmış sayılır.
     const seed = await readProject(dir);
+    seed.clip = './videolar/in.mp4';
+    seed.video = { cropBottom: 150 };
     Object.assign(seed.music.tracks[0], { status: 'completed', file: '01-Intro.mp3' });
     seed.music.completedCount = 1;
     await writeFile(join(dir, 'project.json'), JSON.stringify(seed, null, 2));
 
-    // Kullanıcı 1/17 track'te 'finish' seçip confirmation'a 'yes' diyor, sonraki faz3 adımında 'menu' diyerek çıkıyor
+    // Kullanıcı 1/17 track'te 'finish' seçip confirmation'a 'yes' diyor, build tamamlandıktan sonra publish adımında çıkıyor
     const { ctx } = makeCtx([
       pick('finish'),
       pick('yes'),
-      pick('menu'),
+      pick('Ana Menüye Dön'),
     ]);
 
     ctx.session.project = dir;
@@ -420,9 +439,9 @@ describe('multi-track music workflow in continueProject', () => {
     assert.equal(data.music.totalTracks, 17);
     assert.equal(data.music.tracks.filter((t) => t.status === 'pending').length, 16);
 
-    // project-status ile nextStep kontrol et: Artık audio değil faz3 bekleniyor
+    // project-status ile nextStep kontrol et: Montaj yapıldığı için çıktı dosyası oluştu ve durum done oldu
     const status = await inspectProject(dir);
-    assert.equal(nextStep(status).id, 'faz3');
+    assert.equal(nextStep(status).id, 'done');
   });
 
   test('Multi-Reference Visual Style seçildiğinde style-references adımına geçilir, Explorer açma state değiştirmez, görsel eklenince analiz başlatılır', async () => {
@@ -625,6 +644,11 @@ describe('multi-track music workflow in continueProject', () => {
   test('Müzik seçiminde native dialog ile dosya seçildiğinde dosya proje audio/ klasörüne kopyalanır ve proje audio/ içindeki dosya adı saklanır', async () => {
     const { dir } = await project('native-picker-test');
     await writeFile(join(dir, 'resimler', 'MASTER.png'), '');
+    await writeFile(join(dir, 'videolar', 'in.mp4'), '');
+    const p = await readProject(dir);
+    p.clip = './videolar/in.mp4';
+    p.video = { cropBottom: 150 };
+    await writeFile(join(dir, 'project.json'), JSON.stringify(p, null, 2));
 
     const fakeSourceDir = join(env.base, 'temp-music');
     await mkdir(fakeSourceDir, { recursive: true });
@@ -647,6 +671,11 @@ describe('multi-track music workflow in continueProject', () => {
   test('Çakışan isimde müzik kopyalanırsa güvenli duplicate ismi (Night Drive (1).mp3) üretilir ve kopyalanır', async () => {
     const { dir } = await project('native-picker-duplicate-test');
     await writeFile(join(dir, 'resimler', 'MASTER.png'), '');
+    await writeFile(join(dir, 'videolar', 'in.mp4'), '');
+    const p = await readProject(dir);
+    p.clip = './videolar/in.mp4';
+    p.video = { cropBottom: 150 };
+    await writeFile(join(dir, 'project.json'), JSON.stringify(p, null, 2));
     await writeFile(join(dir, 'audio', 'Night Drive.mp3'), 'existing-content');
 
     const fakeSourceDir = join(env.base, 'temp-music-dup');
@@ -668,6 +697,11 @@ describe('multi-track music workflow in continueProject', () => {
   test('Müzik seçiminde native dialog iptal edilirse (null) state değişmez ve aynı müzik ekranında kalınır', async () => {
     const { dir } = await project('native-picker-cancel-test');
     await writeFile(join(dir, 'resimler', 'MASTER.png'), '');
+    await writeFile(join(dir, 'videolar', 'in.mp4'), '');
+    const p = await readProject(dir);
+    p.clip = './videolar/in.mp4';
+    p.video = { cropBottom: 150 };
+    await writeFile(join(dir, 'project.json'), JSON.stringify(p, null, 2));
 
     const { ctx, prompter } = makeCtx([pick('Select Audio Files'), pick('Ana Menüye Dön')]);
     ctx.pickAudioFilesFn = async () => null;
@@ -689,6 +723,11 @@ describe('multi-track music workflow in continueProject', () => {
   test('Müzik ekranı: Select Audio -> Cancel -> Select Audio again -> MP3 seçimi sonrası akış devam eder', async () => {
     const { dir } = await project('native-picker-retry-test');
     await writeFile(join(dir, 'resimler', 'MASTER.png'), '');
+    await writeFile(join(dir, 'videolar', 'in.mp4'), '');
+    const p = await readProject(dir);
+    p.clip = './videolar/in.mp4';
+    p.video = { cropBottom: 150 };
+    await writeFile(join(dir, 'project.json'), JSON.stringify(p, null, 2));
 
     const fakeSourceDir = join(env.base, 'temp-retry-music');
     await mkdir(fakeSourceDir, { recursive: true });
@@ -722,6 +761,11 @@ describe('multi-track music workflow in continueProject', () => {
   test('Native picker ile aynı anda birden fazla (2+) audio seçildiğinde tümü audio/ klasörüne kopyalanır ve track status güncellenir', async () => {
     const { dir } = await project('multi-audio-pick-test');
     await writeFile(join(dir, 'resimler', 'MASTER.png'), '');
+    await writeFile(join(dir, 'videolar', 'in.mp4'), '');
+    const p = await readProject(dir);
+    p.clip = './videolar/in.mp4';
+    p.video = { cropBottom: 150 };
+    await writeFile(join(dir, 'project.json'), JSON.stringify(p, null, 2));
 
     const fakeSourceDir = join(env.base, 'temp-multi-music');
     await mkdir(fakeSourceDir, { recursive: true });
