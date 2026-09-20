@@ -1,0 +1,49 @@
+{
+  "name": "glassy-frost-x-wire",
+  "styleBlock": {
+    "medium": "Retro-futuristic digital composition combining 3D wireframe mesh vector art, translucent glass distortion overlays, and graphic typography aesthetics",
+    "lines": "Sharp precision vector grid lines, dense 3D polygonal wireframe meshes, and clean geometric framing lines",
+    "palette": [
+      {
+        "hex": "#0A0A0C",
+        "role": "dominant dark background"
+      },
+      {
+        "hex": "#FFFFFF",
+        "role": "primary light and wireframe highlights"
+      },
+      {
+        "hex": "#00D2FF",
+        "role": "neon cyan accent glow"
+      },
+      {
+        "hex": "#FF007F",
+        "role": "vibrant magenta cyber highlight"
+      },
+      {
+        "hex": "#FF5500",
+        "role": "bold graphic typography accent"
+      },
+      {
+        "hex": "#1E40AF",
+        "role": "deep duotone shadow accent"
+      },
+      {
+        "hex": "#80C4E9",
+        "role": "frosted glass distortion refraction"
+      }
+    ],
+    "light": "High-contrast edge illumination, luminescent neon line glow, and diffuse light filtering through stippled glass distortion",
+    "texture": "Tactile pebbled frosted glass texture, subtle digital noise grain, and fine mesh raster grid patterns",
+    "contrast": "Extreme visual contrast separating pitch-dark background voids from vivid illuminated wireframes and bright white typographic elements",
+    "shading": "Grid-contour volumetric shading, flat graphic fills, and refraction-based glass diffusion without traditional soft gradients"
+  },
+  "suggestedAmbient": "gentleRain",
+  "motionHints": [
+    "Subtle pulse of luminescent light traveling along the vector wireframe lines",
+    "Slow shifting refraction distortion across the frosted glass surface layer",
+    "Faint digital noise grain flickering softly over dark background areas",
+    "Gentle breathing intensity modulation on the illuminated accent text and lines",
+    "Micro-pulsing glow effect on the geometric mesh grid intersections"
+  ]
+}

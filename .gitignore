@@ -17,4 +17,10 @@ videolar/
 # Web client build output
 dist/
 web/dist/
+release/
 
+
+# Kullanıcı müzik kütüphanesi ve geçici test çıktıları (ses dosyaları, scratch)
+music_library/
+test-temp-suno-forbidden/
+scratch/

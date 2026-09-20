@@ -111,6 +111,42 @@ export async function setProjectCropBottom(projectPath, cropBottom) {
   return cropBottom;
 }
 
+/**
+ * Çok yönlü kırpma (`cropTop`, `cropBottom`, `cropLeft`, `cropRight`, `watermark`) yazar.
+ *
+ * @param {string} projectPath
+ * @param {{ cropTop?: number, cropBottom?: number, cropLeft?: number, cropRight?: number, watermark?: boolean }} options
+ * @returns {Promise<object>}
+ */
+export async function setProjectCrop(projectPath, { cropTop, cropBottom = 0, cropLeft, cropRight } = {}) {
+  for (const [key, val] of Object.entries({ cropTop, cropBottom, cropLeft, cropRight })) {
+    if (val !== undefined && (!Number.isSafeInteger(val) || val < 0)) {
+      throw new ProjectFileError(`video.${key} sıfır ya da pozitif tam sayı olmalı: ${JSON.stringify(val)}`);
+    }
+  }
+  const json = await readProjectObject(projectPath);
+  const video = json.video === undefined ? {} : json.video;
+  if (video === null || typeof video !== 'object' || Array.isArray(video)) {
+    throw new ProjectFileError('project.json "video" bir nesne olmalı');
+  }
+  const nextVideo = { ...video, cropBottom };
+  if (cropTop !== undefined) {
+    if (cropTop > 0) nextVideo.cropTop = cropTop;
+    else delete nextVideo.cropTop;
+  }
+  if (cropLeft !== undefined) {
+    if (cropLeft > 0) nextVideo.cropLeft = cropLeft;
+    else delete nextVideo.cropLeft;
+  }
+  if (cropRight !== undefined) {
+    if (cropRight > 0) nextVideo.cropRight = cropRight;
+    else delete nextVideo.cropRight;
+  }
+  json.video = nextVideo;
+  await writeTextFile(projectPath, JSON.stringify(json, null, 2) + '\n');
+  return json.video;
+}
+
 /** project.json'u okur; kök nesne değilse ProjectFileError. */
 async function readProjectObject(projectPath) {
   let json;

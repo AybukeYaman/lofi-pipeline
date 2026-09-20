@@ -1,50 +1,68 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import {
+  assignAlbumToProject,
   completeProjectMusic,
+  deleteProjectReference,
   fetchBuildStatus,
+  fetchMusicLibrary,
   fetchProject,
   fetchProjectMaster,
+  generateProjectStyle,
   getProjectClipUrl,
   getProjectMasterUrl,
   getProjectOutputUrl,
   getProjectReferenceUrl,
+  ingestSunoToProject,
+  openProjectFolder,
   selectProjectClip,
   startBuild,
   updateProjectCrop,
+  uploadProjectReference,
+  uploadProjectAudio,
+  uploadProjectClip,
+  uploadProjectImage,
+  fetchProjectMusic,
+  getProjectImageUrl,
   ApiError,
 } from '../../api';
 import { AssetPreview } from '../../components/AssetPreview';
 import { EmptyState, NotConnectedNotice } from '../../components/Feedback';
-import { ReferencePicker, type ReferenceDraft } from '../../components/ReferencePicker';
 import { StatusBadge, type AssetStatus } from '../../components/StatusBadge';
 import { TrackList } from '../../components/TrackList';
-import type { BuildJob, MasterFrameInfo, ProjectDetail } from '../../types';
-import type { WorkflowStatus } from '../../workflow';
+import type { BuildJob, MasterFrameInfo, ProjectDetail, ProjectMusicInfo, ProjectPrompts, WorkflowStepId } from '../../types';
 import { fileName, musicTracks, styleName, type ProjectAssets } from './assetState';
+import { CopyPrompt, UploadButton } from './StepWidgets';
+
+/** Adımın canonical akıştaki durumu (backend workflow.steps[].status). */
+export type StageStatus = 'done' | 'current' | 'pending';
 
 export type StageProps = {
   project: ProjectDetail;
   assets: ProjectAssets;
-  stageStatus: WorkflowStatus;
+  stageStatus: StageStatus;
   onProjectUpdate?: (updatedProject: ProjectDetail) => void;
+  onGoToStep?: (step: WorkflowStepId) => void;
+  prompts?: ProjectPrompts | null;
+  promptsError?: string | null;
 };
 
 const NOT_CONNECTED_HINT = 'Not connected yet';
 
-export function sectionAnchor(section: string) {
+function sectionAnchor(section: string) {
   return `stage-${section}`;
 }
 
 type StagePanelProps = {
   section: string;
   title: string;
-  status: AssetStatus;
-  stageStatus: WorkflowStatus;
+  status?: AssetStatus;
+  statusLabel?: string;
+  stageStatus: StageStatus;
   children: ReactNode;
 };
 
-function StagePanel({ section, title, status, stageStatus, children }: StagePanelProps) {
+export function StagePanel({ section, title, status, statusLabel, stageStatus, children }: StagePanelProps) {
   return (
     <section
       className={`panel stage-panel${stageStatus === 'current' ? ' is-current' : ''}`}
@@ -52,10 +70,31 @@ function StagePanel({ section, title, status, stageStatus, children }: StagePane
       aria-labelledby={`${sectionAnchor(section)}-title`}
     >
       <header className="stage-header">
-        <h2 id={`${sectionAnchor(section)}-title`}>{title}</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <h2 id={`${sectionAnchor(section)}-title`}>{title}</h2>
+          {stageStatus === 'current' ? (
+            <span
+              className="stage-current-chip"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '2px 8px',
+                borderRadius: 6,
+                background: 'var(--primary-subtle)',
+                color: 'var(--primary)',
+                fontSize: 11,
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+                border: '1px solid var(--border-current)',
+              }}
+            >
+              Sıradaki adım
+            </span>
+          ) : null}
+        </div>
         <div className="stage-meta">
-          {stageStatus === 'current' ? <span className="stage-current">Current step</span> : null}
-          <StatusBadge status={status} />
+          {status ? <StatusBadge status={status} label={statusLabel} /> : null}
         </div>
       </header>
       {children}
@@ -76,74 +115,352 @@ function ReferenceThumbnail({ src, alt }: { src: string; alt: string }) {
         height: 32,
         borderRadius: 4,
         objectFit: 'cover',
-        border: '1px solid #ddd6cc',
+        border: '1px solid var(--border)',
         flexShrink: 0,
       }}
     />
   );
 }
 
-export function StyleStage({ project, assets, stageStatus }: StageProps) {
-  const [drafts, setDrafts] = useState<ReferenceDraft[]>([]);
+export function StyleStage({ project, assets, stageStatus, onProjectUpdate }: StageProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [deletingName, setDeletingName] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refError, setRefError] = useState<string | null>(null);
+  const [refSuccess, setRefSuccess] = useState<string | null>(null);
+
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const [generateSuccess, setGenerateSuccess] = useState<string | null>(null);
+
   const style = styleName(project);
+  const isCustomStyle = style === 'custom-generated';
   const references = project.references ?? [];
+  const hasReferences = references.length > 0;
+  const isStyleReady = project.styleBlockExists || (!isCustomStyle && Boolean(style));
+
+  const handleUploadFiles = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    if (files.length === 0) return;
+    event.target.value = '';
+
+    setIsUploading(true);
+    setRefError(null);
+    setRefSuccess(null);
+
+    try {
+      let latestProject = project;
+      for (const file of files) {
+        latestProject = await uploadProjectReference(project.id, file);
+      }
+      if (onProjectUpdate) {
+        onProjectUpdate(latestProject);
+      }
+      setRefSuccess(
+        `Added ${files.length} reference image${files.length > 1 ? 's' : ''} to references/ folder.`,
+      );
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        setRefError(err.message);
+      } else {
+        setRefError(err instanceof Error ? err.message : 'Could not upload reference image.');
+      }
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleDeleteReference = async (name: string) => {
+    if (deletingName) return;
+    setDeletingName(name);
+    setRefError(null);
+    setRefSuccess(null);
+    try {
+      const updated = await deleteProjectReference(project.id, name);
+      if (onProjectUpdate) {
+        onProjectUpdate(updated);
+      }
+      setRefSuccess(`Removed ${name}.`);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        setRefError(err.message);
+      } else {
+        setRefError(err instanceof Error ? err.message : 'Could not delete reference image.');
+      }
+    } finally {
+      setDeletingName(null);
+    }
+  };
+
+  const handleOpenFolder = async () => {
+    try {
+      await openProjectFolder(project.id, 'references');
+      setRefSuccess('Opened references/ folder in Explorer.');
+    } catch {
+      setRefError('Could not open folder in Explorer.');
+    }
+  };
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    setRefError(null);
+    setRefSuccess(null);
+    try {
+      const updated = await fetchProject(project.id);
+      if (onProjectUpdate) {
+        onProjectUpdate(updated);
+      }
+      setRefSuccess(`Refreshed. Found ${updated.references?.length ?? 0} saved reference(s).`);
+    } catch {
+      setRefError('Could not refresh references.');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  const handleGenerateStyle = async () => {
+    setIsGenerating(true);
+    setGenerateError(null);
+    setGenerateSuccess(null);
+    try {
+      const response = await generateProjectStyle(project.id, { overwrite: Boolean(project.styleBlockExists) });
+      if (onProjectUpdate) {
+        onProjectUpdate(response.project);
+      }
+      setGenerateSuccess('Visual style successfully generated with Gemini!');
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        setGenerateError(err.message);
+      } else {
+        setGenerateError(err instanceof Error ? err.message : 'Could not generate project style.');
+      }
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   return (
-    <StagePanel section="style" title="Style / References" status={assets.style} stageStatus={stageStatus}>
+    <StagePanel
+      section="style"
+      title="2. Görsel Stili (Image Style)"
+      status={isStyleReady ? 'ready' : 'waiting'}
+      statusLabel={isStyleReady ? (project.styleBlockExists ? 'Ready' : 'Selected') : 'Waiting'}
+      stageStatus={stageStatus}
+    >
       <div className="stage-grid">
         <div className="stage-block">
-          <h3>Current style</h3>
+          <h3>Current Image Style</h3>
           {style ? (
             <div className="style-summary">
               <div className="swatch swatch-neutral" aria-hidden="true" />
-              <div>
-                <strong>{style}</strong>
-                <p className="muted">
-                  Style block: {project.styleBlockExists ? 'available' : 'not generated'}
+              <div style={{ flex: 1 }}>
+                <strong style={{ fontSize: 15 }}>{style}</strong>
+                <p className="muted" style={{ margin: '4px 0 0' }}>
+                  Image Style Block: {project.styleBlockExists ? '✓ available (STYLE_BLOCK.txt)' : 'not generated yet'}
                 </p>
+                <p className="field-hint" style={{ margin: '6px 0 0' }}>
+                  {isCustomStyle
+                    ? 'Custom visual image style block — reference images in references/ are analyzed by Gemini to generate your style block.'
+                    : 'Pre-built template image style block is active. Extra reference images are optional.'}
+                </p>
+                {isCustomStyle ? (
+                  <div style={{ marginTop: 14 }}>
+                    {hasReferences ? (
+                      <button
+                        className="button button-primary"
+                        type="button"
+                        onClick={handleGenerateStyle}
+                        disabled={isGenerating}
+                      >
+                        {isGenerating
+                          ? 'Generating Image Style Block with Gemini...'
+                          : project.styleBlockExists
+                          ? '🔄 Regenerate Image Style Block with Gemini'
+                          : '✨ Generate Image Style Block from References'}
+                      </button>
+                    ) : (
+                      <p className="field-hint" style={{ color: 'var(--text-muted)' }}>
+                        Add at least 1 reference image to synthesize your image style block.
+                      </p>
+                    )}
+                  </div>
+                ) : null}
+                {generateError ? (
+                  <p className="field-hint field-error" role="alert" style={{ marginTop: 8 }}>
+                    {generateError}
+                  </p>
+                ) : null}
+                {generateSuccess ? (
+                  <p className="field-hint" style={{ marginTop: 8, color: '#34603f' }}>
+                    ✓ {generateSuccess}
+                  </p>
+                ) : null}
               </div>
             </div>
           ) : (
-            <EmptyState compact title="No style selected." />
+            <EmptyState compact title="No style block selected." />
           )}
         </div>
 
         <div className="stage-block">
-          <h3>
-            References <span className="count">{references.length}</span>
-            <StatusBadge status={assets.references} />
-          </h3>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginBottom: 8 }}>
+            <h3 style={{ margin: 0 }}>
+              Saved References <span className="count">({references.length})</span>
+            </h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <StatusBadge status={hasReferences ? 'ready' : 'waiting'} label={`${references.length} saved`} />
+            </div>
+          </div>
+
+          <div
+            style={{
+              padding: '8px 12px',
+              borderRadius: 6,
+              background: 'var(--bg-surface-subtle)',
+              border: '1px solid var(--border-subtle)',
+              marginBottom: 10,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+              fontSize: 12,
+            }}
+          >
+            <span style={{ color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              📁 <code>references/</code> ({references.length} files)
+            </span>
+            <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+              <button
+                type="button"
+                className="button"
+                style={{ fontSize: 11.5, minHeight: 24, padding: '1px 8px' }}
+                onClick={handleOpenFolder}
+              >
+                📂 Open Folder
+              </button>
+              <button
+                type="button"
+                className="button"
+                style={{ fontSize: 11.5, minHeight: 24, padding: '1px 8px' }}
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+              >
+                {isRefreshing ? '...' : '🔄 Refresh'}
+              </button>
+            </div>
+          </div>
+
           {references.length > 0 ? (
-            <ul className="file-list">
+            <ul className="file-list" style={{ maxHeight: 180, overflowY: 'auto', margin: '0 0 12px' }}>
               {references.map((path) => {
                 const name = fileName(path);
                 const refUrl = name ? getProjectReferenceUrl(project.id, name) : null;
+                const isDeleting = deletingName === name;
                 return (
-                  <li key={path} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    {refUrl ? <ReferenceThumbnail src={refUrl} alt={name || ''} /> : null}
-                    <span>{name}</span>
+                  <li
+                    key={path}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '4px 8px',
+                      borderRadius: 6,
+                      background: 'var(--bg-surface)',
+                      border: '1px solid var(--border-subtle)',
+                      marginBottom: 4,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                      {refUrl ? <ReferenceThumbnail src={refUrl} alt={name || ''} /> : null}
+                      <span style={{ fontSize: 13, wordBreak: 'break-all' }}>{name}</span>
+                    </div>
+                    {name ? (
+                      <button
+                        type="button"
+                        aria-label={`Remove ${name}`}
+                        disabled={isDeleting}
+                        onClick={() => handleDeleteReference(name)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--text-muted)',
+                          cursor: 'pointer',
+                          fontSize: 16,
+                          lineHeight: 1,
+                          padding: '2px 6px',
+                          borderRadius: 4,
+                        }}
+                      >
+                        {isDeleting ? '...' : '×'}
+                      </button>
+                    ) : null}
                   </li>
                 );
               })}
             </ul>
           ) : (
-            <EmptyState compact title="No reference images in the project folder." />
+            <EmptyState
+              compact
+              title={
+                isCustomStyle
+                  ? 'No reference images in references/ folder.'
+                  : 'No reference images in references/ folder (optional for pre-built styles).'
+              }
+            />
           )}
-          <ReferencePicker items={drafts} onChange={setDrafts} emptyLabel="No new references staged." />
+
+          <div style={{ marginTop: 8 }}>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".jpg,.jpeg,.png,.webp"
+              multiple
+              className="visually-hidden"
+              onChange={handleUploadFiles}
+            />
+            <button
+              type="button"
+              className="button"
+              disabled={isUploading}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {isUploading ? 'Uploading reference...' : '➕ Add Reference Images'}
+            </button>
+            <p className="field-hint" style={{ margin: '6px 0 0' }}>
+              Supported: JPG, PNG, WEBP (up to 15 MB). Uploaded directly to <code>references/</code>.
+            </p>
+          </div>
+
+          {refError ? (
+            <p className="field-hint field-error" role="alert" style={{ marginTop: 8 }}>
+              {refError}
+            </p>
+          ) : null}
+
+          {refSuccess ? (
+            <p className="field-hint" style={{ marginTop: 8, color: '#34603f' }}>
+              ✓ {refSuccess}
+            </p>
+          ) : null}
         </div>
       </div>
     </StagePanel>
   );
 }
 
-export function MasterStage({ project, assets, stageStatus, onProjectUpdate }: StageProps) {
+export function MasterStage({ project, stageStatus, onProjectUpdate, prompts, promptsError }: StageProps) {
   const masterName = fileName(project.master);
   const masterUrl = masterName ? getProjectMasterUrl(project.id, masterName) : null;
   const isMasterReady = project.readiness?.master?.ready ?? Boolean(project.master);
+  const masterBadgeStatus: AssetStatus = isMasterReady ? 'ready' : 'waiting';
+  const masterBadgeLabel = isMasterReady ? 'Hazır' : 'Master bekleniyor';
+  const sceneName = fileName(project.sceneRef);
+  const sceneUrl = project.sceneRef ? getProjectImageUrl(project.id, 'scene', project.sceneRef) : null;
+  const styleImages = [...(project.references ?? []), ...(project.styleRef ? [project.styleRef] : [])];
 
   const [masterInfo, setMasterInfo] = useState<MasterFrameInfo | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -161,17 +478,6 @@ export function MasterStage({ project, assets, stageStatus, onProjectUpdate }: S
       isActive = false;
     };
   }, [project.id, project.master]);
-
-  const handleCopyPrompt = async () => {
-    if (!masterInfo?.prompt) return;
-    try {
-      await navigator.clipboard.writeText(masterInfo.prompt);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      setError('Could not copy prompt to clipboard.');
-    }
-  };
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -201,8 +507,23 @@ export function MasterStage({ project, assets, stageStatus, onProjectUpdate }: S
     }
   };
 
+  const handleOpenFolder = async () => {
+    try {
+      await openProjectFolder(project.id, 'resimler');
+      setSuccess('Opened resimler/ folder in Explorer.');
+    } catch {
+      setError('Could not open folder in Explorer.');
+    }
+  };
+
   return (
-    <StagePanel section="master" title="Master Frame (Faz 1)" status={assets.master} stageStatus={stageStatus}>
+    <StagePanel
+      section="master"
+      title="4. Master Frame"
+      status={masterBadgeStatus}
+      statusLabel={masterBadgeLabel}
+      stageStatus={stageStatus}
+    >
       <div className="stage-media">
         <AssetPreview
           kind="image"
@@ -211,50 +532,91 @@ export function MasterStage({ project, assets, stageStatus, onProjectUpdate }: S
           emptyLabel="No master frame yet. Generate with the Faz 1 prompt and save as resimler\MASTER.png."
         />
         <div className="stage-actions">
-          <h3>Master Frame Workflow</h3>
-          <p className="field-hint">
-            The master visual frame establishes the visual atmosphere and scene composition. In the pipeline design, it is created externally via the Faz 1 prompt (Midjourney, Nano Banana, etc.) and placed in <code>resimler\MASTER.png</code>.
-          </p>
+          <h3>AI Studio'ya verilecekler</h3>
+          <ul className="field-hint" style={{ margin: 0, paddingLeft: 18 }}>
+            <li>
+              Sahne referansı:{' '}
+              {sceneName && sceneUrl ? (
+                <a href={sceneUrl} target="_blank" rel="noreferrer">{sceneName}</a>
+              ) : (
+                'yok (3. adımda yükle)'
+              )}
+            </li>
+            <li>
+              Stil görseli:{' '}
+              {styleImages.length > 0
+                ? styleImages.map((path, index) => (
+                    <span key={path}>
+                      {index > 0 ? ', ' : ''}
+                      <a href={getProjectReferenceUrl(project.id, path)} target="_blank" rel="noreferrer">{fileName(path)}</a>
+                    </span>
+                  ))
+                : 'projede kayıtlı stil görseli yok — kullandığın stil görselini kendin ekle'}
+            </li>
+          </ul>
 
-          {masterInfo?.prompt ? (
-            <div style={{ marginTop: 10 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                <label style={{ fontSize: 13, fontWeight: 600 }}>Faz 1 Prompt</label>
+          <CopyPrompt
+            label="Master Frame promptu"
+            prompt={prompts?.master ?? masterInfo?.prompt}
+            error={promptsError ?? masterInfo?.promptError}
+          />
+
+          <UploadButton
+            label={isMasterReady ? 'Master frame\'i değiştir' : 'Master frame\'i yükle'}
+            accept=".jpg,.jpeg,.png,.webp"
+            onFiles={async ([file]) => {
+              onProjectUpdate?.(await uploadProjectImage(project.id, 'master', file));
+            }}
+          />
+          {isMasterReady ? <p className="field-hint field-success">✓ Master Frame hazır: {masterName}</p> : null}
+
+          <div
+            style={{
+              marginTop: 10,
+              width: '100%',
+              padding: '10px 14px',
+              borderRadius: 8,
+              background: 'var(--bg-surface-subtle)',
+              border: '1px solid var(--border-subtle)',
+              boxSizing: 'border-box',
+            }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                <strong style={{ color: 'var(--text-main)', flexShrink: 0 }}>Target location:</strong>
                 <button
-                  className="button"
                   type="button"
-                  style={{ fontSize: 12, minHeight: 28, padding: '0 10px' }}
-                  onClick={handleCopyPrompt}
+                  className="button"
+                  style={{ fontSize: 12, minHeight: 26, padding: '2px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                  onClick={handleOpenFolder}
                 >
-                  {copied ? '✓ Copied!' : 'Copy Prompt'}
+                  📂 Open Folder
                 </button>
               </div>
-              <textarea
-                readOnly
-                rows={4}
-                value={masterInfo.prompt}
+              <code
+                onClick={handleOpenFolder}
+                title="Click to open resimler\ folder in Windows Explorer"
                 style={{
-                  width: '100%',
+                  cursor: 'pointer',
+                  wordBreak: 'break-all',
+                  background: 'var(--bg-surface)',
+                  padding: '6px 10px',
+                  borderRadius: 6,
+                  border: '1px solid var(--border-subtle)',
+                  color: 'var(--primary)',
                   fontSize: 12,
-                  fontFamily: 'monospace',
-                  background: '#fcfbf9',
-                  borderColor: '#ddd6cc',
-                  resize: 'vertical',
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                  textDecoration: 'underline',
+                  textUnderlineOffset: '2px',
                 }}
-              />
+              >
+                {masterInfo?.folder ?? `${project.dir || project.name}\\resimler`}\MASTER.png
+              </code>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)', fontSize: 12 }}>
+                <span>Supported formats:</span>
+                <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>.png, .jpg, .jpeg, .webp</span>
+              </div>
             </div>
-          ) : masterInfo?.promptError ? (
-            <p className="field-hint field-error" role="alert">
-              {masterInfo.promptError}
-            </p>
-          ) : null}
-
-          <div style={{ marginTop: 8 }}>
-            <p className="field-hint">
-              <strong>Target location:</strong> <code>{masterInfo?.folder ?? `${project.dir || project.name}\\resimler`}\MASTER.png</code>
-              <br />
-              <span className="muted">Supported formats: .png, .jpg, .jpeg, .webp</span>
-            </p>
           </div>
 
           {error ? (
@@ -269,7 +631,7 @@ export function MasterStage({ project, assets, stageStatus, onProjectUpdate }: S
             </p>
           ) : null}
 
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
             <button
               className="button button-primary"
               type="button"
@@ -285,19 +647,34 @@ export function MasterStage({ project, assets, stageStatus, onProjectUpdate }: S
   );
 }
 
-export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: StageProps) {
+export function VideoStage({ project, assets, stageStatus, onProjectUpdate, prompts, promptsError }: StageProps) {
   const clips = project.clips ?? [];
   const currentClip = project.clip?.exists ? project.clip.path : null;
+  // Tek klip varsa ve seçim yoksa onu öner; birden fazlaysa kullanıcı seçer.
+  const suggestedClip = currentClip ?? (clips.length === 1 ? clips[0] : null);
+  // build.js kırpma kaydı olmadan başlamaz; kayıt yoksa ilk kaydetmede yazılır.
+  const cropStored = project.readiness?.video?.ready ?? project.projectJson?.data?.video?.cropBottom !== undefined;
   const currentClipName = fileName(currentClip);
   const clipMissing = Boolean(project.clip?.value) && !project.clip?.exists;
 
   const backendVideo = project.projectJson?.data?.video;
-  const backendCrop = backendVideo?.cropBottom ?? 150;
-  const backendWatermark = backendVideo?.watermark ?? (backendCrop > 0);
+  const backendCropBottom = backendVideo?.cropBottom ?? 150;
+  const backendCropTop = backendVideo?.cropTop ?? 0;
+  const backendCropLeft = backendVideo?.cropLeft ?? 0;
+  const backendCropRight = backendVideo?.cropRight ?? 0;
+  const backendWatermark = backendVideo?.watermark ?? (backendCropBottom > 0 || backendCropTop > 0 || backendCropLeft > 0 || backendCropRight > 0);
 
-  const [selected, setSelected] = useState<string | null>(currentClip ?? null);
-  const [cropBottom, setCropBottom] = useState<number>(backendCrop);
-  const [cropInput, setCropInput] = useState<string>(String(backendCrop));
+  const [selected, setSelected] = useState<string | null>(suggestedClip);
+  const [cropBottom, setCropBottom] = useState<number>(backendCropBottom);
+  const [cropTop, setCropTop] = useState<number>(backendCropTop);
+  const [cropLeft, setCropLeft] = useState<number>(backendCropLeft);
+  const [cropRight, setCropRight] = useState<number>(backendCropRight);
+
+  const [cropBottomInput, setCropBottomInput] = useState<string>(String(backendCropBottom));
+  const [cropTopInput, setCropTopInput] = useState<string>(String(backendCropTop));
+  const [cropLeftInput, setCropLeftInput] = useState<string>(String(backendCropLeft));
+  const [cropRightInput, setCropRightInput] = useState<string>(String(backendCropRight));
+
   const [watermark, setWatermark] = useState<boolean>(backendWatermark);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -306,23 +683,58 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
 
   // Synchronize state when project updates from backend
   useEffect(() => {
-    const freshCrop = project.projectJson?.data?.video?.cropBottom ?? 150;
-    const freshWatermark = project.projectJson?.data?.video?.watermark ?? (freshCrop > 0);
-    setCropBottom(freshCrop);
-    setCropInput(String(freshCrop));
+    const freshBottom = project.projectJson?.data?.video?.cropBottom ?? 150;
+    const freshTop = project.projectJson?.data?.video?.cropTop ?? 0;
+    const freshLeft = project.projectJson?.data?.video?.cropLeft ?? 0;
+    const freshRight = project.projectJson?.data?.video?.cropRight ?? 0;
+    const freshWatermark = project.projectJson?.data?.video?.watermark ?? (freshBottom > 0 || freshTop > 0 || freshLeft > 0 || freshRight > 0);
+
+    setCropBottom(freshBottom);
+    setCropTop(freshTop);
+    setCropLeft(freshLeft);
+    setCropRight(freshRight);
+
+    setCropBottomInput(String(freshBottom));
+    setCropTopInput(String(freshTop));
+    setCropLeftInput(String(freshLeft));
+    setCropRightInput(String(freshRight));
+
     setWatermark(freshWatermark);
-    setSelected(project.clip?.exists ? project.clip.path ?? null : null);
-  }, [project.clip?.exists, project.clip?.path, project.projectJson?.data?.video]);
+    setSelected(suggestedClip ?? null);
+  }, [suggestedClip, project.projectJson?.data?.video]);
 
   const chosenPath = selected || currentClip;
   const chosenName = fileName(chosenPath);
   const hasClipChange = selected !== currentClip;
-  const hasSettingsChange = cropBottom !== backendCrop || watermark !== backendWatermark;
+  const hasSettingsChange =
+    cropBottom !== backendCropBottom ||
+    cropTop !== backendCropTop ||
+    cropLeft !== backendCropLeft ||
+    cropRight !== backendCropRight ||
+    watermark !== backendWatermark ||
+    !cropStored;
   const canSave = Boolean(chosenName) && (hasClipChange || hasSettingsChange) && !validationError && !isSaving;
 
   // Determine active preview: load URL for currently selected candidate or saved clip
   const previewName = chosenName ?? currentClipName;
   const previewUrl = previewName ? getProjectClipUrl(project.id, previewName) : null;
+
+  const handleApplyPreset = (b: number, t: number, l: number, r: number) => {
+    setCropBottom(b);
+    setCropTop(t);
+    setCropLeft(l);
+    setCropRight(r);
+
+    setCropBottomInput(String(b));
+    setCropTopInput(String(t));
+    setCropLeftInput(String(l));
+    setCropRightInput(String(r));
+
+    setWatermark(b > 0 || t > 0 || l > 0 || r > 0);
+    setValidationError(null);
+    setError(null);
+    setSuccess(null);
+  };
 
   const handleSave = async () => {
     if (!chosenName || isSaving || validationError) return;
@@ -331,7 +743,11 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
     setError(null);
     setSuccess(null);
 
-    const effectiveCrop = watermark ? (cropBottom > 0 ? cropBottom : 150) : 0;
+    const effectiveBottom = watermark ? cropBottom : 0;
+    const effectiveTop = watermark ? cropTop : 0;
+    const effectiveLeft = watermark ? cropLeft : 0;
+    const effectiveRight = watermark ? cropRight : 0;
+    const effectiveWatermark = watermark && (effectiveBottom > 0 || effectiveTop > 0 || effectiveLeft > 0 || effectiveRight > 0);
 
     try {
       let updatedProject: ProjectDetail = project;
@@ -345,11 +761,13 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
       if (hasSettingsChange) {
         try {
           updatedProject = await updateProjectCrop(project.id, {
-            watermark,
-            cropBottom: effectiveCrop,
+            watermark: effectiveWatermark,
+            cropBottom: effectiveBottom,
+            cropTop: effectiveTop,
+            cropLeft: effectiveLeft,
+            cropRight: effectiveRight,
           });
         } catch (cropErr: unknown) {
-          // If backend only supports combined or legacy endpoint, fallback to local state merge
           if (cropErr instanceof ApiError && cropErr.status === 404) {
             updatedProject = {
               ...updatedProject,
@@ -359,8 +777,11 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
                   ...updatedProject.projectJson?.data,
                   video: {
                     ...updatedProject.projectJson?.data?.video,
-                    cropBottom: effectiveCrop,
-                    watermark,
+                    cropBottom: effectiveBottom,
+                    cropTop: effectiveTop,
+                    cropLeft: effectiveLeft,
+                    cropRight: effectiveRight,
+                    watermark: effectiveWatermark,
                   },
                 },
               },
@@ -374,7 +795,7 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
       if (onProjectUpdate) {
         onProjectUpdate(updatedProject);
       }
-      setSuccess('Video settings and clip saved successfully.');
+      setSuccess('Klip seçildi, kırpma ve 16:9 ayarı proje ayarlarına kaydedildi.');
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -386,8 +807,53 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
     }
   };
 
+  const handleOpenFolder = async () => {
+    try {
+      await openProjectFolder(project.id, 'videolar');
+      setSuccess('Opened videolar/ folder in Explorer.');
+    } catch {
+      setError('Could not open folder in Explorer.');
+    }
+  };
+
+  const handleRefreshClips = async () => {
+    try {
+      const updated = await fetchProject(project.id);
+      if (onProjectUpdate) {
+        onProjectUpdate(updated);
+      }
+      setSuccess('Refreshed clips from videolar/ folder.');
+    } catch {
+      setError('Could not refresh clips.');
+    }
+  };
+
+  const handleNumberChange = (
+    val: string,
+    setter: (n: number) => void,
+    inputSetter: (s: string) => void,
+    fieldLabel: string,
+  ) => {
+    inputSetter(val);
+    setError(null);
+    setSuccess(null);
+    if (val.trim() === '') {
+      setValidationError(`${fieldLabel} is required.`);
+    } else {
+      const num = Number(val);
+      if (!Number.isInteger(num) || num < 0) {
+        setValidationError(`${fieldLabel} must be 0 or a positive integer.`);
+      } else if (num > 2160) {
+        setValidationError(`${fieldLabel} cannot exceed 2160px.`);
+      } else {
+        setValidationError(null);
+        setter(num);
+      }
+    }
+  };
+
   return (
-    <StagePanel section="video" title="Video Clip" status={assets.clip} stageStatus={stageStatus}>
+    <StagePanel section="video" title="6. Video" status={assets.clip} stageStatus={stageStatus}>
       <div className="stage-media">
         <AssetPreview
           kind="video"
@@ -400,9 +866,54 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
           }
         />
         <div className="stage-actions">
-          <h3>
-            Clips in folder <span className="count">{clips.length}</span>
-          </h3>
+          <p className="field-hint">
+            Görsel: {fileName(project.master) ?? 'master frame yok'}
+            {(project.angles?.length ?? 0) > 0 ? ` (ya da açı görselleri: ${project.angles?.map((path) => fileName(path)).join(', ')})` : ''}
+          </p>
+          <CopyPrompt label="Hailuo promptu" prompt={prompts?.video} error={promptsError} />
+          <UploadButton
+            label="Video klibi yükle (.mp4)"
+            accept=".mp4"
+            multiple
+            onFiles={async (files) => {
+              let latest = project;
+              for (const file of files) latest = await uploadProjectClip(project.id, file);
+              onProjectUpdate?.(latest);
+            }}
+          />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6, margin: '12px 0 8px' }}>
+            <h3 style={{ margin: 0 }}>
+              Clips in folder <span className="count">({clips.length})</span>
+            </h3>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                type="button"
+                className="button"
+                style={{ fontSize: 12, minHeight: 26, padding: '2px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                onClick={handleOpenFolder}
+              >
+                📂 Open Folder
+              </button>
+              <button
+                type="button"
+                className="button"
+                style={{ fontSize: 12, minHeight: 26, padding: '2px 10px' }}
+                onClick={handleRefreshClips}
+              >
+                🔄 Refresh
+              </button>
+            </div>
+          </div>
+          <p className="field-hint" style={{ margin: '0 0 10px' }}>
+            Put loop video files (<code>.mp4</code>) into{' '}
+            <code
+              onClick={handleOpenFolder}
+              title="Click to open videolar\ folder in Windows Explorer"
+              style={{ cursor: 'pointer', color: 'var(--primary)', textDecoration: 'underline' }}
+            >
+              {project.dir || project.name}\videolar\
+            </code>.
+          </p>
           {clips.length > 0 ? (
             <div className="option-list" role="radiogroup" aria-label="Video clips">
               {clips.map((path) => {
@@ -431,8 +942,28 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
             <EmptyState compact title="No .mp4 clips in videolar\." />
           )}
 
-          <div style={{ marginTop: 14, width: '100%', borderTop: '1px solid #ece5dc', paddingTop: 14 }}>
-            <h3 style={{ marginBottom: 8 }}>Clip Settings</h3>
+          <div style={{ marginTop: 14, width: '100%', borderTop: '1px solid var(--border-subtle)', paddingTop: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
+              <h3 style={{ margin: 0 }}>Watermark & Kenar Kırpma (Çok Yönlü)</h3>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  type="button"
+                  className="button"
+                  style={{ fontSize: 11.5, minHeight: 24, padding: '2px 8px' }}
+                  onClick={() => handleApplyPreset(150, 0, 0, 0)}
+                >
+                  🎯 Hailuo (Alt: 150px)
+                </button>
+                <button
+                  type="button"
+                  className="button"
+                  style={{ fontSize: 11.5, minHeight: 24, padding: '2px 8px' }}
+                  onClick={() => handleApplyPreset(0, 0, 0, 0)}
+                >
+                  🔄 Sıfırla (0px)
+                </button>
+              </div>
+            </div>
 
             <label className="option" style={{ marginBottom: 10 }}>
               <input
@@ -444,89 +975,140 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
                   setWatermark(checked);
                   setError(null);
                   setSuccess(null);
-                  if (checked && cropBottom === 0) {
+                  if (checked && cropBottom === 0 && cropTop === 0 && cropLeft === 0 && cropRight === 0) {
                     setCropBottom(150);
-                    setCropInput('150');
-                    setValidationError(null);
-                  } else if (!checked) {
-                    setCropBottom(0);
-                    setCropInput('0');
-                    setValidationError(null);
+                    setCropBottomInput('150');
                   }
                 }}
               />
-              <span>Crop bottom (watermark removal)</span>
+              <span>Kenar / Watermark kırpmayı etkinleştir</span>
             </label>
 
-            <div className="field">
-              <label htmlFor={`crop-bottom-${project.id}`}>
-                Bottom crop (pixels)
-              </label>
-              <input
-                id={`crop-bottom-${project.id}`}
-                type="number"
-                min={0}
-                max={2160}
-                value={cropInput}
-                disabled={!watermark || isSaving}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setCropInput(val);
-                  setError(null);
-                  setSuccess(null);
-                  if (val.trim() === '') {
-                    setValidationError('Bottom crop is required.');
-                  } else {
-                    const num = Number(val);
-                    if (!Number.isInteger(num) || num < 0) {
-                      setValidationError('Bottom crop must be 0 or a positive integer.');
-                    } else if (num > 2160) {
-                      setValidationError('Bottom crop cannot exceed 2160px.');
-                    } else {
-                      setValidationError(null);
-                      setCropBottom(num);
-                    }
-                  }
-                }}
-              />
-              <p className="field-hint">
-                Default 150px removes Hailuo AI watermark from bottom edge.
-              </p>
+            {/* Directional 4-side inputs */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, 1fr)',
+                gap: 10,
+                padding: '10px 12px',
+                borderRadius: 8,
+                background: 'var(--bg-surface-subtle)',
+                border: '1px solid var(--border-subtle)',
+                opacity: watermark ? 1 : 0.6,
+              }}
+            >
+              <div className="field" style={{ margin: 0 }}>
+                <label style={{ fontSize: 12.5, fontWeight: 600 }}>⬆️ Üstten Kırp (Top px)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={2160}
+                  value={cropTopInput}
+                  disabled={!watermark || isSaving}
+                  onChange={(e) => handleNumberChange(e.target.value, setCropTop, setCropTopInput, 'Top crop')}
+                  style={{ padding: '6px 8px', fontSize: 13 }}
+                />
+              </div>
+
+              <div className="field" style={{ margin: 0 }}>
+                <label style={{ fontSize: 12.5, fontWeight: 600 }}>⬇️ Alttan Kırp (Bottom px)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={2160}
+                  value={cropBottomInput}
+                  disabled={!watermark || isSaving}
+                  onChange={(e) => handleNumberChange(e.target.value, setCropBottom, setCropBottomInput, 'Bottom crop')}
+                  style={{ padding: '6px 8px', fontSize: 13 }}
+                />
+              </div>
+
+              <div className="field" style={{ margin: 0 }}>
+                <label style={{ fontSize: 12.5, fontWeight: 600 }}>⬅️ Soldan Kırp (Left px)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={2160}
+                  value={cropLeftInput}
+                  disabled={!watermark || isSaving}
+                  onChange={(e) => handleNumberChange(e.target.value, setCropLeft, setCropLeftInput, 'Left crop')}
+                  style={{ padding: '6px 8px', fontSize: 13 }}
+                />
+              </div>
+
+              <div className="field" style={{ margin: 0 }}>
+                <label style={{ fontSize: 12.5, fontWeight: 600 }}>➡️ Sağdan Kırp (Right px)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={2160}
+                  value={cropRightInput}
+                  disabled={!watermark || isSaving}
+                  onChange={(e) => handleNumberChange(e.target.value, setCropRight, setCropRightInput, 'Right crop')}
+                  style={{ padding: '6px 8px', fontSize: 13 }}
+                />
+              </div>
+            </div>
+
+            {/* 16:9 Guarantee Banner */}
+            <div
+              style={{
+                marginTop: 10,
+                padding: '8px 12px',
+                borderRadius: 6,
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border-subtle)',
+                fontSize: 12,
+                color: 'var(--text-muted)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}
+            >
+              <span style={{ fontSize: 16 }}>📐</span>
+              <div>
+                <strong style={{ color: 'var(--text-main)', display: 'block' }}>
+                  Otomatik 16:9 Format Garantisi
+                </strong>
+                Kenarlardan istediğiniz kadar piksel kırpın; pipeline videoyu merkezden otomatik olarak tam 16:9 oranına tamamlayacaktır.
+              </div>
             </div>
           </div>
 
           {validationError ? (
-            <p className="field-hint field-error" role="alert">
+            <p className="field-hint field-error" role="alert" style={{ marginTop: 8 }}>
               {validationError}
             </p>
           ) : null}
 
           {error ? (
-            <p className="field-hint field-error" role="alert">
+            <p className="field-hint field-error" role="alert" style={{ marginTop: 8 }}>
               {error}
             </p>
           ) : null}
 
           {success ? (
-            <p className="field-hint" style={{ color: '#34603f' }}>
+            <p className="field-hint" style={{ marginTop: 8, color: '#34603f' }}>
               ✓ {success}
             </p>
           ) : null}
 
-          <button
-            className="button"
-            type="button"
-            disabled={!canSave || isSaving}
-            onClick={handleSave}
-          >
-            {isSaving
-              ? 'Saving...'
-              : hasClipChange
-                ? currentClip
-                  ? 'Replace clip & save settings'
-                  : 'Use selected clip & save'
-                : 'Save video settings'}
-          </button>
+          <div style={{ marginTop: 12 }}>
+            <button
+              className="button button-primary"
+              type="button"
+              disabled={!canSave || isSaving}
+              onClick={handleSave}
+            >
+              {isSaving
+                ? 'Saving...'
+                : hasClipChange
+                  ? currentClip
+                    ? 'Klibi değiştir ve kaydet'
+                    : 'Seçilen klibi kullan ve kaydet'
+                  : 'Video ayarlarını kaydet'}
+            </button>
+          </div>
         </div>
       </div>
     </StagePanel>
@@ -547,8 +1129,82 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
   const [completeError, setCompleteError] = useState<string | null>(null);
   const [completeSuccess, setCompleteSuccess] = useState<string | null>(null);
 
+  // Inline Suno downloader state
+  const [showSunoBox, setShowSunoBox] = useState(false);
+  const [sunoUrl, setSunoUrl] = useState('');
+  const [isIngestingSuno, setIsIngestingSuno] = useState(false);
+  const [sunoIngestError, setSunoIngestError] = useState<string | null>(null);
+  const [sunoIngestSuccess, setSunoIngestSuccess] = useState<string | null>(null);
+
+  // Yüklenen dosyaların listesi (audioDir) — plan olmayan projede de adlar görünsün.
+  const [musicInfo, setMusicInfo] = useState<ProjectMusicInfo | null>(null);
+  useEffect(() => {
+    let active = true;
+    fetchProjectMusic(project.id)
+      .then((info) => {
+        if (active) setMusicInfo(info);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [project.id, audioCount]);
+
+  // Album Library picker state
+  const [showAlbumPicker, setShowAlbumPicker] = useState(false);
+  const [libraryAlbums, setLibraryAlbums] = useState<Array<{ id: string; name: string; trackCount: number }>>([]);
+  const [isImportingAlbum, setIsImportingAlbum] = useState(false);
+
+  useEffect(() => {
+    fetchMusicLibrary()
+      .then((lib) => {
+        setLibraryAlbums(lib.albums.map((a) => ({ id: a.id, name: a.name, trackCount: a.trackCount })));
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleImportAlbum = async (albumId: string) => {
+    setIsImportingAlbum(true);
+    setCompleteError(null);
+    setCompleteSuccess(null);
+    try {
+      const res = await assignAlbumToProject({ albumId, projectId: project.id });
+      const updated = await fetchProject(project.id);
+      if (onProjectUpdate) {
+        onProjectUpdate(updated);
+      }
+      setCompleteSuccess(`✓ "${albumId}" albümünden ${res.copiedCount} parça projeye başarıyla aktarıldı.`);
+      setShowAlbumPicker(false);
+    } catch (err: unknown) {
+      setCompleteError(err instanceof Error ? err.message : 'Albüm aktarılamadı.');
+    } finally {
+      setIsImportingAlbum(false);
+    }
+  };
+
   const isMusicReady = readinessMusic?.ready ?? (assets.music === 'ready');
   const missingTracksCount = Math.max(0, trackCount - audioCount);
+
+  const handleDownloadSuno = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!sunoUrl.trim() || isIngestingSuno) return;
+    setIsIngestingSuno(true);
+    setSunoIngestError(null);
+    setSunoIngestSuccess(null);
+    try {
+      const res = await ingestSunoToProject(project.id, sunoUrl.trim());
+      const updated = await fetchProject(project.id);
+      if (onProjectUpdate) {
+        onProjectUpdate(updated);
+      }
+      setSunoIngestSuccess(`✓ ${res.downloadedCount} parça Suno'dan indirildi ve projeye bağlandı!`);
+      setSunoUrl('');
+    } catch (err: unknown) {
+      setSunoIngestError(err instanceof Error ? err.message : 'Suno indirme başarısız oldu.');
+    } finally {
+      setIsIngestingSuno(false);
+    }
+  };
 
   const handleCompleteMusic = async () => {
     if (isCompleting) return;
@@ -585,8 +1241,30 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
     }
   };
 
+  const handleOpenFolder = async () => {
+    try {
+      await openProjectFolder(project.id, 'audio');
+      setCompleteSuccess('Opened audio/ folder in Explorer.');
+    } catch {
+      setCompleteError('Could not open folder in Explorer.');
+    }
+  };
+
   return (
-    <StagePanel section="music" title="Music" status={assets.music} stageStatus={stageStatus}>
+    <StagePanel section="music" title="7. Müzik" status={assets.music} stageStatus={stageStatus}>
+      <UploadButton
+        label="Müzik dosyalarını yükle"
+        accept=".mp3,.wav,.m4a,.flac,.aac,.opus,.ogg"
+        multiple
+        onFiles={async (files) => {
+          let latest = project;
+          for (const file of files) latest = await uploadProjectAudio(project.id, file);
+          onProjectUpdate?.(latest);
+        }}
+      />
+      <p className="field-hint">
+        <strong>{audioCount} parça yüklendi.</strong>
+      </p>
       <div className="music-summary">
         {music?.concept ? (
           <p>
@@ -597,23 +1275,173 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
           <strong>{trackCount > 0 ? `${trackCount} Tracks Planned` : `${audioCount} Audio Files`}</strong>
           <span className="muted">
             {' '}
-            · {audioCount} audio files in folder
-            {trackCount > 0 && missingTracksCount > 0 ? ` · ${missingTracksCount} remaining` : null}
-            {completedCount > 0 ? ` · ${completedCount} marked completed` : null}
-            {readinessMusic?.status ? ` · Status: ${readinessMusic.status}` : null}
+            · {audioCount} of {trackCount || audioCount} audio files present
+            {trackCount > 0 && missingTracksCount > 0 ? ` (${missingTracksCount} remaining)` : ''}
+            {completedCount > 0 ? ` · ${completedCount} marked completed` : ''}
+            {isMusicReady
+              ? ' · Status: Completed'
+              : audioCount === 0
+                ? ' · Status: Awaiting audio files'
+                : ' · Status: In progress'}
           </span>
         </p>
       </div>
 
+      {/* Suno Downloader Accordion / Box */}
+      {showSunoBox ? (
+        <div
+          style={{
+            margin: '12px 0 16px',
+            padding: '14px 16px',
+            borderRadius: 8,
+            background: 'var(--bg-surface-subtle)',
+            border: '1px solid var(--border)',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <strong style={{ fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span>🌐</span> Suno Linkinden Otomatik İndir (Suno Ingest)
+            </strong>
+            <button
+              type="button"
+              className="button"
+              style={{ fontSize: 11, minHeight: 22, padding: '0 6px' }}
+              onClick={() => setShowSunoBox(false)}
+            >
+              Kapat
+            </button>
+          </div>
+          <form onSubmit={handleDownloadSuno} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                type="url"
+                placeholder="https://suno.com/playlist/... veya https://suno.com/song/..."
+                value={sunoUrl}
+                onChange={(e) => setSunoUrl(e.target.value)}
+                disabled={isIngestingSuno}
+                style={{ flex: 1, fontSize: 13, padding: '6px 10px' }}
+                required
+              />
+              <button
+                type="submit"
+                className="button button-primary"
+                disabled={isIngestingSuno || !sunoUrl.trim()}
+                style={{ fontSize: 13, minHeight: 32 }}
+              >
+                {isIngestingSuno ? 'İndiriliyor...' : 'İndir & Bağla'}
+              </button>
+            </div>
+            {sunoIngestError ? (
+              <p className="field-hint field-error" role="alert" style={{ margin: 0 }}>
+                {sunoIngestError}
+              </p>
+            ) : null}
+            {sunoIngestSuccess ? (
+              <p className="field-hint" style={{ color: '#34603f', margin: 0, fontWeight: 600 }}>
+                {sunoIngestSuccess}
+              </p>
+            ) : null}
+          </form>
+        </div>
+      ) : null}
+
+      {/* Album Library Picker Box */}
+      {showAlbumPicker ? (
+        <div
+          style={{
+            margin: '12px 0 16px',
+            padding: '14px 16px',
+            borderRadius: 8,
+            background: 'var(--bg-surface-subtle)',
+            border: '1px solid var(--border)',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <strong style={{ fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span>📚</span> Müzik Kütüphanesinden Albüm Seç & Bu Projeye Aktar
+            </strong>
+            <button
+              type="button"
+              className="button"
+              style={{ fontSize: 11, minHeight: 22, padding: '0 6px' }}
+              onClick={() => setShowAlbumPicker(false)}
+            >
+              Kapat
+            </button>
+          </div>
+          {libraryAlbums.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {libraryAlbums.map((album) => (
+                <div
+                  key={album.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '8px 12px',
+                    borderRadius: 6,
+                    background: 'var(--bg-surface)',
+                    border: '1px solid var(--border-subtle)',
+                  }}
+                >
+                  <div>
+                    <strong style={{ fontSize: 13 }}>📁 {album.name}</strong>
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>
+                      ({album.trackCount} parça)
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="button button-primary"
+                    disabled={isImportingAlbum || album.trackCount === 0}
+                    style={{ fontSize: 12, minHeight: 26, padding: '2px 10px' }}
+                    onClick={() => handleImportAlbum(album.id)}
+                  >
+                    {isImportingAlbum ? 'Aktarılıyor...' : 'Bu Albümü Projeye Aktar'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="field-hint" style={{ margin: 0 }}>
+              Kütüphanede henüz albüm yok. Üst menüdeki <strong>Music Hub</strong> üzerinden albüm ekleyebilirsiniz.
+            </p>
+          )}
+        </div>
+      ) : null}
+
       {tracks.length > 0 ? (
         <TrackList tracks={tracks} />
+      ) : musicInfo && musicInfo.audioFiles.length > 0 ? (
+        <ol className="order-list">
+          {musicInfo.audioFiles.map((audio, index) => (
+            <li key={audio.file}>
+              <span className="order-number">{index + 1}</span>
+              <span className="order-name">{audio.file}</span>
+            </li>
+          ))}
+        </ol>
       ) : audioCount > 0 ? (
         <EmptyState compact title="Track names are not available.">
-          {audioCount} audio files found in {project.audioDir ?? 'the audio folder'}.
+          {audioCount} audio files found in{' '}
+          <code
+            onClick={handleOpenFolder}
+            title="Click to open audio folder in Windows Explorer"
+            style={{ cursor: 'pointer', color: 'var(--primary)', textDecoration: 'underline' }}
+          >
+            {project.audioDir ?? 'the audio folder'}
+          </code>.
         </EmptyState>
       ) : (
         <EmptyState compact title="No music tracks yet.">
-          Put Suno audio files (.mp3, .wav, .m4a, .flac) in <code>{project.audioDir ?? 'the audio folder'}</code>.
+          Put Suno audio files (.mp3, .wav, .m4a, .flac) in{' '}
+          <code
+            onClick={handleOpenFolder}
+            title="Click to open audio folder in Windows Explorer"
+            style={{ cursor: 'pointer', color: 'var(--primary)', textDecoration: 'underline' }}
+          >
+            {project.audioDir ?? 'the audio folder'}
+          </code>.
         </EmptyState>
       )}
 
@@ -630,6 +1458,30 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
       ) : null}
 
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 14 }}>
+        <button
+          className="button"
+          type="button"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+          onClick={() => setShowAlbumPicker((prev) => !prev)}
+        >
+          📚 {showAlbumPicker ? 'Albümleri Gizle' : 'Kütüphaneden Albüm Seç'}
+        </button>
+        <button
+          className="button"
+          type="button"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+          onClick={() => setShowSunoBox((prev) => !prev)}
+        >
+          🌐 {showSunoBox ? 'Suno Alanını Gizle' : 'Suno Linkinden İndir'}
+        </button>
+        <button
+          className="button"
+          type="button"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+          onClick={handleOpenFolder}
+        >
+          📂 Open audio/ Folder
+        </button>
         {!isMusicReady ? (
           <button
             className="button button-primary"
@@ -646,33 +1498,75 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
           disabled={isCompleting}
           onClick={handleRefresh}
         >
-          Refresh Audio Files
+          🔄 Refresh Audio Files
         </button>
       </div>
 
       {!isMusicReady && audioCount === 0 ? (
-        <p className="field-hint" style={{ marginTop: 6 }}>
-          At least 1 audio file is required in the audio directory to complete the music step.
+        <p className="field-hint" style={{ marginTop: 8 }}>
+          ℹ Add at least 1 audio file (.mp3, .wav) to the audio folder, import an album, or download with Suno above to continue.
         </p>
       ) : null}
     </StagePanel>
   );
 }
 
-export function BuildStage({ project, assets, stageStatus, onProjectUpdate }: StageProps) {
+type BuildOpState = 'pending' | 'running' | 'done' | 'failed';
+
+/**
+ * Canonical 9. adımın 7 otomatik işlemi ve build.js'teki karşılığı (tag).
+ * build.js her adım için "[tag] <ad> başlıyor." / "[tag] <ad> bitti: …"
+ * yazar; çalışma sırası 01 → 02 → 04 → 03 → 05 olduğundan durum sıradan
+ * bağımsız, satırlardan okunur.
+ */
+const BUILD_OPERATIONS = [
+  { label: "Watermark'ı kırp", tag: '01' },
+  { label: 'Video oranını düzelt (16:9)', tag: '01' },
+  { label: 'Sesleri birleştir', tag: '02' },
+  { label: 'Ambient sesi ekle', tag: '03' },
+  { label: 'Videoyu ses süresine uzat', tag: '04' },
+  { label: 'Fade işlemlerini uygula', tag: '04' },
+  { label: 'Tracklist üret', tag: '05' },
+] as const;
+
+const OP_ICON: Record<BuildOpState, string> = { pending: '○', running: '⏳', done: '✓', failed: '✗' };
+
+function buildChecklist(log: string[] = [], state?: string) {
+  const has = (tag: string, word: string) => log.some((line) => line.startsWith(`[${tag}]`) && line.includes(word));
+  const ambientSkipped = log.some((line) => line.includes('Ambient tanımlı değil'));
+  const tagState = (tag: string): BuildOpState => {
+    if (state === 'succeeded') return 'done';
+    // Ambient birden fazla karışım olabilir: tracklist başladıysa bitmiştir.
+    const finished = tag === '03' ? ambientSkipped || has('05', 'başlıyor') : has(tag, 'bitti');
+    if (finished) return 'done';
+    if (has(tag, 'başlıyor')) return state === 'failed' ? 'failed' : 'running';
+    return 'pending';
+  };
+  const items = BUILD_OPERATIONS.map((op) => ({ label: op.label, state: tagState(op.tag) }));
+  const doneCount = items.filter((item) => item.state === 'done').length;
+  const active = items.find((item) => item.state === 'running' || item.state === 'failed');
+  const percent = state === 'succeeded' ? 100 : Math.max(5, Math.round((doneCount / items.length) * 100));
+  let stepLabel = 'Montaj başlatılıyor...';
+  if (state === 'succeeded') stepLabel = 'Montaj tamamlandı';
+  else if (state === 'failed') stepLabel = active ? `Montaj başarısız: ${active.label}` : 'Montaj başarısız';
+  else if (active) stepLabel = `${active.label} (${doneCount}/${items.length})`;
+  return { items, percent, stepLabel };
+}
+
+export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGoToStep }: StageProps) {
+  const readiness = project.readiness;
+  const isBuildReady = readiness?.build?.ready ?? (assets.assembly === 'ready');
+  const canBuild = isBuildReady;
+  const missingRequirements = readiness?.build?.missing ?? [];
+
   const [buildJob, setBuildJob] = useState<BuildJob | null>(null);
   const [isStarting, setIsStarting] = useState(false);
   const [buildError, setBuildError] = useState<string | null>(null);
 
-  const readinessBuild = project.readiness?.build;
-  const canBuild = readinessBuild ? readinessBuild.ready : project.step?.id === 'build';
-  const missingRequirements = readinessBuild?.missing ?? [];
-  const rows: { label: string; status: AssetStatus }[] = [
-    { label: 'Audio', status: assets.music },
-    { label: 'Ambient', status: assets.ambient },
+  const rows = [
+    { label: 'Master Frame', status: assets.master },
     { label: 'Video Clip', status: assets.clip },
-    { label: 'Assembly', status: assets.assembly },
-    { label: 'Output', status: assets.output },
+    { label: 'Music', status: assets.music },
   ];
 
   // Initial fetch of build status
@@ -682,6 +1576,15 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate }: St
       .then((job) => {
         if (!isActive) return;
         setBuildJob(job);
+        if (job.state === 'succeeded' && !project.output?.exists) {
+          fetchProject(project.id)
+            .then((updated) => {
+              if (isActive && onProjectUpdate) {
+                onProjectUpdate(updated);
+              }
+            })
+            .catch(() => {});
+        }
       })
       .catch(() => {
         // ignore
@@ -689,7 +1592,7 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate }: St
     return () => {
       isActive = false;
     };
-  }, [project.id]);
+  }, [project.id, project.output?.exists, onProjectUpdate]);
 
   // Polling when buildJob is running
   useEffect(() => {
@@ -729,6 +1632,10 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate }: St
     setIsStarting(true);
     setBuildError(null);
 
+    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {});
+    }
+
     try {
       const job = await startBuild(project.id, { overwrite: Boolean(project.output?.exists) });
       setBuildJob(job);
@@ -744,13 +1651,27 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate }: St
   };
 
   const isRunning = buildJob?.state === 'running';
+  const isSucceeded = buildJob?.state === 'succeeded' || (project.output?.exists && !isRunning);
+  const progress = buildChecklist(buildJob?.log, buildJob?.state);
 
   const videoConfig = project.projectJson?.data?.video;
-  const configuredCrop = videoConfig?.cropBottom ?? 150;
-  const isWatermarkActive = videoConfig?.watermark ?? (configuredCrop > 0);
+  const configuredCropBottom = videoConfig?.cropBottom ?? 150;
+  const configuredCropTop = videoConfig?.cropTop ?? 0;
+  const configuredCropLeft = videoConfig?.cropLeft ?? 0;
+  const configuredCropRight = videoConfig?.cropRight ?? 0;
+  const hasCrop = (videoConfig?.watermark ?? false) && (configuredCropBottom > 0 || configuredCropTop > 0 || configuredCropLeft > 0 || configuredCropRight > 0);
+
+  const cropDescription = hasCrop
+    ? [
+        configuredCropBottom > 0 ? `Alt: ${configuredCropBottom}px` : null,
+        configuredCropTop > 0 ? `Üst: ${configuredCropTop}px` : null,
+        configuredCropLeft > 0 ? `Sol: ${configuredCropLeft}px` : null,
+        configuredCropRight > 0 ? `Sağ: ${configuredCropRight}px` : null,
+      ].filter(Boolean).join(', ')
+    : 'Kırpma yok';
 
   return (
-    <StagePanel section="build" title="Build" status={assets.assembly} stageStatus={stageStatus}>
+    <StagePanel section="build" title="9. Montaj" status={assets.assembly} stageStatus={stageStatus}>
       <dl className="readiness-list">
         {rows.map((row) => (
           <div key={row.label}>
@@ -761,18 +1682,16 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate }: St
           </div>
         ))}
         <div>
-          <dt>Video Crop</dt>
+          <dt>Video Crop & Format</dt>
           <dd>
-            {isWatermarkActive && configuredCrop > 0
-              ? `${configuredCrop}px (watermark removal)`
-              : 'No crop'}
+            {cropDescription} → 16:9
           </dd>
         </div>
       </dl>
 
-      {missingRequirements.length > 0 ? (
-        <p className="field-hint field-error" style={{ marginTop: 12 }}>
-          Missing requirements: {missingRequirements.join(', ')}
+      {!isBuildReady ? (
+        <p className="field-hint" style={{ marginTop: 12, color: 'var(--text-muted)' }}>
+          ℹ Build will be available when all required stages (Master Frame, Video Clip, Music) are ready.
         </p>
       ) : null}
 
@@ -780,6 +1699,102 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate }: St
         <p className="field-hint field-error" role="alert" style={{ marginTop: 12 }}>
           {buildError}
         </p>
+      ) : null}
+
+      {/* Progress bar during build */}
+      {isRunning || buildJob?.state === 'failed' ? (
+        <div
+          style={{
+            marginTop: 16,
+            padding: '14px 16px',
+            borderRadius: 8,
+            backgroundColor: 'var(--bg-surface-subtle)',
+            border: '1px solid var(--border-subtle)',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-main)' }}>
+              {isRunning ? '⏳' : '✗'} {progress.stepLabel}
+            </span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--primary)' }}>
+              %{progress.percent}
+            </span>
+          </div>
+          <div
+            style={{
+              width: '100%',
+              height: 10,
+              borderRadius: 5,
+              background: 'var(--bg-surface)',
+              border: '1px solid var(--border)',
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                width: `${progress.percent}%`,
+                height: '100%',
+                borderRadius: 5,
+                background: 'linear-gradient(90deg, #4caf50, #2e7d32)',
+                transition: 'width 0.5s ease',
+              }}
+            />
+          </div>
+          <ol className="build-ops">
+            {progress.items.map((item) => (
+              <li key={item.label} className={`build-op ${item.state}`}>
+                <span aria-hidden="true">{OP_ICON[item.state]}</span> {item.label}
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
+
+      {isSucceeded ? (
+        <div
+          style={{
+            marginTop: 16,
+            padding: '14px 18px',
+            borderRadius: 8,
+            backgroundColor: 'var(--bg-surface-subtle)',
+            border: '1px solid #34603f',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 12,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: 26 }} role="img" aria-label="party popper">🎉</span>
+            <div>
+              <strong style={{ fontSize: 15, color: '#34603f', display: 'block' }}>
+                Video Başarıyla Oluşturuldu!
+              </strong>
+              <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                Nihai video <code>out/final_ambient.mp4</code> olarak hazırlandı.
+              </span>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="button button-primary"
+              style={{ fontSize: 12.5, minHeight: 30, padding: '2px 12px' }}
+              onClick={() => onGoToStep?.('publish')}
+            >
+              ▶️ Yayın adımına geç
+            </button>
+            <button
+              type="button"
+              className="button"
+              style={{ fontSize: 12.5, minHeight: 30, padding: '2px 12px' }}
+              onClick={() => openProjectFolder(project.id, 'out')}
+            >
+              📂 Çıktı Klasörünü Aç
+            </button>
+          </div>
+        </div>
       ) : null}
 
       {buildJob && buildJob.state !== 'idle' ? (
@@ -796,9 +1811,13 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate }: St
           </div>
 
           {buildJob.error ? (
-            <p className="field-hint field-error" style={{ marginTop: 4 }}>
+            <p className="field-hint field-error" role="alert" style={{ marginTop: 4 }}>
               {buildJob.error}
             </p>
+          ) : null}
+
+          {buildJob.state === 'failed' && buildJob.errorLog && buildJob.errorLog.length > 0 ? (
+            <pre className="build-log">{buildJob.errorLog.slice(-15).join('\n')}</pre>
           ) : null}
 
           {buildJob.log && buildJob.log.length > 0 ? (
@@ -817,12 +1836,12 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate }: St
           onClick={handleStartBuild}
         >
           {isRunning
-            ? 'Building Video...'
+            ? 'Montaj sürüyor...'
             : isStarting
-              ? 'Starting...'
+              ? 'Başlatılıyor...'
               : project.output?.exists
-                ? 'Rebuild Video'
-                : 'Build Video'}
+                ? 'Yeniden başlat'
+                : 'Başlat'}
         </button>
 
         {!canBuild && !project.output?.exists && !isRunning ? (
@@ -837,12 +1856,28 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate }: St
   );
 }
 
-export function OutputStage({ project, assets, stageStatus }: StageProps) {
+export function OutputStage({ project, assets, stageStatus, onProjectUpdate }: StageProps) {
   const outputName = fileName(project.output?.path);
+  const tracklist = project.readiness?.output?.tracklist;
   const outputUrl = project.output?.exists && outputName ? getProjectOutputUrl(project.id, outputName) : null;
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefreshOutput = async () => {
+    setIsRefreshing(true);
+    try {
+      const updated = await fetchProject(project.id);
+      if (onProjectUpdate) {
+        onProjectUpdate(updated);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   return (
-    <StagePanel section="completed" title="Completed / Output" status={assets.output} stageStatus={stageStatus}>
+    <StagePanel section="publish" title="10. Yayın" status={assets.output} stageStatus={stageStatus}>
       {project.output?.exists ? (
         <div className="stage-media">
           <AssetPreview kind="video" fileName={outputName} src={outputUrl} emptyLabel="" />
@@ -861,12 +1896,51 @@ export function OutputStage({ project, assets, stageStatus }: StageProps) {
                 <dd><code>{project.output?.path ?? 'out/final_ambient.mp4'}</code></dd>
               </div>
             </dl>
+
+            <CopyPrompt
+              label="Tracklist (YouTube açıklaması)"
+              buttonLabel="Tracklist'i kopyala"
+              prompt={tracklist?.text}
+              error={tracklist?.exists ? 'Tracklist okunamadı.' : 'Tracklist dosyası bulunamadı — montajı yeniden başlat.'}
+            />
+
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 14 }}>
+              <button
+                type="button"
+                className="button button-primary"
+                onClick={() => openProjectFolder(project.id, 'out')}
+              >
+                📂 Çıktı Klasörünü Aç (Explorer)
+              </button>
+              {outputUrl ? (
+                <a
+                  href={outputUrl}
+                  download={outputName || 'final_ambient.mp4'}
+                  className="button"
+                  style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}
+                >
+                  ⬇️ İndir (MP4)
+                </a>
+              ) : null}
+            </div>
           </div>
         </div>
       ) : (
-        <EmptyState compact title="No output yet.">
-          The video will be assembled and written to <code>{outputName ?? 'out/final_ambient.mp4'}</code> when build completes.
-        </EmptyState>
+        <div>
+          <EmptyState compact title="No output yet.">
+            The video will be assembled and written to <code>{outputName ?? 'out/final_ambient.mp4'}</code> when build completes.
+          </EmptyState>
+          <div style={{ marginTop: 10 }}>
+            <button
+              type="button"
+              className="button"
+              disabled={isRefreshing}
+              onClick={handleRefreshOutput}
+            >
+              {isRefreshing ? 'Checking out/...' : '🔄 Çıktıyı Kontrol Et / Yenile'}
+            </button>
+          </div>
+        </div>
       )}
     </StagePanel>
   );

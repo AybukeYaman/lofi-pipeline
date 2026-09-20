@@ -15,7 +15,7 @@ import { inspectProject, nextStep } from '../../prep/project-status.js';
 import { GeminiError } from '../../prep/gemini.js';
 import { STYLES_DIR } from '../../prep/styles.js';
 import {
-  createLibraryStyle, generateStyle, getAsset, getLibrary, getMaster, getProject,
+  createLibraryStyle, deleteLibraryStyle, generateStyle, getAsset, getLibrary, getMaster, getProject, getStyle, getStyleAsset, updateLibraryStyle,
 } from '../../server/project-api.js';
 import { createWebServer } from '../../server/web-server.js';
 
@@ -96,6 +96,10 @@ before(async () => {
       createLibraryStyle: (body) => createLibraryStyle(body, {
         videosDir, stylesDir, ambientDir, gemini: geminiOptions(),
       }),
+      getStyle: (id) => getStyle(id, { stylesDir, ambientDir }),
+      getStyleAsset: (id, options) => getStyleAsset(id, { ...options, stylesDir }),
+      updateLibraryStyle: (id, body) => updateLibraryStyle(id, body, { stylesDir, ambientDir }),
+      deleteLibraryStyle: (id) => deleteLibraryStyle(id, { stylesDir }),
       generateStyle: (id, body) => generateStyle(id, body, { videosDir, ambientDir, gemini: geminiOptions() }),
       getMaster: (id) => getMaster(id, { videosDir, stylesDir: STYLES_DIR }),
       getAsset: (id, type, file) => getAsset(id, type, file, { videosDir }),
@@ -205,6 +209,38 @@ describe('POST /api/styles — kütüphaneye stil', () => {
     assert.equal((await second.json()).error, 'Generation already in progress');
     release();
     assert.equal((await first).status, 201);
+  });
+
+  test('UI AI modalı: concept ve suggestedAmbient ile stil üretir (projectId olmadan)', async () => {
+    const body = {
+      name: 'cyber-concept',
+      concept: 'Cyberpunk neon night rain',
+      suggestedAmbient: ['heavyRain'],
+    };
+    const response = await send('POST', '/api/styles', body);
+    assert.equal(response.status, 201);
+    const { style } = await response.json();
+    assert.equal(style.name, 'cyber-concept');
+    assert.equal(style.suggestedAmbient, 'heavyRain');
+    assert.match(generateCalls[0].contents[0].parts[0].text, /Cyberpunk neon night rain/);
+
+    const saved = JSON.parse(await readFile(join(stylesDir, 'cyber-concept.json'), 'utf8'));
+    assert.equal(saved.name, 'cyber-concept');
+  });
+
+  test('UI AI modalı: base64 referenceImages ile stil üretir ve refs/ altına kaydeder', async () => {
+    const fakeBase64 = Buffer.from('fake-png-content').toString('base64');
+    const body = {
+      name: 'pixel-art',
+      concept: 'Chiptune pixel mood',
+      referenceImages: [{ name: 'pixel.png', data: `data:image/png;base64,${fakeBase64}` }],
+    };
+    const response = await send('POST', '/api/styles', body);
+    assert.equal(response.status, 201);
+    const { style } = await response.json();
+    assert.equal(style.name, 'pixel-art');
+    assert.equal(await readFile(join(stylesDir, 'refs', 'pixel-art.png'), 'utf8'), 'fake-png-content');
+    assert.equal(generateCalls[0].contents[0].parts[1].inline_data.mime_type, 'image/png');
   });
 });
 
@@ -374,5 +410,105 @@ describe('GET /api/projects/:id/master — Faz 1 (elle)', () => {
     const body = await (await send('GET', '/api/projects/master-linked/master')).json();
     assert.equal(body.ready, false);
     assert.equal(body.previewUrl, null);
+  });
+});
+
+describe('Style CRUD — GET, PUT, DELETE /api/styles/:name & direct creation', () => {
+  test('doğrudan styleBlock ile stil oluşturma, okuma, güncelleme ve silme', async () => {
+    // 1. Create directly with JSON
+    const createRes = await send('POST', '/api/styles', {
+      name: 'lofi-sunset',
+      styleBlock: {
+        medium: 'Digital anime landscape',
+        lines: 'Crisp thin lines',
+        palette: [
+          { hex: '#FFAA00', role: 'sunset sky' },
+          { hex: '#223344', role: 'dark silhouette' },
+          { hex: '#FFEECC', role: 'sunlight highlights' },
+        ],
+        light: 'Warm sunset glow',
+        texture: 'Smooth digital',
+        contrast: 'High contrast',
+        shading: 'Two-tone cell shading',
+      },
+      suggestedAmbient: 'heavyRain',
+      motionHints: ['Sun sinking slowly', 'Warm light bouncing'],
+    });
+    assert.equal(createRes.status, 201);
+    const { style: created } = await createRes.json();
+    assert.equal(created.name, 'lofi-sunset');
+
+    // 2. GET /api/styles/:name
+    const getRes = await send('GET', '/api/styles/lofi-sunset');
+    assert.equal(getRes.status, 200);
+    const getBody = await getRes.json();
+    assert.equal(getBody.name, 'lofi-sunset');
+    assert.equal(getBody.styleBlock.medium, 'Digital anime landscape');
+
+    // 3. PUT /api/styles/:name (Update)
+    const updateRes = await send('PUT', '/api/styles/lofi-sunset', {
+      styleBlock: {
+        ...getBody.styleBlock,
+        medium: 'Updated watercolor anime sunset',
+      },
+      motionHints: ['Gently floating particles'],
+    });
+    assert.equal(updateRes.status, 200);
+    const { style: updated } = await updateRes.json();
+    assert.equal(updated.styleBlock.medium, 'Updated watercolor anime sunset');
+    assert.deepEqual(updated.motionHints, ['Gently floating particles']);
+
+    // 4. DELETE /api/styles/:name
+    const deleteRes = await send('DELETE', '/api/styles/lofi-sunset');
+    assert.equal(deleteRes.status, 200);
+
+    // Verify deleted
+    const getAfterDelete = await send('GET', '/api/styles/lofi-sunset');
+    assert.equal(getAfterDelete.status, 404);
+  });
+
+  test('ayrılmış custom-generated stili güncellenemez ve silinemez', async () => {
+    assert.equal((await send('PUT', '/api/styles/custom-generated', {})).status, 400);
+    assert.equal((await send('DELETE', '/api/styles/custom-generated')).status, 400);
+  });
+
+  test('birden fazla referans görseliyle stil oluşturma, listeleme ve önizleme', async () => {
+    const png1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const png2 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR42mNk+M9QzwAEjAwACPsD/bFw5Z8AAAAASUVORK5CYII=';
+
+    const createRes = await send('POST', '/api/styles', {
+      name: 'multi-test-style',
+      styleBlock: {
+        medium: 'Multi style reference test',
+        lines: 'Test lines',
+        palette: [{ hex: '#111111', role: 'dark' }, { hex: '#222222', role: 'mid' }, { hex: '#333333', role: 'light' }],
+        light: 'Soft light',
+        texture: 'Smooth',
+        contrast: 'Medium',
+        shading: 'Cell',
+      },
+      motionHints: ['Gentle movement test'],
+      referenceImages: [
+        { name: 'style-1.png', data: png1 },
+        { name: 'style-2.png', data: png2 },
+      ],
+    });
+    assert.equal(createRes.status, 201);
+    const { style } = await createRes.json();
+    assert.equal(style.name, 'multi-test-style');
+    assert.equal(style.hasReference, true);
+    assert.equal(style.refUrls.length, 2);
+
+    // Fetch each image
+    const img1Res = await send('GET', style.refUrls[0]);
+    assert.equal(img1Res.status, 200);
+    assert.equal(img1Res.headers.get('content-type'), 'image/png');
+
+    const img2Res = await send('GET', style.refUrls[1]);
+    assert.equal(img2Res.status, 200);
+    assert.equal(img2Res.headers.get('content-type'), 'image/png');
+
+    // Clean up
+    await send('DELETE', '/api/styles/multi-test-style');
   });
 });

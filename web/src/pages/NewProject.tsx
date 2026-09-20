@@ -1,9 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react';
 
-import { createProject, fetchLibrary, fetchProjects, ApiError } from '../api';
+import { assignAlbumToProject, createProject, fetchLibrary, fetchMusicLibrary, fetchProjects, ApiError } from '../api';
 import { PageHeader } from '../components/PageHeader';
-import { ReferencePicker, type ReferenceDraft } from '../components/ReferencePicker';
 import { sampleAmbients, sampleStyles } from '../mockData';
+import { showError, showSuccess } from '../toast';
 import type { LoadState } from '../types';
 
 type FormErrors = Partial<Record<'name' | 'style' | 'form', string>>;
@@ -12,6 +12,8 @@ const INVALID_NAME_CHARS = /[<>:"/\\|?* - ]/;
 
 type StyleOption = { id: string; name: string; description: string };
 type AmbientOption = { id: string; name: string; category: string };
+
+const PROJECT_DRAFT_KEY = 'lofi_new_project_draft';
 
 export function NewProject({
   initialStyle,
@@ -30,15 +32,34 @@ export function NewProject({
     return params.get('style') || '';
   });
   const [ambients, setAmbients] = useState<string[]>([]);
-  const [references, setReferences] = useState<ReferenceDraft[]>([]);
   const [errors, setErrors] = useState<FormErrors>({});
   const [existingNames, setExistingNames] = useState<string[]>([]);
   const [namesState, setNamesState] = useState<LoadState>('loading');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [serverProblems, setServerProblems] = useState<string[]>([]);
+  const [restoredDraftTime, setRestoredDraftTime] = useState<string | null>(null);
 
   const [availableStyles, setAvailableStyles] = useState<StyleOption[]>(sampleStyles);
   const [availableAmbients, setAvailableAmbients] = useState<AmbientOption[]>(sampleAmbients);
+  const [availableAlbums, setAvailableAlbums] = useState<Array<{ id: string; name: string; trackCount: number }>>([]);
+  const [selectedAlbumId, setSelectedAlbumId] = useState<string>('');
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(PROJECT_DRAFT_KEY);
+      if (raw) {
+        const draft = JSON.parse(raw);
+        if (draft) {
+          if (draft.name) setName(draft.name);
+          if (draft.concept) setConcept(draft.concept);
+          if (draft.style && !initialStyle) setStyle(draft.style);
+          if (Array.isArray(draft.ambients)) setAmbients(draft.ambients);
+          if (draft.selectedAlbumId) setSelectedAlbumId(draft.selectedAlbumId);
+          setRestoredDraftTime(draft.savedAt || 'Önceki oturum');
+        }
+      }
+    } catch {}
+  }, []);
 
   useEffect(() => {
     if (initialStyle) {
@@ -96,6 +117,15 @@ export function NewProject({
         // Fallback to defaults
       });
 
+    fetchMusicLibrary()
+      .then((musicLib) => {
+        if (!isActive) return;
+        if (Array.isArray(musicLib.albums)) {
+          setAvailableAlbums(musicLib.albums.map((a) => ({ id: a.id, name: a.name, trackCount: a.trackCount })));
+        }
+      })
+      .catch(() => {});
+
     return () => {
       isActive = false;
     };
@@ -111,6 +141,35 @@ export function NewProject({
     edit(setAmbients)(
       ambients.includes(id) ? ambients.filter((other) => other !== id) : [...ambients, id],
     );
+  };
+
+  const saveDraft = () => {
+    try {
+      if (name || concept || ambients.length > 0 || selectedAlbumId) {
+        localStorage.setItem(
+          PROJECT_DRAFT_KEY,
+          JSON.stringify({
+            name,
+            concept,
+            style,
+            ambients,
+            selectedAlbumId,
+            savedAt: new Date().toLocaleTimeString(),
+          }),
+        );
+      }
+    } catch {}
+  };
+
+  const clearDraft = () => {
+    try {
+      localStorage.removeItem(PROJECT_DRAFT_KEY);
+    } catch {}
+    setRestoredDraftTime(null);
+    setName('');
+    setConcept('');
+    setAmbients([]);
+    setSelectedAlbumId('');
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -132,10 +191,21 @@ export function NewProject({
         concept: concept.trim() || undefined,
       });
 
+      try {
+        localStorage.removeItem(PROJECT_DRAFT_KEY);
+      } catch {}
+
+      if (selectedAlbumId) {
+        await assignAlbumToProject({ albumId: selectedAlbumId, projectId: response.project.id }).catch(() => {});
+      }
+
+      showSuccess(`"${response.project.name || name}" projesi başarıyla oluşturuldu!`, 'Proje Başlatıldı');
+
       if (onCreated) {
         onCreated(response.project.id);
       }
     } catch (err: unknown) {
+      showError(err, 'Proje oluşturulamadı.');
       if (err instanceof ApiError) {
         if (err.status === 409) {
           setErrors({ name: err.message });
@@ -155,6 +225,16 @@ export function NewProject({
     }
   };
 
+  const handleCancelWithDraft = () => {
+    saveDraft();
+    onCancel();
+  };
+
+  const handleDiscard = () => {
+    clearDraft();
+    onCancel();
+  };
+
   const selectedStyle = availableStyles.find((option) => option.id === style);
 
   return (
@@ -162,8 +242,35 @@ export function NewProject({
       <PageHeader
         eyebrow="NEW PROJECT"
         title="New Project"
-        description="Set up the album, visual style and ambience for a new video."
+        description="Set up the album, image style and ambience for a new video."
       />
+
+      {restoredDraftTime ? (
+        <div
+          className="notice"
+          style={{
+            borderColor: '#e5dccb',
+            background: '#faf7f0',
+            color: '#5c523b',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: 20,
+          }}
+        >
+          <div>
+            <strong>📝 Yarım kalan proje taslağı yüklendi</strong> <span className="muted">({restoredDraftTime})</span>
+          </div>
+          <button
+            type="button"
+            className="button"
+            style={{ fontSize: 12, padding: '2px 8px' }}
+            onClick={clearDraft}
+          >
+            🗑️ Taslağı Sıfırla
+          </button>
+        </div>
+      ) : null}
 
       <form className="panel form" onSubmit={handleSubmit} noValidate>
         {errors.form ? (
@@ -215,7 +322,7 @@ export function NewProject({
         </div>
 
         <div className="field">
-          <label htmlFor="project-style">Style</label>
+          <label htmlFor="project-style">Image Style</label>
           <select
             id="project-style"
             value={style}
@@ -224,7 +331,7 @@ export function NewProject({
             aria-describedby="project-style-hint"
             disabled={isSubmitting}
           >
-            <option value="">Select a style</option>
+            <option value="">Select an image style</option>
             {availableStyles.map((option) => (
               <option key={option.id} value={option.id}>
                 {option.name}
@@ -232,7 +339,7 @@ export function NewProject({
             ))}
           </select>
           <p id="project-style-hint" className={errors.style ? 'field-error' : 'field-hint'}>
-            {errors.style ?? selectedStyle?.description ?? 'Choose the visual style for the video.'}
+            {errors.style ?? selectedStyle?.description ?? 'Choose the image style for the video.'}
           </p>
         </div>
 
@@ -258,16 +365,44 @@ export function NewProject({
           <p className="field-hint">Optional. Mixed under the music.</p>
         </fieldset>
 
-        <fieldset className="field">
-          <legend>References</legend>
-          <ReferencePicker items={references} onChange={edit(setReferences)} />
-        </fieldset>
+        {availableAlbums.length > 0 ? (
+          <div className="field">
+            <label htmlFor="music-album-select">
+              🎵 Müzik Albümü (Opsiyonel — Kütüphaneden Doğrudan Bağla)
+            </label>
+            <select
+              id="music-album-select"
+              value={selectedAlbumId}
+              onChange={(e) => setSelectedAlbumId(e.target.value)}
+              disabled={isSubmitting}
+            >
+              <option value="">(Yok — Müzik planı veya manuel ses eklenecek)</option>
+              {availableAlbums.map((album) => (
+                <option key={album.id} value={album.id}>
+                  📁 {album.name} ({album.trackCount} parça)
+                </option>
+              ))}
+            </select>
+            <p className="field-hint">
+              Seçilen albümdeki tüm ses dosyaları otomatik olarak bu projenin <code>audio/</code> klasörüne kopyalanacaktır.
+            </p>
+          </div>
+        ) : null}
 
-        <div className="form-actions">
-          <button className="button" type="button" onClick={onCancel} disabled={isSubmitting}>
-            Cancel
+        <div className="form-actions" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <button className="button" type="button" onClick={handleCancelWithDraft} disabled={isSubmitting}>
+            💾 Taslağı Sakla & Kapat
           </button>
-          <button className="button button-primary" type="submit" disabled={isSubmitting}>
+          <button
+            className="button"
+            type="button"
+            style={{ color: '#a63a2b' }}
+            onClick={handleDiscard}
+            disabled={isSubmitting}
+          >
+            ✕ Vazgeç
+          </button>
+          <button className="button button-primary" type="submit" disabled={isSubmitting} style={{ marginLeft: 'auto' }}>
             {isSubmitting ? 'Creating Project...' : 'Create Project'}
           </button>
         </div>

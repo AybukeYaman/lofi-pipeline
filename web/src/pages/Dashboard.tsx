@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { fetchProjects } from '../api';
 import { EmptyState } from '../components/Feedback';
+import { LayoutSwitcher, useCardLayout } from '../components/LayoutSwitcher';
 import { PageHeader } from '../components/PageHeader';
 import type { LoadState, ProjectSummary } from '../types';
 
@@ -13,6 +14,7 @@ type DashboardProps = {
 export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loadState, setLoadState] = useState<LoadState>('idle');
+  const [layoutCols, setLayoutCols] = useCardLayout('lofi-layout-projects', 1);
 
   const loadProjects = useCallback(async () => {
     setLoadState('loading');
@@ -56,9 +58,14 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
         }
       />
 
-      <div className="summary-row" aria-live="polite">
+      <div className="summary-row" aria-live="polite" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <span>{projects.length} Projects</span>
-        {loadState === 'loading' ? <span>Loading projects...</span> : null}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {loadState === 'loading' ? <span>Loading projects...</span> : null}
+          {projects.length > 0 ? (
+            <LayoutSwitcher value={layoutCols} onChange={setLayoutCols} storageKey="lofi-layout-projects" />
+          ) : null}
+        </div>
       </div>
 
       {loadState === 'error' ? (
@@ -79,7 +86,7 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
       ) : null}
 
       {projects.length > 0 ? (
-        <div className="project-list">
+        <div className={`card-grid-layout cols-${layoutCols}`}>
           {sortedProjects.map((project) => (
             <button
               className="project-card project-card-button"
@@ -89,7 +96,12 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
             >
               <div>
                 <h2>{project.name}</h2>
-                <p>Step: {project.step?.title ?? project.step?.id ?? 'Unknown'}</p>
+                <p>
+                  Adım:{' '}
+                  {project.workflow
+                    ? `${project.workflow.steps.find((step) => step.id === project.workflow?.current)?.number ?? '?'}/10 · ${project.workflow.currentTitle}`
+                    : project.step?.title ?? project.step?.id ?? 'Unknown'}
+                </p>
               </div>
               <time dateTime={new Date(project.mtimeMs).toISOString()}>
                 Updated: {formatUpdatedAt(project.mtimeMs)}

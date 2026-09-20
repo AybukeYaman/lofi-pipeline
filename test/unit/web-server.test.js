@@ -111,4 +111,43 @@ describe('web server project API', () => {
       await fixture.cleanup();
     }
   });
+
+  test('canonical akış rotaları doğru API metoduna gövdeyle gider', async () => {
+    const calls = [];
+    const record = (name) => async (id, body) => {
+      calls.push([name, id, body]);
+      return { ok: name };
+    };
+    const server = await startServer({
+      getProjectPrompts: async (id) => ({ id }),
+      uploadProjectImage: record('image'),
+      uploadProjectClip: record('clip'),
+      uploadProjectAudio: record('audio'),
+      updateWorkflow: record('workflow'),
+      updateTrackOrder: record('order'),
+    });
+    const send = (method, path, body) => fetch(`${server.url}${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    try {
+      assert.deepEqual(await (await fetch(`${server.url}/api/projects/p/prompts`)).json(), { id: 'p' });
+      assert.equal((await send('POST', '/api/projects/p/images', { slot: 'scene' })).status, 200);
+      assert.equal((await send('POST', '/api/projects/p/clips', { name: 'a.mp4' })).status, 200);
+      assert.equal((await send('POST', '/api/projects/p/audio', { name: 'a.mp3' })).status, 200);
+      assert.equal((await send('PUT', '/api/projects/p/workflow', { angles: { wanted: false } })).status, 200);
+      assert.equal((await send('PUT', '/api/projects/p/order', { mode: 'alphabetical' })).status, 200);
+      assert.deepEqual(calls, [
+        ['image', 'p', { slot: 'scene' }],
+        ['clip', 'p', { name: 'a.mp4' }],
+        ['audio', 'p', { name: 'a.mp3' }],
+        ['workflow', 'p', { angles: { wanted: false } }],
+        ['order', 'p', { mode: 'alphabetical' }],
+      ]);
+      assert.equal((await send('GET', '/api/projects/p/order')).status, 405);
+    } finally {
+      await server.close();
+    }
+  });
 });

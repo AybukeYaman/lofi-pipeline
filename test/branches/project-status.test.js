@@ -51,22 +51,31 @@ describe('inspectProject — taze projeden montaja', () => {
     assert.equal(nextStep(s).id, 'faz1');
   });
 
-  test('açı varyantı MASTER sayılmaz; MASTER.PNG sayılır → audio', async () => {
+  test('açı varyantı MASTER sayılmaz; MASTER.PNG sayılır → faz3 (Video)', async () => {
     await writeFile(join(dir, 'resimler', 'Master1.jpg'), '');
     assert.equal(nextStep(await inspectProject(dir)).id, 'faz1');
 
     await writeFile(join(dir, 'resimler', 'MASTER.PNG'), '');
     const s = await inspectProject(dir);
     assert.equal(s.master, join(dir, 'resimler', 'MASTER.PNG'));
-    assert.equal(nextStep(s).id, 'audio');
+    assert.equal(nextStep(s).id, 'faz3');
   });
 
-  test('parça konunca → multi-track tamamlanana kadar audio adımında kalır; hepsi tamamlanınca → klip beklentisine geçer; klip yazılınca → build', async () => {
+  test('klip hazır olunca → audio (müzik) adımına geçer; müzik tamamlanınca → build', async () => {
     await writeFile(join(dir, 'resimler', 'MASTER.PNG'), '');
-    await writeFile(join(dir, 'audio', 'a [usesuno.com].m4a'), '');
+    await writeFile(join(dir, 'videolar', 'in.mp4'), '');
     let s = await inspectProject(dir);
+    assert.equal(nextStep(s).id, 'clip');
+
+    await setProjectClip(s.projectPath, s.clips[0]);
+    s = await inspectProject(dir);
+    // Klip hazır, henüz müzik yok → audio adımı
+    assert.equal(nextStep(s).id, 'audio');
+
+    // 1 müzik parçası koyduk ama multi-track tamamlanmadı → audio'da kalır
+    await writeFile(join(dir, 'audio', 'a [usesuno.com].m4a'), '');
+    s = await inspectProject(dir);
     assert.equal(s.audioCount, 1);
-    // multi-track projede (17 track) 1 track yetmez, audio adımında kalır:
     assert.equal(nextStep(s).id, 'audio');
 
     // music planını tamamlanmış sayalım (1/1):
@@ -77,14 +86,7 @@ describe('inspectProject — taze projeden montaja', () => {
     data.music.tracks[0].status = 'completed';
     await writeFile(s.projectPath, JSON.stringify(data, null, 2));
 
-    s = await inspectProject(dir);
-    assert.equal(nextStep(s).id, 'faz3');
-
-    await writeFile(join(dir, 'videolar', 'in.mp4'), '');
-    s = await inspectProject(dir);
-    assert.equal(nextStep(s).id, 'clip');
-
-    await setProjectClip(s.projectPath, s.clips[0]);
+    // Hem klip hem müzik hazır → build
     s = await inspectProject(dir);
     assert.equal(nextStep(s).id, 'build');
   });

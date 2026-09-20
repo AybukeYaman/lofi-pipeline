@@ -1,5 +1,8 @@
 import type {
   BuildJob,
+  ImageSlot,
+  ProjectMusicInfo,
+  ProjectPrompts,
   CreateProjectPayload,
   CreateProjectResponse,
   LibraryResponse,
@@ -51,6 +54,26 @@ async function handleResponse<T>(response: Response, defaultMessage: string): Pr
   return response.json() as Promise<T>;
 }
 
+function readAsDataUrl(file: File): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function sendJson<T>(method: string, path: string, body: unknown, defaultMessage: string): Promise<T> {
+  const response = await fetch(path, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return handleResponse<T>(response, defaultMessage);
+}
+
+const projectUrl = (id: string, suffix: string) => `/api/projects/${encodeURIComponent(id)}/${suffix}`;
+
 export async function fetchProjects(): Promise<ProjectSummary[]> {
   const response = await fetch('/api/projects');
   return handleResponse<ProjectSummary[]>(response, 'Projects could not be loaded.');
@@ -64,6 +87,36 @@ export async function fetchProject(id: string): Promise<ProjectDetail> {
 export async function fetchLibrary(): Promise<LibraryResponse> {
   const response = await fetch('/api/library');
   return handleResponse<LibraryResponse>(response, 'Library could not be loaded.');
+}
+
+export async function getStyleDetail(name: string): Promise<BackendStyle> {
+  const response = await fetch(`/api/styles/${encodeURIComponent(name)}`);
+  return handleResponse<BackendStyle>(response, 'Style could not be loaded.');
+}
+
+export async function createLibraryStyleApi(payload: unknown): Promise<{ style: BackendStyle }> {
+  const response = await fetch('/api/styles', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<{ style: BackendStyle }>(response, 'Style could not be created.');
+}
+
+export async function updateStyleDetail(name: string, payload: unknown): Promise<{ style: BackendStyle }> {
+  const response = await fetch(`/api/styles/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<{ style: BackendStyle }>(response, 'Style could not be updated.');
+}
+
+export async function deleteStyleDetail(name: string): Promise<{ ok: boolean; deleted: string }> {
+  const response = await fetch(`/api/styles/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  });
+  return handleResponse<{ ok: boolean; deleted: string }>(response, 'Style could not be deleted.');
 }
 
 export async function createProject(payload: CreateProjectPayload): Promise<CreateProjectResponse> {
@@ -143,6 +196,9 @@ export async function fetchBuildStatus(id: string): Promise<BuildJob> {
 export type UpdateCropPayload = {
   watermark?: boolean;
   cropBottom?: number;
+  cropTop?: number;
+  cropLeft?: number;
+  cropRight?: number;
 };
 
 export async function updateProjectCrop(
@@ -184,5 +240,224 @@ export function getProjectOutputUrl(projectId: string, fileName?: string | null)
   return `/api/projects/${encodeURIComponent(projectId)}/assets/output/${encodeURIComponent(name)}`;
 }
 
+export async function generateProjectStyle(
+  id: string,
+  options: { overwrite?: boolean } = {},
+): Promise<{ project: ProjectDetail; warnings?: string[] }> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(id)}/style/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(options),
+  });
+  return handleResponse<{ project: ProjectDetail; warnings?: string[] }>(
+    response,
+    'Project style could not be generated.',
+  );
+}
+
+export async function openProjectFolder(
+  id: string,
+  folder?: string,
+): Promise<{ ok: boolean; path: string }> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(id)}/open-folder`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(folder ? { folder } : {}),
+  });
+  return handleResponse<{ ok: boolean; path: string }>(response, 'Folder could not be opened.');
+}
+
+export async function uploadProjectReference(
+  id: string,
+  file: File,
+): Promise<ProjectDetail> {
+  const base64Data = await readAsDataUrl(file);
+
+  const response = await fetch(`/api/projects/${encodeURIComponent(id)}/references`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: file.name, data: base64Data }),
+  });
+  return handleResponse<ProjectDetail>(response, 'Reference image could not be uploaded.');
+}
+
+export async function deleteProjectReference(
+  id: string,
+  name: string,
+): Promise<ProjectDetail> {
+  const response = await fetch(
+    `/api/projects/${encodeURIComponent(id)}/references/${encodeURIComponent(name)}`,
+    {
+      method: 'DELETE',
+    },
+  );
+  return handleResponse<ProjectDetail>(response, 'Reference image could not be deleted.');
+}
+
+// ---------------------------------------------------------------- Music Library & Suno Ingest
+
+export async function fetchMusicLibrary(): Promise<import('./types').MusicLibraryResponse> {
+  const response = await fetch('/api/music-library');
+  return handleResponse<import('./types').MusicLibraryResponse>(response, 'Music library could not be loaded.');
+}
+
+export async function createMusicAlbum(name: string): Promise<{ id: string; name: string }> {
+  const response = await fetch('/api/music-library/albums', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  return handleResponse<{ id: string; name: string }>(response, 'Album could not be created.');
+}
+
+export async function deleteMusicAlbum(albumId: string): Promise<{ ok: boolean; id: string }> {
+  const response = await fetch(`/api/music-library/albums/${encodeURIComponent(albumId)}`, {
+    method: 'DELETE',
+  });
+  return handleResponse<{ ok: boolean; id: string }>(response, 'Album could not be deleted.');
+}
+
+export async function deleteMusicTrack(
+  albumId: string,
+  filename: string,
+): Promise<{ ok: boolean; albumId: string; filename: string }> {
+  const response = await fetch(
+    `/api/music-library/tracks/${encodeURIComponent(albumId)}/${encodeURIComponent(filename)}`,
+    {
+      method: 'DELETE',
+    },
+  );
+  return handleResponse<{ ok: boolean; albumId: string; filename: string }>(
+    response,
+    'Track could not be deleted.',
+  );
+}
+
+export async function uploadMusicTrack(
+  albumId: string,
+  file: File,
+): Promise<{ ok: boolean; albumId: string; file: string }> {
+  const base64Data = await readAsDataUrl(file);
+
+  const response = await fetch('/api/music-library/upload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ albumId, name: file.name, data: base64Data }),
+  });
+  return handleResponse<{ ok: boolean; albumId: string; file: string }>(
+    response,
+    'Track could not be uploaded.',
+  );
+}
+
+export async function openMusicLibraryFolder(albumId?: string): Promise<{ ok: boolean; path: string }> {
+  const response = await fetch('/api/music-library/open-folder', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(albumId ? { albumId } : {}),
+  });
+  return handleResponse<{ ok: boolean; path: string }>(response, 'Folder could not be opened.');
+}
+
+export async function ingestSuno(
+  payload: import('./types').SunoIngestPayload,
+): Promise<import('./types').SunoIngestResponse> {
+  const response = await fetch('/api/music-library/ingest-suno', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<import('./types').SunoIngestResponse>(response, 'Suno tracks could not be downloaded.');
+}
+
+export async function ingestSunoToProject(
+  projectId: string,
+  url: string,
+): Promise<import('./types').SunoIngestResponse> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/music/ingest-suno`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
+  });
+  return handleResponse<import('./types').SunoIngestResponse>(response, 'Suno tracks could not be downloaded.');
+}
+
+export async function assignAlbumToProject(payload: {
+  albumId: string;
+  projectId: string;
+  trackFiles?: string[];
+}): Promise<{ ok: boolean; copiedCount: number; copiedFiles: string[] }> {
+  const response = await fetch('/api/music-library/assign-to-project', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<{ ok: boolean; copiedCount: number; copiedFiles: string[] }>(
+    response,
+    'Tracks could not be assigned to project.',
+  );
+}
+
+export function getMusicAssetUrl(albumId: string, filename: string): string {
+  return `/api/music-library/assets/${encodeURIComponent(albumId)}/${encodeURIComponent(filename)}`;
+}
 
 
+
+
+// ---------------------------------------------------------------- Canonical workflow steps
+
+export async function fetchProjectPrompts(id: string): Promise<ProjectPrompts> {
+  const response = await fetch(projectUrl(id, 'prompts'));
+  return handleResponse<ProjectPrompts>(response, 'Prompts could not be loaded.');
+}
+
+export async function fetchProjectMusic(id: string): Promise<ProjectMusicInfo> {
+  const response = await fetch(projectUrl(id, 'music'));
+  return handleResponse<ProjectMusicInfo>(response, 'Music could not be loaded.');
+}
+
+/** Adım 3/4/5: sahne referansı, master frame ya da kamera açısı görseli. */
+export async function uploadProjectImage(
+  id: string,
+  slot: ImageSlot,
+  file: File,
+  index?: number,
+): Promise<ProjectDetail> {
+  const data = await readAsDataUrl(file);
+  return sendJson<ProjectDetail>(
+    'POST',
+    projectUrl(id, 'images'),
+    { slot, name: file.name, data, ...(index === undefined ? {} : { index }) },
+    'Image could not be uploaded.',
+  );
+}
+
+export async function uploadProjectClip(id: string, file: File): Promise<ProjectDetail> {
+  const data = await readAsDataUrl(file);
+  return sendJson<ProjectDetail>('POST', projectUrl(id, 'clips'), { name: file.name, data }, 'Video could not be uploaded.');
+}
+
+export async function uploadProjectAudio(id: string, file: File): Promise<ProjectDetail> {
+  const data = await readAsDataUrl(file);
+  return sendJson<ProjectDetail>('POST', projectUrl(id, 'audio'), { name: file.name, data }, 'Audio could not be uploaded.');
+}
+
+export async function updateProjectAngles(
+  id: string,
+  angles: { wanted: boolean; count?: number },
+): Promise<ProjectDetail> {
+  return sendJson<ProjectDetail>('PUT', projectUrl(id, 'workflow'), { angles }, 'Camera angle choice could not be saved.');
+}
+
+export async function saveTrackOrder(
+  id: string,
+  payload: { mode: 'alphabetical' } | { mode: 'manual'; order: string[] },
+): Promise<ProjectDetail> {
+  return sendJson<ProjectDetail>('PUT', projectUrl(id, 'order'), payload, 'Track order could not be saved.');
+}
+
+export function getProjectImageUrl(projectId: string, assetType: 'scene' | 'angle', path: string): string {
+  const name = path.split(/[\\/]/).pop() || path;
+  return projectUrl(projectId, `assets/${assetType}/${encodeURIComponent(name)}`);
+}

@@ -7,11 +7,17 @@
   "engines": {
     "node": ">=22"
   },
+  "main": "electron/main.js",
   "scripts": {
     "start": "node lofi.js",
+    "dev": "node server/web-server.js",
     "web": "node server/web-server.js",
     "web:client": "vite --config web/vite.config.ts --host 127.0.0.1",
     "web:client:build": "vite build --config web/vite.config.ts",
+    "electron:start": "electron .",
+    "electron:dev": "npm run web:client:build && electron .",
+    "electron:build": "npm run web:client:build && electron-builder --win nsis --x64",
+    "dist": "npm run electron:build",
     "tty-check": "node scripts/tty-check.js",
     "tui-check": "node scripts/tui-check.js",
     "build": "node build.js",
@@ -31,8 +37,58 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
+    "electron": "^44.4.1",
+    "electron-builder": "^26.15.3",
     "ink-testing-library": "4.0.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.0"
+  },
+  "build": {
+    "appId": "com.lofi.automation",
+    "productName": "LoFi Automation",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "package.json",
+      "electron/**/*",
+      "server/**/*",
+      "prep/**/*",
+      "prompts/**/*",
+      "core/**/*",
+      "steps/**/*",
+      "styles/**/*",
+      "ui/**/*",
+      "web/dist/**/*",
+      "*.js",
+      "!test/**/*",
+      "!web/src/**/*"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "build.js",
+      "add-style.js",
+      "new-video.js",
+      "steps/**/*",
+      "prompts/**/*",
+      "styles/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "LoFi Automation"
+    }
   }
 }

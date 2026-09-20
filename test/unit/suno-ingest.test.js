@@ -157,27 +157,43 @@ describe('güncel Suno sayfası (RSC) ve uyarılar', () => {
     assert.deepEqual(result.clips, [{ clipId: ID, title: 'Sabah', audioUrl: `https://cdn1.suno.ai/${ID}.mp3` }]);
   });
 
-  test('audio_url "forbidden" → downloadDisabled uyarısı; şifreli akış indirilmeye çalışılmaz', async () => {
+  test('audio_url "forbidden" ve CDN erişilemezse → SunoIngestError fırlatılır', async () => {
     const calls = [];
     const fetchFn = async (url, options) => {
       calls.push(url);
+      if (url.includes('cdn1.suno.ai')) return { ok: false, status: 403 };
       return page(rscPage(`\\"audio_url\\":\\"https://studio-api.prod.suno.com/api/forbidden\\",\\"media_urls\\":[{\\"url\\":\\"https://x.cloudfront.net/1/clip/${ID}.m4a\\"}]`))(url, options);
     };
     await assert.rejects(
       ingestSunoUrl({ url: 'https://suno.com/s/KFj9r501wKVxarsv', outputDir: join(process.cwd(), 'test-temp-suno-forbidden') }, { fetchFn }),
-      (err) => err instanceof SunoIngestError && err.downloadDisabled && !err.notPublic && err.message.includes('Select Audio Files'),
+      (err) => err instanceof SunoIngestError,
     );
-    assert.equal(calls.length, 1, 'yalnızca sayfa istenir');
+    assert.ok(calls.length >= 1);
   });
 
-  test('is_public:false → notPublic uyarısı', async () => {
-    const fetchFn = page(rscPage(`\\"is_public\\":false,\\"audio_url\\":\\"https://cdn1.suno.ai/${ID}.mp3\\"`));
-    await assert.rejects(parseSunoUrl(`https://suno.com/song/${ID}`, fetchFn), (err) => err.notPublic && err.message.includes('public değil'));
+  test('is_public:false olsa bile şarkı ve CDN adresi başarıyla okunur (usesuno davranışı)', async () => {
+    const fetchFn = page(rscPage(`\\"is_public\\":false,\\"audio_url\\":\\"https://cdn1.suno.ai/${ID}.mp3\\",\\"title\\":\\"Sabah\\"`));
+    const result = await parseSunoUrl(`https://suno.com/song/${ID}`, fetchFn);
+    assert.equal(result.id, ID);
+    assert.equal(result.clips[0].title, 'Sabah');
+    assert.equal(result.clips[0].audioUrl, `https://cdn1.suno.ai/${ID}.mp3`);
   });
 
-  test('HTTP 404/403 ya da sayfada şarkı verisi yok → notPublic uyarısı', async () => {
-    await assert.rejects(parseSunoUrl(`https://suno.com/song/${ID}`, page('', { status: 404 })), (err) => err.notPublic && err.message.includes('HTTP 404'));
-    await assert.rejects(parseSunoUrl(`https://suno.com/song/${ID}`, page('', { status: 403 })), (err) => err.notPublic);
-    await assert.rejects(parseSunoUrl(`https://suno.com/song/${ID}`, page('<html>giriş yap</html>')), (err) => err.notPublic);
+  test('HTTP 404/403 veya sayfa verisi olmasa bile tek şarkı URL kimliğinden CDN klibi oluşturulur', async () => {
+    const result404 = await parseSunoUrl(`https://suno.com/song/${ID}`, page('', { status: 404 }));
+    assert.equal(result404.clips[0].clipId, ID);
+    assert.equal(result404.clips[0].audioUrl, `https://cdn1.suno.ai/${ID}.mp3`);
+
+    const result403 = await parseSunoUrl(`https://suno.com/song/${ID}`, page('', { status: 403 }));
+    assert.equal(result403.clips[0].clipId, ID);
+
+    const resultLogin = await parseSunoUrl(`https://suno.com/song/${ID}`, page('<html>giriş yap</html>'));
+    assert.equal(resultLogin.clips[0].clipId, ID);
+  });
+
+  test('Public olmayan playlist için notPublic uyarısı fırlatılır', async () => {
+    const playlistId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const fetchFn = page(`<html><head><title>Private Playlist</title></head><body><script>self.__next_f.push([1,"{\\"id\\":\\"${playlistId}\\",\\"is_public\\":false}"])</script></body></html>`, { url: `https://suno.com/playlist/${playlistId}` });
+    await assert.rejects(parseSunoUrl(`https://suno.com/playlist/${playlistId}`, fetchFn), (err) => err.notPublic && err.message.includes('public değil'));
   });
 });

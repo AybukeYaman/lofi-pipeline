@@ -1,80 +1,95 @@
-import type { ProjectReadiness } from './types';
+import type { ProjectWorkflow, WorkflowStepId, WorkflowStepInfo } from './types';
 
-export const workflowSteps = [
-  { id: 'faz1', label: 'Style / References', section: 'style' },
-  { id: 'faz2', label: 'Master Frame', section: 'master' },
-  { id: 'faz3', label: 'Video Clip', section: 'video' },
-  { id: 'audio', label: 'Music', section: 'music' },
-  { id: 'build', label: 'Build', section: 'build' },
-  { id: 'done', label: 'Completed', section: 'completed' },
-] as const;
+/**
+ * Canonical kullanıcı akışı. Sıra ve tamamlanma durumu backend'den gelir
+ * (project.workflow — diskteki kanıt); burada yalnızca adımın kullanıcıya
+ * ne söyleyeceği durur.
+ */
+export const STEP_ORDER: WorkflowStepId[] = [
+  'project',
+  'style',
+  'reference',
+  'master',
+  'angles',
+  'video',
+  'music',
+  'order',
+  'build',
+  'publish',
+];
 
-const stepOrder = ['style-references', 'faz1', 'faz2', 'faz3', 'clip', 'audio', 'build', 'done'];
-const sectionByStep: Record<string, string> = {
-  'style-references': 'style',
-  faz1: 'master',
-  faz2: 'master',
-  faz3: 'video',
-  clip: 'video',
-  audio: 'music',
-  build: 'build',
-  done: 'completed',
+export const STEP_GUIDE: Record<WorkflowStepId, { who: 'user' | 'system'; lines: string[] }> = {
+  project: {
+    who: 'user',
+    lines: ['Proje adı, stil ve ambient ses seçildi; proje ayarları ve promptlar hazırlandı.'],
+  },
+  style: {
+    who: 'user',
+    lines: [
+      'Beğendiğin bir stil görseli yükle; sistem görseli analiz edip stil tarifini kaydeder.',
+      'Kayıtlı bir kütüphane stili seçtiysen bu adım tamamdır, yeniden görsel vermen gerekmez.',
+    ],
+  },
+  reference: {
+    who: 'user',
+    lines: ['Sahnenin ne olacağını gösteren bir görsel bul ve yükle.'],
+  },
+  master: {
+    who: 'user',
+    lines: [
+      "Bu promptu AI Studio'ya yapıştır.",
+      'İki görseli yükle: biri sahne referansı, biri stil görseli.',
+      'Görseli üret, en iyisini seç ve buraya yükle.',
+    ],
+  },
+  angles: {
+    who: 'user',
+    lines: ['Farklı açılar ister misin? İstemiyorsan bu adımı atlayıp Video adımına geç.'],
+  },
+  video: {
+    who: 'user',
+    lines: [
+      "Bu promptu Hailuo'ya yapıştır.",
+      'Görseli yükle. 5 saniye, motion düşük kullan.',
+      'Videoyu üret ve buraya yükle.',
+    ],
+  },
+  music: {
+    who: 'user',
+    lines: ["Suno'dan parçaları üret ve buraya yükle."],
+  },
+  order: {
+    who: 'user',
+    lines: ['Sırayı kendin mi belirleyeceksin, alfabetik mi?'],
+  },
+  build: {
+    who: 'system',
+    lines: [
+      '"Başlat" de; sistem watermark kırpma, 16:9 oran, ses birleştirme, ambient, videoyu ses süresine uzatma, fade ve tracklist işlemlerini otomatik yapar.',
+    ],
+  },
+  publish: {
+    who: 'user',
+    lines: ["YouTube'a yükle, bu metni açıklamaya yapıştır."],
+  },
 };
 
-export type WorkflowStatus = 'completed' | 'current' | 'pending' | 'unavailable';
-
-export function sectionForStep(stepId?: string) {
-  return stepId ? sectionByStep[stepId] ?? 'style' : 'style';
+export function stepInfo(workflow: ProjectWorkflow | undefined, id: WorkflowStepId): WorkflowStepInfo | undefined {
+  return workflow?.steps.find((step) => step.id === id);
 }
 
-export function getWorkflowStatus(
-  section: string,
-  currentStepId?: string,
-  readiness?: ProjectReadiness,
-): WorkflowStatus {
-  if (!currentStepId) return 'unavailable';
-  if (currentStepId === 'done') return section === 'completed' ? 'current' : 'completed';
-
-  const currentSection = sectionForStep(currentStepId);
-  const sectionOrder = workflowSteps.findIndex((step) => step.section === section);
-  const currentOrder = workflowSteps.findIndex((step) => step.section === currentSection);
-
-  if (sectionOrder === -1 || currentOrder === -1 || stepOrder.indexOf(currentStepId) === -1) {
-    return 'unavailable';
-  }
-
-  if (sectionOrder === currentOrder) {
-    return 'current';
-  }
-
-  if (readiness) {
-    const isStageReady = getStageReadiness(section, readiness);
-    if (sectionOrder < currentOrder) {
-      return isStageReady ? 'completed' : 'pending';
-    }
-    return isStageReady ? 'completed' : 'pending';
-  }
-
-  if (sectionOrder < currentOrder) return 'completed';
-  return 'pending';
+/** Kullanıcı yalnızca tamamlanmış adımlara ve ilk açık adıma gidebilir. */
+export function isStepReachable(workflow: ProjectWorkflow | undefined, id: WorkflowStepId): boolean {
+  if (!workflow) return false;
+  return STEP_ORDER.indexOf(id) <= STEP_ORDER.indexOf(workflow.current) || stepInfo(workflow, id)?.status === 'done';
 }
 
-function getStageReadiness(section: string, readiness: ProjectReadiness): boolean {
-  switch (section) {
-    case 'style':
-      return readiness.style.ready;
-    case 'master':
-      return readiness.master.ready;
-    case 'video':
-      return readiness.clip.ready;
-    case 'music':
-      return readiness.music.ready;
-    case 'build':
-      return readiness.build.ready;
-    case 'completed':
-      return readiness.output.exists;
-    default:
-      return false;
-  }
+export function previousStep(id: WorkflowStepId): WorkflowStepId | null {
+  const index = STEP_ORDER.indexOf(id);
+  return index > 0 ? STEP_ORDER[index - 1] : null;
 }
 
+export function nextStepId(id: WorkflowStepId): WorkflowStepId | null {
+  const index = STEP_ORDER.indexOf(id);
+  return index >= 0 && index < STEP_ORDER.length - 1 ? STEP_ORDER[index + 1] : null;
+}
