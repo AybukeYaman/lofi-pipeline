@@ -458,7 +458,7 @@ export async function updateProjectAngles(
 
 export async function saveTrackOrder(
   id: string,
-  payload: { mode: 'alphabetical' } | { mode: 'manual'; order: string[] },
+  payload: { mode: 'alphabetical' | 'added' } | { mode: 'manual'; order: string[] },
 ): Promise<ProjectDetail> {
   return sendJson<ProjectDetail>('PUT', projectUrl(id, 'order'), payload, 'Track order could not be saved.');
 }

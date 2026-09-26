@@ -10,7 +10,7 @@
  */
 
 import { readdir, stat } from 'node:fs/promises';
-import { isAbsolute, join, resolve } from 'node:path';
+import { basename, isAbsolute, join, resolve } from 'node:path';
 
 import { CONFIG_DEFAULTS } from '../core/config.js';
 import { AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, isImagePath, listFiles } from '../core/files.js';
@@ -248,6 +248,32 @@ export function canonicalWorkflow(s) {
 
 function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Müzik klasöründeki parçaların eklenme sırası (8. adım "Eklediğim sıra").
+ * Kayıtlı olanlar (`workflow.audioAdded`) kayıt sırasıyla önce; kaydı olmayanlar
+ * (ör. Explorer'dan elle konanlar) sonra, oluşturulma zamanına ve ada göre.
+ *
+ * @param {Awaited<ReturnType<typeof inspectProject>>} s
+ * @returns {Promise<string[]>} dosya adları
+ */
+export async function audioAddedOrder(s) {
+  const paths = await filesOrEmpty(s.audioDir, AUDIO_EXTENSIONS);
+  const workflow = s.projectJson.data?.workflow;
+  const recorded = Array.isArray(workflow?.audioAdded) ? workflow.audioAdded : [];
+  const names = paths.map((path) => basename(path));
+
+  const known = recorded.filter((name, i) => names.includes(name) && recorded.indexOf(name) === i);
+  const rest = [];
+  for (const [i, name] of names.entries()) {
+    if (known.includes(name)) continue;
+    const info = await stat(paths[i]).catch(() => null);
+    rest.push({ name, time: info?.birthtimeMs ?? 0 });
+  }
+  // Aynı zamanda oluşanlar klasörün doğal sırasında kalır (sort kararlı).
+  rest.sort((a, b) => a.time - b.time);
+  return [...known, ...rest.map((item) => item.name)];
 }
 
 /**

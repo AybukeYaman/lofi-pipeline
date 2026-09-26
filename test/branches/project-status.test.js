@@ -11,7 +11,8 @@ import { after, before, describe, test } from 'node:test';
 import { runNewVideo } from '../../new-video.js';
 import { setProjectClip } from '../../prep/project-file.js';
 import { loadProject } from '../../core/config.js';
-import { canonicalWorkflow, inspectProject, listProjects, nextStep } from '../../prep/project-status.js';
+import { audioAddedOrder, canonicalWorkflow, inspectProject, listProjects, nextStep } from '../../prep/project-status.js';
+import { recordAudioAdded } from '../../prep/project-file.js';
 import { tempDir } from '../helpers/fixtures.js';
 
 describe('inspectProject — taze projeden montaja', () => {
@@ -208,5 +209,26 @@ describe('tek resim modu — new-video\'dan montaj konfigine', () => {
 
     const [listed] = await listProjects(root.path('videolar'));
     assert.equal(listed.thumbnail, s.thumbnail);
+  });
+});
+
+describe('audioAddedOrder — 8. adım "Eklediğim sıra"', () => {
+  let root;
+  before(async () => { root = await tempDir('added-order'); });
+  after(() => root?.cleanup());
+
+  test('kayıtlılar kayıt sırasıyla, kaydı olmayanlar sonra oluşturulma zamanına göre; silinen kayıt atlanır', async () => {
+    const dir = root.path('p');
+    await mkdir(join(dir, 'audio'), { recursive: true });
+    await writeFile(join(dir, 'project.json'), JSON.stringify({ clip: '', audioDir: './audio' }));
+    for (const name of ['z.mp3', 'y.mp3']) {
+      await writeFile(join(dir, 'audio', name), '');
+      await new Promise((resolveWait) => setTimeout(resolveWait, 30));
+    }
+    await writeFile(join(dir, 'audio', 'm.mp3'), '');
+    await writeFile(join(dir, 'audio', 'a.mp3'), '');
+    await recordAudioAdded(join(dir, 'project.json'), ['m.mp3', 'silindi.mp3', 'a.mp3']);
+
+    assert.deepEqual(await audioAddedOrder(await inspectProject(dir)), ['m.mp3', 'a.mp3', 'z.mp3', 'y.mp3']);
   });
 });

@@ -1010,6 +1010,13 @@ describe('canonical akış — 10 adım, diskten kaldığı yer', () => {
     const alpha = await updateTrackOrder('flow', { mode: 'alphabetical' }, options());
     assert.deepEqual(alpha.projectJson.data.order, ['a-song.mp3', 'b-song.mp3']);
 
+    // Yükleme sırası (b, a) kaydedildi; "Eklediğim sıra" onu kullanır.
+    assert.deepEqual(alpha.projectJson.data.workflow.audioAdded, ['b-song.mp3', 'a-song.mp3']);
+    const added = await updateTrackOrder('flow', { mode: 'added' }, options());
+    assert.deepEqual(added.projectJson.data.order, ['b-song.mp3', 'a-song.mp3']);
+    assert.equal(added.projectJson.data.workflow.order, 'added');
+    await assert.rejects(updateTrackOrder('flow', { mode: 'random' }, options()), (error) => error.status === 400);
+
     await mkdir(join(videosDir, 'flow', 'out'), { recursive: true });
     await writeFile(join(videosDir, 'flow', 'out', 'final_ambient.mp4'), 'x');
     const published = await getProject('flow', options());

@@ -63,6 +63,29 @@ export async function completeMusicByUser(projectPath, musicData) {
 }
 
 /**
+ * Müzik klasörüne eklenen dosyaları eklenme sırasıyla `workflow.audioAdded`'a
+ * yazar (8. adım "Eklediğim sıra"). Dosya tarihleri bunun yerine geçmez:
+ * albümden kopyalanan parçalar aynı saniyede ve alfabetik sırayla oluşur.
+ * Yeniden eklenen ad listenin sonuna taşınır. Build bu alanı okumaz.
+ *
+ * @param {string} projectPath
+ * @param {string[]} names dosya adları (klasörsüz), eklenme sırasıyla
+ * @returns {Promise<string[]>} güncel liste
+ */
+export async function recordAudioAdded(projectPath, names) {
+  if (names.length === 0) return [];
+  const json = await readProjectObject(projectPath);
+  const workflow = json.workflow !== null && typeof json.workflow === 'object' && !Array.isArray(json.workflow)
+    ? json.workflow
+    : {};
+  const previous = Array.isArray(workflow.audioAdded) ? workflow.audioAdded.filter((n) => typeof n === 'string') : [];
+  const audioAdded = [...previous.filter((n) => !names.includes(n)), ...names];
+  json.workflow = { ...workflow, audioAdded };
+  await writeTextFile(projectPath, JSON.stringify(json, null, 2) + '\n');
+  return audioAdded;
+}
+
+/**
  * project.json'daki her hangi bir alanı yazar.
  *
  * @param {string} projectPath

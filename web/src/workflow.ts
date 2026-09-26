@@ -60,7 +60,7 @@ export const STEP_GUIDE: Record<WorkflowStepId, { who: 'user' | 'system'; lines:
   },
   order: {
     who: 'user',
-    lines: ['Sırayı kendin mi belirleyeceksin, alfabetik mi?'],
+    lines: ['Parçalar eklediğin sırayla mı, kendi belirleyeceğin sırayla mı, alfabetik mi dizilsin?'],
   },
   build: {
     who: 'system',

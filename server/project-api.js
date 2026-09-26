@@ -22,11 +22,12 @@ import { NewVideoError, runNewVideo } from '../new-video.js';
 import { AmbientError, DEFAULT_AMBIENT_DIR, listAmbients } from '../prep/ambients.js';
 import { GeminiError, getApiKey, loadEnv } from '../prep/gemini.js';
 import {
-  DEFAULT_CROP_BOTTOM, ProjectFileError, completeMusicByUser, cropForWatermark, setProjectClip, setProjectCrop, setProjectCropBottom,
-  setProjectField,
+  DEFAULT_CROP_BOTTOM, ProjectFileError, completeMusicByUser, cropForWatermark, recordAudioAdded, setProjectClip, setProjectCrop,
+  setProjectCropBottom, setProjectField,
 } from '../prep/project-file.js';
 import {
-  ANGLE_PATTERN, MASTER_PATTERN, SCENE_REF_PATTERN, canonicalWorkflow, inspectProject, isMusicCompleted, listProjects, nextStep,
+  ANGLE_PATTERN, MASTER_PATTERN, SCENE_REF_PATTERN, audioAddedOrder, canonicalWorkflow, inspectProject, isMusicCompleted,
+  listProjects, nextStep,
 } from '../prep/project-status.js';
 import {
   ProjectStyleError, StyleGenerationError, generateProjectStyle, projectPromptStyle,
@@ -41,6 +42,8 @@ import { REPO_ROOT } from './build-jobs.js';
 /** Albümdeki parça sayısı sınırı — music-planner ile aynı aralık. */
 const MAX_TRACKS = 50;
 const MAX_CONCEPT_LENGTH = 300;
+/** 8. adım sıralama yöntemleri — project.json `workflow.order`. */
+const TRACK_ORDER_MODES = ['alphabetical', 'added', 'manual'];
 /**
  * Önizlenebilen asset türleri: projedeki izinli dosyalar (inspectProject'ten)
  * ve türün sunabileceği MIME ailesi (ör. MASTER.txt master olarak sunulmaz).
@@ -846,6 +849,8 @@ export async function getMusic(id, { videosDir = DEFAULT_VIDEOS_DIR, probeFn = p
     },
     tracks,
     audioFiles,
+    /** 8. adım "Eklediğim sıra" — dosya adları. */
+    addedOrder: await audioAddedOrder(status),
   };
 }
 
@@ -1545,6 +1550,7 @@ export async function uploadProjectAudio(id, body, { videosDir = DEFAULT_VIDEOS_
   await mkdir(status.audioDir, { recursive: true });
   if (!(await realPathInside(projectDir, status.audioDir))) throw outside;
   await writeFile(join(status.audioDir, name), buffer);
+  await recordAudioAdded(status.projectPath, [name]);
   return getProject(id, { videosDir });
 }
 
@@ -1578,15 +1584,16 @@ export async function updateWorkflow(id, body, { videosDir = DEFAULT_VIDEOS_DIR 
 /**
  * Adım 8 → project.json `order` (build.js'in okuduğu alan) ve
  * `workflow.order` (seçilen yöntem). Alfabetik: audioDir'in doğal sırası
- * (build'in sırasız düşüşüyle aynı listFiles sırası).
+ * (build'in sırasız düşüşüyle aynı listFiles sırası). Eklediğim sıra:
+ * audioAddedOrder (kayıtlı eklenme sırası, yoksa oluşturulma zamanı).
  *
- * @param {unknown} body `{ mode: 'alphabetical'|'manual', order?: string[] }`
+ * @param {unknown} body `{ mode: 'alphabetical'|'added'|'manual', order?: string[] }`
  */
 export async function updateTrackOrder(id, body, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
   const projectDir = await resolveProjectDir(id, videosDir);
   const { mode, order } = parseBody(body ?? {}, { mode: 'string', order: 'object' }, ['mode']);
-  if (mode !== 'alphabetical' && mode !== 'manual') {
-    throw new ApiError(400, 'mode must be alphabetical or manual');
+  if (!TRACK_ORDER_MODES.includes(mode)) {
+    throw new ApiError(400, `mode must be one of: ${TRACK_ORDER_MODES.join(', ')}`);
   }
 
   const status = await inspectProject(projectDir);
@@ -1599,7 +1606,9 @@ export async function updateTrackOrder(id, body, { videosDir = DEFAULT_VIDEOS_DI
   }
 
   let names = files;
-  if (mode === 'manual') {
+  if (mode === 'added') {
+    names = await audioAddedOrder(status);
+  } else if (mode === 'manual') {
     const valid = Array.isArray(order)
       && order.length === files.length
       && new Set(order).size === order.length

@@ -15,7 +15,7 @@ import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'nod
 import { AUDIO_EXTENSIONS, listFiles, uniqueFileName } from '../core/files.js';
 import { probe } from '../core/probe.js';
 import { inspectProject, listProjects } from '../prep/project-status.js';
-import { setProjectField } from '../prep/project-file.js';
+import { recordAudioAdded, setProjectField } from '../prep/project-file.js';
 import { DEFAULT_VIDEOS_DIR } from '../prep/scaffold.js';
 import { SunoIngestError } from '../prep/suno-errors.js';
 import { ingestSunoUrl, sanitizeFilename } from '../prep/suno-ingest.js';
@@ -421,6 +421,11 @@ export async function assignAlbumToProject(body, {
   if (selectedPaths.length === 0) {
     throw new ApiError(422, 'No audio files found in album to assign');
   }
+  // Albüme eklenme sırasıyla kopyala (yükleme/indirme yeni dosya yazar, oluşturulma
+  // zamanı güvenilir); aynı andakiler klasörün doğal sırasında kalır.
+  const addedAt = new Map();
+  for (const path of selectedPaths) addedAt.set(path, (await stat(path).catch(() => null))?.birthtimeMs ?? 0);
+  selectedPaths.sort((a, b) => addedAt.get(a) - addedAt.get(b));
 
   await mkdir(status.audioDir, { recursive: true });
   const copiedFiles = [];
@@ -432,6 +437,7 @@ export async function assignAlbumToProject(body, {
     await copyFile(srcPath, destPath);
     copiedFiles.push(destName);
   }
+  await recordAudioAdded(status.projectPath, copiedFiles);
 
   // Update project.json music tracks if music plan exists
   const musicData = status.projectJson.data?.music;

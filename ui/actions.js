@@ -10,9 +10,10 @@ import {
 } from '../prep/download-watch.js';
 import { AmbientError, listAmbients } from '../prep/ambients.js';
 import {
-  ProjectFileError, completeMusicByUser, cropForWatermark, setProjectClip, setProjectCropBottom, setProjectField,
+  ProjectFileError, completeMusicByUser, cropForWatermark, recordAudioAdded, setProjectClip, setProjectCropBottom,
+  setProjectField,
 } from '../prep/project-file.js';
-import { inspectProject, isMusicCompleted, listProjects, nextStep } from '../prep/project-status.js';
+import { audioAddedOrder, inspectProject, isMusicCompleted, listProjects, nextStep } from '../prep/project-status.js';
 import { generateProjectStyle, projectPromptStyle } from '../prep/project-style.js';
 import { getPhasePrompts } from '../prep/prompts.js';
 import { validateVideoName } from '../prep/scaffold.js';
@@ -743,6 +744,7 @@ export async function stepMusic(ctx, dir, status, { pollMs = 50 } = {}) {
             prompter.print('\x1b[36m[🌐 Suno İndirme Başlatılıyor...]\x1b[0m Metadata ve MP3 çekiliyor...');
             try {
               const ingestResult = await ingestSunoUrl({ url: sunoUrl, outputDir: status.audioDir });
+              await recordAudioAdded(status.projectPath, ingestResult.tracks.map((t) => basename(t.localPath)));
               if (ingestResult.tracks.length > 0) {
                 const pendingTracks = musicData.tracks.filter((t) => t.status === 'pending');
                 const count = Math.min(ingestResult.tracks.length, pendingTracks.length);
@@ -947,6 +949,7 @@ export async function stepOrdering(ctx, dir, status) {
 
   const choice = await prompter.choose('Sıralama Tercihi — Ne yapmak istersiniz?', [
     { label: '✓ [ Mevcut Sırayı Onayla ] - Dosya isimlerindeki mevcut sırayı koru', value: 'keep' },
+    { label: '📥 [ Eklediğim Sıra ] - Parçaları klasöre eklediğim sırayla diz', value: 'added' },
     { label: '🔤 [ Alfabetik Sırala ] - Parçaları A\'dan Z\'ye alfabetik sırala', value: 'alphabetical' },
     { label: '📝 [ Elle Sıralama ] - Sıra numaralarını tek tek belirle', value: 'manual' },
     { label: '🏠 Ana Menüye Dön', value: 'menu' },
@@ -956,7 +959,9 @@ export async function stepOrdering(ctx, dir, status) {
 
   let orderList = [...baseNames];
 
-  if (choice === 'alphabetical') {
+  if (choice === 'added') {
+    orderList = await audioAddedOrder(status);
+  } else if (choice === 'alphabetical') {
     const confirmAlpha = await prompter.confirm('⚠️ Uyarı: Albüm sırası alfabetik olmayabilir. Alfabetik sıralansın mı?', { defaultValue: true });
     if (!confirmAlpha) return 'menu';
     orderList.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
@@ -1435,6 +1440,7 @@ async function autoWatchMusic(ctx, { status, musicData, recentMinutes, pollMs })
           continue;
         }
         knownAudio.add(file);
+        await recordAudioAdded(status.projectPath, [file]);
         await markTrackCompleted(ctx, { status, musicData, track, file });
         refreshHint();
         completed++;
@@ -1446,6 +1452,7 @@ async function autoWatchMusic(ctx, { status, musicData, recentMinutes, pollMs })
         const track = nextPending();
         if (!track) break;
         knownAudio.add(file);
+        await recordAudioAdded(status.projectPath, [file]);
         await markTrackCompleted(ctx, { status, musicData, track, file });
         refreshHint();
         completed++;

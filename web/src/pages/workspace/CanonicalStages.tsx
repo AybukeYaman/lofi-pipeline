@@ -12,7 +12,7 @@ import {
 import { AssetPreview } from '../../components/AssetPreview';
 import { EmptyState } from '../../components/Feedback';
 import { IMAGE_ACCEPT } from '../../imageTypes';
-import type { ProjectMusicInfo } from '../../types';
+import type { ProjectMusicInfo, TrackOrderMode } from '../../types';
 import { ambientFiles, fileName, styleName } from './assetState';
 import { StagePanel, type StageProps } from './StageSections';
 import { CopyPrompt, errorText, UploadButton } from './StepWidgets';
@@ -211,7 +211,7 @@ export function OrderStage({ project, stageStatus, onProjectUpdate }: StageProps
   const [music, setMusic] = useState<ProjectMusicInfo | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [order, setOrder] = useState<string[]>([]);
-  const [mode, setMode] = useState<'alphabetical' | 'manual'>(project.projectJson?.data?.workflow?.order ?? 'alphabetical');
+  const [mode, setMode] = useState<TrackOrderMode>(project.projectJson?.data?.workflow?.order ?? 'alphabetical');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -223,8 +223,8 @@ export function OrderStage({ project, stageStatus, onProjectUpdate }: StageProps
       .then((info) => {
         if (!active) return;
         setMusic(info);
-        const files = info.audioFiles.map((audio) => audio.file);
-        // Kayıtlı sıra varsa onu göster; yeni eklenen dosyalar sona.
+        // Elle sıralama eklenme sırasından başlar; kayıtlı sıra varsa o, yeni dosyalar sona.
+        const files = info.addedOrder ?? info.audioFiles.map((audio) => audio.file);
         const saved = (savedOrder ?? []).filter((name) => files.includes(name));
         setOrder([...saved, ...files.filter((name) => !saved.includes(name))]);
         setLoadError(null);
@@ -248,7 +248,8 @@ export function OrderStage({ project, stageStatus, onProjectUpdate }: StageProps
   };
 
   const alphabetical = music ? music.audioFiles.map((audio) => audio.file) : [];
-  const shown = mode === 'alphabetical' ? alphabetical : order;
+  const added = music?.addedOrder ?? alphabetical;
+  const shown = mode === 'alphabetical' ? alphabetical : mode === 'added' ? added : order;
 
   const save = async () => {
     setSaving(true);
@@ -257,10 +258,10 @@ export function OrderStage({ project, stageStatus, onProjectUpdate }: StageProps
     try {
       const updated = await saveTrackOrder(
         project.id,
-        mode === 'alphabetical' ? { mode } : { mode, order },
+        mode === 'manual' ? { mode, order } : { mode },
       );
       onProjectUpdate?.(updated);
-      setSuccess(mode === 'alphabetical' ? 'Alfabetik sıra kaydedildi.' : 'Senin belirlediğin sıra kaydedildi.');
+      setSuccess(ORDER_SAVED_MESSAGES[mode]);
     } catch (err: unknown) {
       setError(errorText(err, 'Sıralama kaydedilemedi.'));
     } finally {
@@ -284,6 +285,10 @@ export function OrderStage({ project, stageStatus, onProjectUpdate }: StageProps
         </p>
       ) : null}
       <div className="choice-row" role="radiogroup" aria-label="Sıralama yöntemi">
+        <label className={mode === 'added' ? 'option selected' : 'option'}>
+          <input type="radio" checked={mode === 'added'} onChange={() => setMode('added')} />
+          <span>Eklediğim sıra</span>
+        </label>
         <label className={mode === 'manual' ? 'option selected' : 'option'}>
           <input type="radio" checked={mode === 'manual'} onChange={() => setMode('manual')} />
           <span>Kendim belirleyeceğim</span>
@@ -335,6 +340,12 @@ export function OrderStage({ project, stageStatus, onProjectUpdate }: StageProps
     </StagePanel>
   );
 }
+
+const ORDER_SAVED_MESSAGES: Record<TrackOrderMode, string> = {
+  alphabetical: 'Alfabetik sıra kaydedildi.',
+  added: 'Eklediğin sıra kaydedildi.',
+  manual: 'Senin belirlediğin sıra kaydedildi.',
+};
 
 function formatDuration(seconds: number | null | undefined) {
   if (seconds === null || seconds === undefined) return '';

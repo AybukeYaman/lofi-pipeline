@@ -9,7 +9,7 @@ import { after, before, describe, test } from 'node:test';
 
 import { loadProject } from '../../core/config.js';
 import {
-  DEFAULT_CROP_BOTTOM, ProjectFileError, cropForWatermark, setProjectClip, setProjectCropBottom,
+  DEFAULT_CROP_BOTTOM, ProjectFileError, cropForWatermark, recordAudioAdded, setProjectClip, setProjectCropBottom,
 } from '../../prep/project-file.js';
 import { tempDir } from '../helpers/fixtures.js';
 
@@ -134,5 +134,22 @@ describe('watermark kırpması', () => {
     await writeFile(projectPath, '{"video": "x"}');
     await assert.rejects(setProjectCropBottom(projectPath, 0), /"video" bir nesne/);
     assert.equal(await readFile(projectPath, 'utf8'), '{"video": "x"}');
+  });
+});
+
+describe('recordAudioAdded', () => {
+  let root;
+  before(async () => { root = await tempDir('audio-added'); });
+  after(() => root?.cleanup());
+
+  test('eklenme sırası workflow.audioAdded\'a yazılır; yeniden eklenen sona taşınır, diğer alanlar korunur', async () => {
+    const projectPath = root.path('project.json');
+    await writeFile(projectPath, JSON.stringify({ clip: '', workflow: { order: 'manual' } }));
+    assert.deepEqual(await recordAudioAdded(projectPath, ['b.mp3', 'a.mp3']), ['b.mp3', 'a.mp3']);
+    assert.deepEqual(await recordAudioAdded(projectPath, ['c.mp3', 'b.mp3']), ['a.mp3', 'c.mp3', 'b.mp3']);
+    const json = JSON.parse(await readFile(projectPath, 'utf8'));
+    assert.deepEqual(json.workflow, { order: 'manual', audioAdded: ['a.mp3', 'c.mp3', 'b.mp3'] });
+    assert.equal(json.clip, '');
+    assert.deepEqual(await recordAudioAdded(projectPath, []), []);
   });
 });

@@ -85,7 +85,7 @@ export type ProjectJsonState = {
     order?: string[];
     workflow?: {
       angles?: { wanted: boolean; count?: number };
-      order?: 'alphabetical' | 'manual';
+      order?: TrackOrderMode;
     };
   };
   error?: string | null;
@@ -194,7 +194,12 @@ export type ProjectMusicInfo = {
   ready: boolean;
   audioDir: string;
   audioFiles: ProjectMusicAudio[];
+  /** Parçaların klasöre eklenme sırası (dosya adları). */
+  addedOrder?: string[];
 };
+
+/** 8. adım sıralama yöntemi — project.json workflow.order. */
+export type TrackOrderMode = 'alphabetical' | 'added' | 'manual';
 
 export type ImageSlot = 'scene' | 'master' | 'angle';
 

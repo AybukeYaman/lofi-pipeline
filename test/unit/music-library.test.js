@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { once } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -173,8 +173,10 @@ describe('music-library API & Suno ingest', () => {
     const fixture = await createLibraryFixture();
     try {
       await createAlbum({ name: 'Synth-Wave' }, { musicDir: fixture.musicDir });
-      await writeFile(join(fixture.musicDir, 'Synth-Wave', 'track-a.mp3'), Buffer.from('audio a'));
+      // Albüme önce b, sonra a eklendi: kopyalama ve kayıt bu sırayla.
       await writeFile(join(fixture.musicDir, 'Synth-Wave', 'track-b.mp3'), Buffer.from('audio b'));
+      await new Promise((resolveWait) => setTimeout(resolveWait, 30));
+      await writeFile(join(fixture.musicDir, 'Synth-Wave', 'track-a.mp3'), Buffer.from('audio a'));
 
       const assignRes = await assignAlbumToProject({
         albumId: 'Synth-Wave',
@@ -186,6 +188,9 @@ describe('music-library API & Suno ingest', () => {
 
       assert.equal(assignRes.ok, true);
       assert.equal(assignRes.copiedCount, 2);
+      assert.deepEqual(assignRes.copiedFiles, ['track-b.mp3', 'track-a.mp3']);
+      const project = JSON.parse(await readFile(join(fixture.videosDir, fixture.projectName, 'project.json'), 'utf8'));
+      assert.deepEqual(project.workflow.audioAdded, ['track-b.mp3', 'track-a.mp3']);
     } finally {
       await fixture.cleanup();
     }
