@@ -330,11 +330,11 @@ export function NewProject({
 
         <fieldset className="field">
           <legend>Video visual</legend>
-          <div className="option-list option-grid" role="radiogroup">
+          <div className="option-list option-card-list" role="radiogroup">
             {VIDEO_SOURCE_OPTIONS.map((option) => {
               const isSelected = videoSource === option.id;
               return (
-                <label key={option.id} className={isSelected ? 'option selected' : 'option'}>
+                <label key={option.id} className={isSelected ? 'option option-card selected' : 'option option-card'}>
                   <input
                     type="radio"
                     name="video-source"
@@ -343,8 +343,10 @@ export function NewProject({
                     onChange={() => edit(setVideoSource)(option.id)}
                     disabled={isSubmitting}
                   />
-                  <span>{option.name}</span>
-                  <span className="muted">{option.description}</span>
+                  <span className="option-card-text">
+                    <span className="option-card-title">{option.name}</span>
+                    <span className="option-card-description">{option.description}</span>
+                  </span>
                 </label>
               );
             })}
