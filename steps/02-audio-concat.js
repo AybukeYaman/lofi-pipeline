@@ -273,7 +273,8 @@ export function normalizeBranch(index, input) {
 
 /**
  * items'ı en çok `limit` eşzamanlı işle eşler; sonuç sırası girdi sırasıdır.
- * İlk hata hepsini düşürür (Promise.all gibi).
+ * İlk hatada yeni iş başlatılmaz, süren işler (ffmpeg süreçleri dosyaları açık
+ * tutuyor) bitene kadar beklenir, sonra ilk hata fırlatılır.
  *
  * @template T, R
  * @param {T[]} items
@@ -284,13 +285,19 @@ export function normalizeBranch(index, input) {
 async function mapLimited(items, limit, fn) {
   const results = new Array(items.length);
   let next = 0;
+  let failure = null;
   const worker = async () => {
-    while (next < items.length) {
+    while (failure === null && next < items.length) {
       const i = next++;
-      results[i] = await fn(items[i]);
+      try {
+        results[i] = await fn(items[i]);
+      } catch (error) {
+        failure ??= { error };
+      }
     }
   };
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  if (failure) throw failure.error;
   return results;
 }
 
