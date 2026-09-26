@@ -37,6 +37,18 @@ const DEFAULTS = {
 
 const NOOP_LOGGER = { info() {}, warn() {} };
 
+/**
+ * Klip video değil: süresi olmayan tek kare (uzantısı .mp4 yapılmış görsel).
+ * Ayrı tür, çünkü çözümü kullanıcıda: başka bir klip seçmesi gerekiyor.
+ */
+export class ClipNotVideoError extends Error {
+  /** @param {string} message */
+  constructor(message) {
+    super(message);
+    this.name = 'ClipNotVideoError';
+  }
+}
+
 export class CropNotConfirmedError extends Error {
   /** @param {string} framePath */
   constructor(framePath) {
@@ -227,6 +239,17 @@ export async function prepareVideo(options) {
   if (!source.hasVideo) {
     throw new Error(`Video akışı yok: ${clipPath}`);
   }
+  // Süresiz girdi = tek kare (uzantısı .mp4 yapılmış JPEG/PNG gibi). ffprobe
+  // buna hasVideo=true der, prep de sorunsuz kodlar — hata ancak montajda
+  // görülür: tek keyframe müzik boyunca on binlerce kez kopyalanır ve disk
+  // kontrolü 40 dakikalık video için ~50 GB ister. Girişte kes.
+  if (!(source.duration > 0)) {
+    throw new ClipNotVideoError(
+      `Klibin süresi yok (${source.formatName}/${source.videoCodec}, tek kare): ${clipPath}\n` +
+      'Bu bir video değil — uzantısı .mp4 yapılmış bir görsel olabilir. ' +
+      'videolar/ klasöründen gerçek bir video klip seç.',
+    );
+  }
 
   const topCrop = Number.isSafeInteger(cropTop) && cropTop > 0 ? cropTop : 0;
   const bottomCrop = Number.isSafeInteger(cropBottom) && cropBottom > 0 ? cropBottom : 0;
@@ -319,9 +342,11 @@ export async function prepareVideo(options) {
 
   await ffmpeg([
     '-i', clipPath,
+    // Kırpma yoksa, en-boy adımı atlandıysa ve ölçek verilmediyse zincir boş kalır:
+    // ffmpeg boş -vf'i "No filters specified in the graph description" ile reddeder.
     ...(crossfade
       ? ['-filter_complex', buildCrossfadeFilter(crossfade, filters)]
-      : ['-vf', filters.join(',')]),
+      : (filters.length > 0 ? ['-vf', filters.join(',')] : [])),
     '-an',                       // Hailuo'nun 32 kHz sesi kullanılmıyor
     '-c:v', 'libx264',
     '-crf', String(crf),
@@ -566,7 +591,7 @@ function buildCrossfadeFilter(plan, filters) {
 
   return (
     // format=yuv420p: xfade'e biçimi seçtirilirse RGB/yuv444'e çevirip renk kaydırıyor.
-    `[0:v]${filters.join(',')},format=yuv420p,split[a][b];` +
+    `[0:v]${filters.length > 0 ? `${filters.join(',')},` : ''}format=yuv420p,split[a][b];` +
     `[a]trim=start_frame=${fadeFrames}:end_frame=${sourceFrames},setpts=PTS-STARTPTS[body];` +
     `[b]trim=start_frame=0:end_frame=${fadeFrames},setpts=PTS-STARTPTS[head];` +
     `[body][head]xfade=transition=fade:duration=${blendSeconds}:offset=${offsetSeconds}`
