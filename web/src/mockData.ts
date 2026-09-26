@@ -9,7 +9,6 @@ export type LibraryStyle = {
   name: string;
   description: string;
   palette: string[];
-  suggestedAmbient: string[];
   refUrl?: string | null;
   refUrls?: string[];
   references?: { name: string; url: string }[];
@@ -30,28 +29,24 @@ export const sampleStyles: LibraryStyle[] = [
     name: 'Anime Cel',
     description: 'Flat cel shading, soft evening light, quiet city windows.',
     palette: ['#2f3a56', '#c98b6b', '#f1d9b5'],
-    suggestedAmbient: ['gentleRain'],
   },
   {
     id: 'cozy-realistic',
     name: 'Cozy Realistic',
     description: 'Warm interior light, shallow depth of field, lived-in rooms.',
     palette: ['#3b2f28', '#a8764f', '#e8d4b8'],
-    suggestedAmbient: ['campfire'],
   },
   {
     id: 'watercolor',
     name: 'Watercolor',
     description: 'Soft washes, paper texture, muted pastel tones.',
     palette: ['#5d7485', '#b9a5c4', '#efe6d8'],
-    suggestedAmbient: ['heavyRain'],
   },
   {
     id: 'custom-generated',
     name: 'Custom (from references)',
     description: 'Style block generated from your own reference images.',
     palette: ['#44403a', '#8f8678', '#d9d2c6'],
-    suggestedAmbient: [],
   },
 ];
 

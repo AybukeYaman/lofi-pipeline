@@ -13,7 +13,7 @@ import { LayoutSwitcher, useCardLayout } from '../components/LayoutSwitcher';
 import { PageHeader } from '../components/PageHeader';
 import { ReferencePicker, type ReferenceDraft } from '../components/ReferencePicker';
 import { StatusBadge } from '../components/StatusBadge';
-import { sampleAmbients, sampleStyles, type LibraryStyle } from '../mockData';
+import { sampleStyles, type LibraryStyle } from '../mockData';
 import { showError, showSuccess, showInfo, showWarning } from '../toast';
 import type { BackendStyle, LoadState, StyleBlock, StyleMusic, StylePaletteColor } from '../types';
 import { matchesQuery } from './libraryFilter';
@@ -53,12 +53,6 @@ function extractDescription(s: BackendStyle): string {
   }
   const sample = sampleStyles.find((item) => item.id === s.name);
   return sample?.description || (s.valid ? 'Visual style option.' : 'Invalid style configuration.');
-}
-
-function normalizeAmbient(ambient: string[] | string | null | undefined): string[] {
-  if (Array.isArray(ambient)) return ambient;
-  if (typeof ambient === 'string' && ambient.trim()) return [ambient.trim()];
-  return [];
 }
 
 function slugify(value: string) {
@@ -324,7 +318,6 @@ function StyleCardHeader({
 export function StyleLibrary({ onUseStyle }: { onUseStyle?: (styleId: string) => void }) {
   const [backendStyles, setBackendStyles] = useState<BackendStyle[]>([]);
   const [styles, setStyles] = useState<LibraryStyle[]>(sampleStyles);
-  const [availableAmbients, setAvailableAmbients] = useState<string[]>(sampleAmbients.map((a) => a.name));
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [isBackendConnected, setIsBackendConnected] = useState(false);
   const [query, setQuery] = useState('');
@@ -340,7 +333,6 @@ export function StyleLibrary({ onUseStyle }: { onUseStyle?: (styleId: string) =>
   const [aiName, setAiName] = useState('');
   const [aiConcept, setAiConcept] = useState('');
   const [aiReferences, setAiReferences] = useState<ReferenceDraft[]>([]);
-  const [aiAmbients, setAiAmbients] = useState<string[]>([]);
 
   // Manual Create Form State
   const [manualReferences, setManualReferences] = useState<ReferenceDraft[]>([]);
@@ -357,7 +349,6 @@ export function StyleLibrary({ onUseStyle }: { onUseStyle?: (styleId: string) =>
   const [formContrast, setFormContrast] = useState('');
   const [formShading, setFormShading] = useState('');
   const [formMotionHints, setFormMotionHints] = useState<string[]>([]);
-  const [formAmbient, setFormAmbient] = useState('gentleRain');
 
   // Music DNA Profile Form State
   const [formMusicGenre, setFormMusicGenre] = useState('');
@@ -375,7 +366,6 @@ export function StyleLibrary({ onUseStyle }: { onUseStyle?: (styleId: string) =>
     aiConcept?: string;
     aiReferences?: ReferenceDraft[];
     manualReferences?: ReferenceDraft[];
-    aiAmbients?: string[];
     formName?: string;
     formMedium?: string;
     formLines?: string;
@@ -385,7 +375,6 @@ export function StyleLibrary({ onUseStyle }: { onUseStyle?: (styleId: string) =>
     formContrast?: string;
     formShading?: string;
     formMotionHints?: string[];
-    formAmbient?: string;
     formMusicGenre?: string;
     formMusicProduction?: string;
     formMusicInstruments?: string;
@@ -442,16 +431,9 @@ export function StyleLibrary({ onUseStyle }: { onUseStyle?: (styleId: string) =>
             refUrl: s.refUrl ?? null,
             refUrls: s.refUrls ?? (s.refUrl ? [s.refUrl] : []),
             references: s.references ?? [],
-            suggestedAmbient: normalizeAmbient(s.suggestedAmbient ?? sample?.suggestedAmbient),
           };
         });
         setStyles(loadedStyles);
-      }
-      if (Array.isArray(res.ambients) && res.ambients.length > 0) {
-        setAvailableAmbients(res.ambients.map((a) => a.name));
-        if (res.ambients.length > 0 && !formAmbient) {
-          setFormAmbient(res.ambients[0].name);
-        }
       }
       setIsBackendConnected(true);
       setLoadState('loaded');
@@ -494,7 +476,6 @@ export function StyleLibrary({ onUseStyle }: { onUseStyle?: (styleId: string) =>
           formContrast,
           formShading,
           formMotionHints,
-          formAmbient,
           formMusicGenre,
           formMusicProduction,
           formMusicInstruments,
@@ -519,7 +500,6 @@ export function StyleLibrary({ onUseStyle }: { onUseStyle?: (styleId: string) =>
             aiConcept,
             aiReferences,
             manualReferences,
-            aiAmbients,
             formName,
             formMedium,
             formLines,
@@ -529,7 +509,6 @@ export function StyleLibrary({ onUseStyle }: { onUseStyle?: (styleId: string) =>
             formContrast,
             formShading,
             formMotionHints,
-            formAmbient,
             formMusicGenre,
             formMusicProduction,
             formMusicInstruments,
@@ -571,7 +550,6 @@ export function StyleLibrary({ onUseStyle }: { onUseStyle?: (styleId: string) =>
     setAiConcept('');
     setAiReferences([]);
     setManualReferences([]);
-    setAiAmbients([]);
     setFormName('');
     setFormMedium('2D anime production still: hand-painted digital background art combined with cel-shaded characters and props.');
     setFormLines('Bold, clean, uniform-weight dark outlines; crisp, confident strokes.');
@@ -586,7 +564,6 @@ export function StyleLibrary({ onUseStyle }: { onUseStyle?: (styleId: string) =>
       'hair and clothing edges swaying slightly',
       'steam rising in simple stylized wisps',
     ]);
-    setFormAmbient(availableAmbients[0] || 'gentleRain');
     setFormMusicGenre('lofi hip hop, chillhop');
     setFormMusicProduction('warm tape saturation, vinyl crackle, gentle sidechain');
     setFormMusicInstruments('dusty Rhodes piano, upright bass, brushed drums');
@@ -622,7 +599,6 @@ export function StyleLibrary({ onUseStyle }: { onUseStyle?: (styleId: string) =>
           setAiConcept(draft.aiConcept || '');
           setAiReferences(Array.isArray(draft.aiReferences) ? draft.aiReferences : []);
           setManualReferences(Array.isArray(draft.manualReferences) ? draft.manualReferences : []);
-          setAiAmbients(draft.aiAmbients || []);
           setFormName(draft.formName || '');
           setFormMedium(draft.formMedium || '');
           setFormLines(draft.formLines || '');
@@ -632,7 +608,6 @@ export function StyleLibrary({ onUseStyle }: { onUseStyle?: (styleId: string) =>
           setFormContrast(draft.formContrast || '');
           setFormShading(draft.formShading || '');
           setFormMotionHints(Array.isArray(draft.formMotionHints) ? draft.formMotionHints : []);
-          setFormAmbient(draft.formAmbient || availableAmbients[0] || 'gentleRain');
           setFormMusicGenre(draft.formMusicGenre || '');
           setFormMusicProduction(draft.formMusicProduction || '');
           setFormMusicInstruments(draft.formMusicInstruments || '');
@@ -695,9 +670,6 @@ export function StyleLibrary({ onUseStyle }: { onUseStyle?: (styleId: string) =>
       setFormMotionHints([]);
     }
 
-    const initialAmb = normalizeAmbient(initialDetail?.suggestedAmbient);
-    setFormAmbient(initialAmb[0] || availableAmbients[0] || 'gentleRain');
-
     const initialRefs: ReferenceDraft[] = [];
     if (Array.isArray(initialDetail?.references) && initialDetail.references.length > 0) {
       initialDetail.references.forEach((r, idx) => {
@@ -741,7 +713,6 @@ export function StyleLibrary({ onUseStyle }: { onUseStyle?: (styleId: string) =>
               setFormContrast(draft.formContrast || '');
               setFormShading(draft.formShading || '');
               setFormMotionHints(Array.isArray(draft.formMotionHints) ? draft.formMotionHints : []);
-              setFormAmbient(draft.formAmbient || availableAmbients[0] || 'gentleRain');
               setFormMusicGenre(draft.formMusicGenre || '');
               setFormMusicProduction(draft.formMusicProduction || '');
               setFormMusicInstruments(draft.formMusicInstruments || '');
@@ -790,9 +761,6 @@ export function StyleLibrary({ onUseStyle }: { onUseStyle?: (styleId: string) =>
         } else {
           setFormMotionHints([]);
         }
-
-        const amb = normalizeAmbient(detail?.suggestedAmbient);
-        setFormAmbient(amb[0] || availableAmbients[0] || 'gentleRain');
 
         // Referansları yalnızca kullanıcı henüz eklemediyse güncelle
         // (setEditReferences ilk yükleme sırasında zaten dolduruldu)
@@ -920,9 +888,6 @@ export function StyleLibrary({ onUseStyle }: { onUseStyle?: (styleId: string) =>
         setFormMotionHints(updatedStyle.motionHints);
       }
 
-      const newAmb = normalizeAmbient(updatedStyle?.suggestedAmbient);
-      if (newAmb[0]) setFormAmbient(newAmb[0]);
-
       // 4. Güncellenmiş referansları forma yükle
       if (Array.isArray(updatedStyle?.references) && updatedStyle.references.length > 0) {
         setEditReferences(
@@ -1011,7 +976,6 @@ export function StyleLibrary({ onUseStyle }: { onUseStyle?: (styleId: string) =>
         name: styleId,
         concept: aiConcept.trim() || undefined,
         referenceImages: aiReferences.map((r) => ({ name: r.name, data: r.data })),
-        suggestedAmbient: aiAmbients.length > 0 ? aiAmbients : undefined,
       };
 
       await createLibraryStyleApi(payload);
@@ -1143,7 +1107,6 @@ export function StyleLibrary({ onUseStyle }: { onUseStyle?: (styleId: string) =>
     const payload = {
       name: styleId,
       styleBlock,
-      suggestedAmbient: formAmbient,
       motionHints: cleanHints,
       music,
       referenceImages: resolvedRefImages,
@@ -1386,32 +1349,6 @@ export function StyleLibrary({ onUseStyle }: { onUseStyle?: (styleId: string) =>
                 />
               </fieldset>
 
-              {availableAmbients.length > 0 ? (
-                <fieldset className="field">
-                  <legend>Suggested Ambient Tracks</legend>
-                  <div className="option-list option-grid">
-                    {availableAmbients.map((ambient) => {
-                      const isChecked = aiAmbients.includes(ambient);
-                      return (
-                        <label key={ambient} className={isChecked ? 'option selected' : 'option'}>
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={() =>
-                              setAiAmbients((prev) =>
-                                prev.includes(ambient) ? prev.filter((a) => a !== ambient) : [...prev, ambient],
-                              )
-                            }
-                            disabled={isSaving}
-                          />
-                          <span>{ambient}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </fieldset>
-              ) : null}
-
               <div className="form-actions" style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
                 <button className="button button-primary" type="submit" disabled={isSaving}>
                   {isSaving ? '✨ Generating Image Style with Gemini...' : '✨ Create Image Style'}
@@ -1564,17 +1501,6 @@ export function StyleLibrary({ onUseStyle }: { onUseStyle?: (styleId: string) =>
                 </div>
               </fieldset>
 
-              <div className="field" style={{ marginTop: 10 }}>
-                <label htmlFor="form-ambient">Suggested Ambient Track</label>
-                <select id="form-ambient" value={formAmbient} onChange={(e) => setFormAmbient(e.target.value)}>
-                  {availableAmbients.map((amb) => (
-                    <option key={amb} value={amb}>
-                      {amb}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
               {/* Music Profile DNA (Optional) */}
               <details style={{ marginTop: 14, background: 'var(--bg-surface-subtle)', padding: '12px 14px', borderRadius: 8 }}>
                 <summary style={{ fontWeight: 600, cursor: 'pointer' }}>🎵 Optional Music DNA Integration</summary>
@@ -1619,7 +1545,7 @@ export function StyleLibrary({ onUseStyle }: { onUseStyle?: (styleId: string) =>
             <div>
               <h2 style={{ margin: 0, fontSize: 18 }}>✏️ Edit Image Style: <code>{editingStyleName}</code></h2>
               <p className="field-hint" style={{ margin: '4px 0 0' }}>
-                Update the visual parameters, color palette, motion hints, and ambient settings.
+                Update the visual parameters, color palette and motion hints.
               </p>
             </div>
             <button
@@ -1843,17 +1769,6 @@ export function StyleLibrary({ onUseStyle }: { onUseStyle?: (styleId: string) =>
                 ))}
               </div>
             </fieldset>
-
-            <div className="field" style={{ marginTop: 10 }}>
-              <label htmlFor="edit-ambient">Suggested Ambient Track</label>
-              <select id="edit-ambient" value={formAmbient} onChange={(e) => setFormAmbient(e.target.value)}>
-                {availableAmbients.map((amb) => (
-                  <option key={amb} value={amb}>
-                    {amb}
-                  </option>
-                ))}
-              </select>
-            </div>
 
             {/* Music Profile */}
             <details style={{ marginTop: 14, background: 'var(--bg-surface-subtle)', padding: '12px 14px', borderRadius: 8 }}>
@@ -2092,11 +2007,6 @@ export function StyleLibrary({ onUseStyle }: { onUseStyle?: (styleId: string) =>
                   </div>
                   <code>{style.id}</code>
                   <p style={{ margin: '8px 0', flex: 1, fontSize: 13, color: 'var(--text-muted)' }}>{style.description}</p>
-                  {style.suggestedAmbient.length > 0 ? (
-                    <p className="muted" style={{ fontSize: 12, margin: '4px 0 10px' }}>
-                      <strong>Ambient:</strong> {style.suggestedAmbient.join(', ')}
-                    </p>
-                  ) : null}
 
                   {/* Actions footer on each card */}
                   <div

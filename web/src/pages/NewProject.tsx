@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 
 import { assignAlbumToProject, createProject, fetchLibrary, fetchMusicLibrary, fetchProjects, ApiError } from '../api';
 import { PageHeader } from '../components/PageHeader';
-import { sampleAmbients, sampleStyles } from '../mockData';
+import { sampleStyles } from '../mockData';
 import { showError, showSuccess } from '../toast';
 import type { LoadState } from '../types';
 
@@ -11,7 +11,6 @@ type FormErrors = Partial<Record<'name' | 'style' | 'form', string>>;
 const INVALID_NAME_CHARS = /[<>:"/\\|?* - ]/;
 
 type StyleOption = { id: string; name: string; description: string };
-type AmbientOption = { id: string; name: string; category: string };
 
 const PROJECT_DRAFT_KEY = 'lofi_new_project_draft';
 
@@ -31,7 +30,6 @@ export function NewProject({
     const params = new URLSearchParams(window.location.search);
     return params.get('style') || '';
   });
-  const [ambients, setAmbients] = useState<string[]>([]);
   const [errors, setErrors] = useState<FormErrors>({});
   const [existingNames, setExistingNames] = useState<string[]>([]);
   const [namesState, setNamesState] = useState<LoadState>('loading');
@@ -40,7 +38,6 @@ export function NewProject({
   const [restoredDraftTime, setRestoredDraftTime] = useState<string | null>(null);
 
   const [availableStyles, setAvailableStyles] = useState<StyleOption[]>(sampleStyles);
-  const [availableAmbients, setAvailableAmbients] = useState<AmbientOption[]>(sampleAmbients);
   const [availableAlbums, setAvailableAlbums] = useState<Array<{ id: string; name: string; trackCount: number }>>([]);
   const [selectedAlbumId, setSelectedAlbumId] = useState<string>('');
 
@@ -53,7 +50,6 @@ export function NewProject({
           if (draft.name) setName(draft.name);
           if (draft.concept) setConcept(draft.concept);
           if (draft.style && !initialStyle) setStyle(draft.style);
-          if (Array.isArray(draft.ambients)) setAmbients(draft.ambients);
           if (draft.selectedAlbumId) setSelectedAlbumId(draft.selectedAlbumId);
           setRestoredDraftTime(draft.savedAt || 'Önceki oturum');
         }
@@ -100,18 +96,6 @@ export function NewProject({
             }),
           );
         }
-        if (Array.isArray(lib.ambients) && lib.ambients.length > 0) {
-          setAvailableAmbients(
-            lib.ambients.map((a) => {
-              const sample = sampleAmbients.find((item) => item.id === a.name);
-              return {
-                id: a.name,
-                name: a.name,
-                category: sample?.category ?? 'Ambient',
-              };
-            }),
-          );
-        }
       })
       .catch(() => {
         // Fallback to defaults
@@ -137,22 +121,15 @@ export function NewProject({
     setServerProblems([]);
   };
 
-  const toggleAmbient = (id: string) => {
-    edit(setAmbients)(
-      ambients.includes(id) ? ambients.filter((other) => other !== id) : [...ambients, id],
-    );
-  };
-
   const saveDraft = () => {
     try {
-      if (name || concept || ambients.length > 0 || selectedAlbumId) {
+      if (name || concept || selectedAlbumId) {
         localStorage.setItem(
           PROJECT_DRAFT_KEY,
           JSON.stringify({
             name,
             concept,
             style,
-            ambients,
             selectedAlbumId,
             savedAt: new Date().toLocaleTimeString(),
           }),
@@ -168,7 +145,6 @@ export function NewProject({
     setRestoredDraftTime(null);
     setName('');
     setConcept('');
-    setAmbients([]);
     setSelectedAlbumId('');
   };
 
@@ -187,7 +163,6 @@ export function NewProject({
       const response = await createProject({
         name: name.trim(),
         style,
-        ambient: ambients.length > 0 ? ambients : undefined,
         concept: concept.trim() || undefined,
       });
 
@@ -242,7 +217,7 @@ export function NewProject({
       <PageHeader
         eyebrow="NEW PROJECT"
         title="New Project"
-        description="Set up the album, image style and ambience for a new video."
+        description="Set up the album and image style for a new video."
       />
 
       {restoredDraftTime ? (
@@ -342,28 +317,6 @@ export function NewProject({
             {errors.style ?? selectedStyle?.description ?? 'Choose the image style for the video.'}
           </p>
         </div>
-
-        <fieldset className="field">
-          <legend>Ambient</legend>
-          <div className="option-list option-grid">
-            {availableAmbients.map((ambient) => {
-              const isSelected = ambients.includes(ambient.id);
-              return (
-                <label key={ambient.id} className={isSelected ? 'option selected' : 'option'}>
-                  <input
-                    type="checkbox"
-                    checked={isSelected}
-                    onChange={() => toggleAmbient(ambient.id)}
-                    disabled={isSubmitting}
-                  />
-                  <span>{ambient.name}</span>
-                  <span className="muted">{ambient.category}</span>
-                </label>
-              );
-            })}
-          </div>
-          <p className="field-hint">Optional. Mixed under the music.</p>
-        </fieldset>
 
         {availableAlbums.length > 0 ? (
           <div className="field">
