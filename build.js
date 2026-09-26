@@ -10,8 +10,8 @@
  *   0  konfig doğrulama + çıktı çakışma kontrolü      (encode yok)
  *   1  01-video-prep    kırpma onayı, watermark + 16:9 → base.mp4
  *   2  02-audio-concat  parçalar → mix.m4a, sonra disk kontrolü
- *   3  04-assemble      base × n + mix + fade → montaj
- *   4  03-ambient-mix   (opsiyonel) ambient → nihai video
+ *   3  03-ambient-mix   (opsiyonel) ambient → mix'e karışır (yalnız ses; video bir kez yazılır)
+ *   4  04-assemble      base × n + ses + fade → nihai video
  *   5  05-tracklist     damgalar
  *   6  çıktıları taşı, rapor yaz, workspace'i temizle
  *
@@ -171,19 +171,44 @@ export async function runBuild(config, options = {}) {
       baseSize: video.result.size,
       baseDuration: video.result.duration,
       targetDuration: audio.duration,
-      copies: config.ambient ? 2 : 1,
+      copies: 1, // ambient sese karıştığı için video yalnızca montajda yazılır
       diskFree,
     });
     log.info(
       `Disk: ~${gb(disk.requiredBytes)} GB gerekli, ${gb(disk.freeBytes)} GB boş.`,
     );
 
-    // --- 3: montaj (04)
-    // Workspace içindeki adlar sabit: çıktı adı ne olursa olsun girdiyle çakışmaz.
+    // --- 3: ambient (03, opsiyonel) — videoya değil sese karışır: 48 dakikalık
+    // video yalnızca montajda bir kez yazılır. Müzik seviyesi mix.m4a'dan ölçülür.
+    const ambientPaths = config.ambient
+      ? (Array.isArray(config.ambient) ? config.ambient : [config.ambient])
+      : [];
+    let finalAudio = audio.output;
+    for (let i = 0; i < ambientPaths.length; i++) {
+      const stepName = ambientPaths.length > 1
+        ? `Ambient karıştırma (${i + 1}/${ambientPaths.length})`
+        : 'Ambient karıştırma';
+      const mixed = await step('03', stepName, (logger) => mixAmbient({
+        audioPath: finalAudio,
+        ambientPath: ambientPaths[i],
+        outputPath: workspace.path(`final_mix_${i}.m4a`),
+        workspace,
+        ambientOffsetDb: config.audio.ambientOffsetDb,
+        fadeOut: config.video.fadeOut,
+        bitrate: config.audio.bitrate,
+        logger,
+        onProgress: progress('03', audio.duration),
+      }));
+      finalAudio = mixed.output;
+    }
+    if (ambientPaths.length === 0) log.info('Ambient tanımlı değil — adım atlandı.');
+
+    // --- 4: montaj (04) — gövde kopya, kuyruk (fade) encode; ses son karışım.
+    const finalVideo = workspace.path('final.mp4');
     const assembled = await step('04', 'Montaj', (logger) => assembleVideo({
       videoPath: video.output,
-      audioPath: audio.output,
-      outputPath: workspace.path('assembled.mp4'),
+      audioPath: finalAudio,
+      outputPath: finalVideo,
       workspace,
       fadeOut: config.video.fadeOut,
       crf: config.video.crf,
@@ -192,31 +217,6 @@ export async function runBuild(config, options = {}) {
       logger,
       onProgress: progress('04', audio.duration),
     }));
-
-    // --- 4: ambient (03, opsiyonel)
-    let finalVideo = assembled.output;
-    if (config.ambient) {
-      const ambientPaths = Array.isArray(config.ambient) ? config.ambient : [config.ambient];
-      for (let i = 0; i < ambientPaths.length; i++) {
-        const ambPath = ambientPaths[i];
-        const stepName = ambientPaths.length > 1 ? `Ambient karıştırma (${i + 1}/${ambientPaths.length})` : 'Ambient karıştırma';
-        const outPath = workspace.path(i === ambientPaths.length - 1 ? 'final.mp4' : `final_amb_${i}.mp4`);
-        const mixed = await step('03', stepName, (logger) => mixAmbient({
-          videoPath: finalVideo,
-          ambientPath: ambPath,
-          outputPath: outPath,
-          workspace,
-          ambientOffsetDb: config.audio.ambientOffsetDb,
-          fadeOut: config.video.fadeOut,
-          bitrate: config.audio.bitrate,
-          logger,
-          onProgress: progress('03', assembled.result.duration),
-        }));
-        finalVideo = mixed.output;
-      }
-    } else {
-      log.info('Ambient tanımlı değil — adım atlandı, montaj çıktısı nihai dosya.');
-    }
 
     // --- 5: tracklist
     const tracklist = await step('05', 'Tracklist', (logger) => writeTracklist({

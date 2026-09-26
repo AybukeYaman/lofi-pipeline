@@ -33,6 +33,8 @@ const DEFAULTS = { bitrate: '192k' };
  * kesilmiş dosyada fark 10 sn ölçüldü.
  */
 const DAMAGED_FILE_GAP = 0.5;
+/** Aynı anda en çok bu kadar ölçüm süreci (ffprobe/ffmpeg); fazlası diski ve CPU'yu boğar. */
+const MEASURE_CONCURRENCY = 8;
 
 const NOOP_LOGGER = { info() {}, warn() {} };
 
@@ -93,10 +95,8 @@ export async function concatAudio(options) {
 
   // 4 — Ölç: biçim probe'dan, SÜRE çözülen örnek sayısından (probe süresi
   // encoder gecikmesi yüzünden dosya başına ~13 ms sapıyor, damgalar kayıyordu).
-  const probes = [];
-  for (const path of ordered) {
-    probes.push(await probe(path));
-  }
+    // Dosya başına ayrı ffprobe/ffmpeg süreci: sırayla 100 parçada dakikalar sürüyordu.
+  const probes = await mapLimited(ordered, MEASURE_CONCURRENCY, (path) => probe(path));
 
   const missingAudio = probes.filter((p) => !p.hasAudio);
   if (missingAudio.length > 0) {
@@ -105,8 +105,7 @@ export async function concatAudio(options) {
     );
   }
 
-  const decoded = [];
-  for (const p of probes) {
+  const decoded = await mapLimited(probes, MEASURE_CONCURRENCY, async (p) => {
     const seconds = await measureDecodedDuration(p.path);
     // Başlık ile gerçek ses arasındaki normal fark encoder gecikmesi kadar (13–27 ms).
     // Saniyeler mertebesinde fark: dosya kesik ya da bozuk — yarım parça albüme girmesin.
@@ -116,8 +115,8 @@ export async function concatAudio(options) {
         `diyor, çözülebilen ses ${seconds.toFixed(2)} sn. Dosyayı yeniden indir/dışa aktar.`,
       );
     }
-    decoded.push(seconds);
-  }
+    return seconds;
+  });
 
   const kinds = [...new Set(probes.map((p) => `${p.audioCodec}/${p.sampleRate}/${p.channels}`))];
   logger.info(
@@ -270,6 +269,29 @@ export function normalizeBranch(index, input) {
     `[${index}:a]aresample=${TARGET.sampleRate},${layout}` +
     `aformat=sample_fmts=fltp:sample_rates=${TARGET.sampleRate}:channel_layouts=stereo[a${index}]`
   );
+}
+
+/**
+ * items'ı en çok `limit` eşzamanlı işle eşler; sonuç sırası girdi sırasıdır.
+ * İlk hata hepsini düşürür (Promise.all gibi).
+ *
+ * @template T, R
+ * @param {T[]} items
+ * @param {number} limit
+ * @param {(item: T) => Promise<R>} fn
+ * @returns {Promise<R[]>}
+ */
+async function mapLimited(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 /**

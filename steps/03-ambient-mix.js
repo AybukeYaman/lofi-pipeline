@@ -64,7 +64,7 @@ const NOOP_LOGGER = { info() {}, warn() {} };
  */
 export async function mixAmbient(options) {
   const {
-    videoPath,
+    audioPath,
     ambientPath,
     outputPath,
     workspace,
@@ -84,19 +84,17 @@ export async function mixAmbient(options) {
   };
 
   // 1 — Girdileri tanı
-  const video = await probe(videoPath);
+  const musicFile = await probe(audioPath);
   const ambient = await probe(ambientPath);
 
-  if (!video.hasAudio) {
-    throw new Error(`Videoda ses akışı yok, karıştıracak müzik bulunamadı: ${videoPath}`);
+  if (!musicFile.hasAudio) {
+    throw new Error(`Dosyada ses akışı yok, karıştıracak müzik bulunamadı: ${audioPath}`);
   }
   if (!ambient.hasAudio) {
     throw new Error(`Ambient dosyasında ses akışı yok: ${ambientPath}`);
   }
 
-  // Hedef sample rate videodan okunur, sabit yazılmaz.
-  // Ambient 44.1 kHz, müzik 48 kHz — eşitlenmezse pitch kayması olur (bölüm 7).
-  const sampleRate = video.sampleRate;
+  const sampleRate = musicFile.sampleRate;
   if (ambient.sampleRate !== sampleRate) {
     logger.info(
       `Ambient ${ambient.sampleRate} Hz, hedef ${sampleRate} Hz — aresample uygulanacak.`,
@@ -104,18 +102,17 @@ export async function mixAmbient(options) {
   }
 
   // 2 — Müziği ölç, hedefi türet
-  const sampleWindow = sample ? fitSample(sample, video.duration) : null;
+  const sampleWindow = sample ? fitSample(sample, musicFile.duration) : null;
   if (sampleWindow && sampleWindow.startSeconds !== sample.startSeconds) {
     logger.info(
-      `Video ${video.duration} sn — doğrulama kesiti ${sample.startSeconds}. sn'ye sığmıyor, ` +
+      `Müzik ${musicFile.duration} sn — doğrulama kesiti ${sample.startSeconds}. sn'ye sığmıyor, ` +
       `${sampleWindow.startSeconds}. sn'den ${sampleWindow.duration} sn alınıyor.`,
     );
   }
   const measureSegment = sampleWindow ?? {};
-  const music = await measureLoudness(videoPath, measureSegment);
+  const music = await measureLoudness(audioPath, measureSegment);
   const targetI = targetLoudnessFor(music.inputI, ambientOffsetDb);
 
-  // Ambient'in kendi seviyesi: iki geçişli loudnorm'un birinci geçişi.
   const ambientMeasured = await measureLoudness(ambientPath);
   const ambientVolume = await measureVolume(ambientPath);
   if (ambientVolume.maxVolume >= -0.1) {
@@ -137,10 +134,10 @@ export async function mixAmbient(options) {
     measured: ambientMeasured,
   });
 
-  // 3 — Kısa örneklerle doğrula (48 dakikayı üretmeden önce)
+  // 3 — Kısa örneklerle doğrula
   const verification = sampleWindow
     ? await verifyLevels({
-      videoPath,
+      audioPath,
       ambientPath,
       workspace,
       ambientFilter,
@@ -159,21 +156,18 @@ export async function mixAmbient(options) {
   // 4 — Nihai çıktı
   await mkdir(dirname(outputPath), { recursive: true });
 
-  const fadeStart = Math.max(0, video.duration - fadeOut);
+  const fadeStart = Math.max(0, musicFile.duration - fadeOut);
   const filterComplex =
     `[1:a]${ambientFilter},afade=t=out:st=${fadeStart}:d=${fadeOut}[amb];` +
     `[0:a][amb]${AMIX}[out]`;
 
-  logger.info('Nihai karıştırma başlıyor (video yeniden encode edilmiyor).');
+  logger.info('Nihai ses karıştırma başlıyor (video yok).');
 
   await ffmpeg([
-    '-i', videoPath,
+    '-i', audioPath,
     '-stream_loop', '-1', '-i', ambientPath,
     '-filter_complex', filterComplex,
-    '-map', '0:v',
     '-map', '[out]',
-    // Video kopyalanıyor: yeniden encode 17 dakika sürerdi, kopya 1-2 dakika.
-    '-c:v', 'copy',
     '-c:a', 'aac',
     '-b:a', bitrate,
     '-y', outputPath,
@@ -182,14 +176,9 @@ export async function mixAmbient(options) {
   // 5 — Çıktıyı doğrula
   const result = await probe(outputPath);
 
-  if (!durationsMatch(result.duration, video.duration)) {
+  if (!durationsMatch(result.duration, musicFile.duration)) {
     throw new Error(
-      `Çıktı süresi girdiden farklı: ${result.duration} sn / ${video.duration} sn.`,
-    );
-  }
-  if (result.videoCodec !== video.videoCodec || result.width !== video.width) {
-    throw new Error(
-      'Video akışı değişmiş — kopyalanması gerekirken yeniden encode edilmiş olabilir.',
+      `Çıktı süresi girdiden farklı: ${result.duration} sn / ${musicFile.duration} sn.`,
     );
   }
 
@@ -207,7 +196,6 @@ export async function mixAmbient(options) {
       maxVolume: ambientVolume.maxVolume,
       loudnormPasses: 2,
     },
-    video: { codec: result.videoCodec, copied: true, width: result.width, height: result.height },
     audio: { codec: result.audioCodec, sampleRate: result.sampleRate, bitrate },
     fade: { start: fadeStart, duration: fadeOut },
     verification,
@@ -267,7 +255,7 @@ function buildAmbientFilter({ sampleRate, targetI, truePeak, loudnessRange, meas
  */
 async function verifyLevels(params) {
   const {
-    videoPath, ambientPath, workspace, ambientFilter,
+    audioPath, ambientPath, workspace, ambientFilter,
     sample, targetI, musicI, logger, warn,
   } = params;
 
@@ -286,7 +274,7 @@ async function verifyLevels(params) {
   // 2 — Karışımın kendisi
   const mixSample = workspace.path('verify-mix.wav');
   await ffmpeg([
-    ...seek, '-i', videoPath,
+    ...seek, '-i', audioPath,
     '-stream_loop', '-1', ...seek, '-i', ambientPath,
     '-filter_complex', `[1:a]${ambientFilter}[amb];[0:a][amb]${AMIX}[out]`,
     '-map', '[out]',

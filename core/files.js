@@ -137,8 +137,10 @@ export async function findDuplicates(paths) {
   const unique = [];
   const duplicates = [];
 
-  for (const path of paths) {
-    const md5 = await md5File(path);
+  const hashPromises = paths.map((path) => md5File(path).then((md5) => ({ path, md5 })));
+  const results = await Promise.all(hashPromises);
+
+  for (const { path, md5 } of results) {
     const original = seen.get(md5);
     if (original === undefined) {
       seen.set(md5, path);
@@ -194,7 +196,11 @@ export function normalizeName(name) {
 export function matchOrder(lines, paths) {
   /** @type {Map<string, string[]>} normalize edilmiş ad → yollar */
   const index = new Map();
+  /** @type {Map<string, string>} tam dosya adı → tam yol */
+  const exactIndex = new Map();
+
   for (const path of paths) {
+    exactIndex.set(basename(path), path);
     const key = normalizeName(basename(path));
     const bucket = index.get(key);
     if (bucket) bucket.push(path);
@@ -211,6 +217,15 @@ export function matchOrder(lines, paths) {
     const line = raw.trim();
     if (line === '' || line.startsWith('#')) return;   // boş satır ve yorum
 
+    // 1. Önce tam eşleşme ara (config'de tam dosya adı verilmişse)
+    const exactMatch = exactIndex.get(line);
+    if (exactMatch && !used.has(exactMatch)) {
+      ordered.push(exactMatch);
+      used.add(exactMatch);
+      return;
+    }
+
+    // 2. Bulunamazsa normalize adla (esnek) eşleştir
     const key = normalizeName(line);
     const candidates = (index.get(key) ?? []).filter((p) => !used.has(p));
 

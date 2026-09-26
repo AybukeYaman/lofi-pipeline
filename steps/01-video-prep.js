@@ -283,7 +283,12 @@ export async function prepareVideo(options) {
     );
   }
   // Onaydan ve encode'dan önce: tek sayılı yükseklik sessizce bir piksel daha kırpılırdı.
-  checkCropHeight({ height: source.height, cropBottom: bottomCrop, cropTop: topCrop });
+  // Kırpma yoksa (bottomCrop=0, topCrop=0) filtre zinciri kırpma içermez;
+  // kaynak yüksekliğinin tek sayı olması planAspectCrop ve satır 312-314
+  // tarafından çift sayıya düzeltilir — burada hata fırlatmak gereksiz.
+  if (bottomCrop > 0 || topCrop > 0) {
+    checkCropHeight({ height: source.height, cropBottom: bottomCrop, cropTop: topCrop });
+  }
 
   // 1 — En-boy planı: watermark/kenar kırpması SONRASI boyuttan hesaplanır.
   const aspectPlan = aspect
@@ -311,6 +316,9 @@ export async function prepareVideo(options) {
   }
   if (expected.height % 2 !== 0 && !scaleWidth) {
     expected.height = 2 * Math.floor(expected.height / 2);
+    // Boyutu gerçekten düzeltmek için filtre ekle — aksi halde ffmpeg ham boyutu
+    // alır ve libx264 "height not divisible by 2" ile çöker.
+    filters.push(`crop=${expected.width}:${expected.height}`);
   }
 
   if (aspectPlan?.skipped) {
