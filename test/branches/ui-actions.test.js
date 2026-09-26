@@ -837,8 +837,11 @@ describe('Auto Watch (İndirilenler → audio/)', () => {
         { number: 2, title: 'Outro', status: 'pending', prompt: 'p2' },
       ],
     };
+    // Akış sırası Master → Klip → Müzik (13d19e9): müzik adımına gelmek için klip de hazır.
+    data.clip = './videolar/in.mp4';
     await writeFile(join(dir, 'project.json'), JSON.stringify(data, null, 2));
     await writeFile(join(dir, 'resimler', 'MASTER.png'), '');
+    await writeFile(join(dir, 'videolar', 'in.mp4'), '');
     const downloads = fakeDownloads;
     await writeFile(join(downloads, 'eski.mp3'), 'önceden inmiş');
     const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
@@ -951,7 +954,7 @@ describe('Auto Watch (İndirilenler → audio/)', () => {
     assert.deepEqual(music.tracks.map((t) => t.status), ['completed', 'pending']);
     assert.ok(out().includes('müzik aşamasını bitirme onayı soruluyor'));
     assert.ok(itemsOf(prompter, '1 / 2 tracks completed'), 'onay sorusu B ile açıldı');
-    assert.ok(prompter.questions.some((q) => q.question.startsWith('CAMERA / VIDEO CLIP READY')), 'sonraki adım (klip)');
+    assert.ok((await readdir(join(dir, 'out'))).includes('final_ambient.mp4'), 'sonraki adım: montaj (sıra Master → Klip → Müzik → Montaj)');
     assert.equal(ctx.store.getState().onKey, null);
   });
 
@@ -1006,7 +1009,7 @@ describe('Auto Watch (İndirilenler → audio/)', () => {
     assert.equal(music.status, 'completed_by_user');
     assert.equal(music.completedCount, 1);
     assert.equal(ctx.store.getState().actionHint, null, 'izleme bitince kutu kalkar');
-    assert.ok(prompter.questions.some((q) => q.question.startsWith('CAMERA / VIDEO CLIP READY')), 'sonraki adım (klip)');
+    assert.ok((await readdir(join(dir, 'out'))).includes('final_ambient.mp4'), 'sonraki adım: montaj (sıra Master → Klip → Müzik → Montaj)');
   });
 
   test('hiç şarkı yokken track menüsünde "Finish Music & Continue" görünmez', async () => {
@@ -1086,16 +1089,17 @@ describe('Auto Watch (İndirilenler → resimler/ ve videolar/)', () => {
     const { ctx, out } = makeCtx([
       pick('⏳ [ Auto Watch ]'),
       pick('Son 15 dakika'),
+      // Sıra Master → Klip → Müzik: master'dan sonra klip menüsü gelir.
       async () => {
         await writeFile(join(dir, 'videolar', 'in.mp4'), '');
         await writeFile(join(dir, 'audio', 'a.m4a'), '');
-        return pick('Default music');
+        return pick('refresh');
       },
-      pick('Son 15 dakika'),
       pick('no'),
+      // audio/ zaten dolu → müzik adımı tamam sayılır, montaj çalışır.
       pick('Ana Menüye Dön'),
     ]);
-    // Sonraki adımın (audio) Auto Watch'ı da izleyici başlatır; görsel yalnızca ilkinde insin.
+    // Görsel yalnızca ilk izleyici başlatıldığında insin.
     let dropped = false;
     Object.assign(ctx, {
       downloadPollMs: 1,
