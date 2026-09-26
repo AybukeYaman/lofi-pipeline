@@ -13,9 +13,9 @@
  *     kare parlaklık/renk ortalamaları, loop SSIM.
  *   - Süreler (adım saniyeleri) yalnızca raporlanır — makine yüküne bağlı (bkz. HANDOFF bölüm 15 notu).
  *
- * Ambient AYNI build'in `assembled.mp4`'üne karşı ayrıştırılır (`--keep`). Yayınlanan
- * final_fade.mp4'e karşı ayrıştırma P4'ten sonra geçersiz: müzik konumu ms'lerce farklı,
- * çıkarma müziği silmiyor (ölçüldü: −12.4 LUFS "ambient").
+ * Ambient AYNI build'in workspace'inde ayrıştırılır (`--keep`): final_mix_0.m4a − mix.m4a.
+ * Yayınlanan videoya karşı ayrıştırma geçersiz: montaj sesi yeniden encode eder, müzik
+ * konumu ms'lerce kayar ve çıkarma müziği silmez (ölçüldü: −10.8 / −12.4 LUFS "ambient").
  *
  * Album parmak izi (dosya adları + MD5) baseline'da tutulur: albüm değişirse karşılaştırma
  * anlamsızdır, test en başta açık bir mesajla durur.
@@ -146,7 +146,11 @@ async function buildAndMeasure(config, workDir) {
   const workspace = files.find((f) => f.startsWith('lofi-build-'));
   const report = JSON.parse(await readFile(join(out, 'final_ambient.report.json'), 'utf8'));
   const video = join(out, 'final_ambient.mp4');
-  const assembled = join(out, workspace, 'assembled.mp4');
+  // Ambient ayrıştırması aynı zincirin iki sesi arasında: ambientli karışım
+  // (final_mix_0.m4a) − ambientsiz müzik (mix.m4a). Montajın ek encode'u
+  // araya girerse örnekler kayar ve müzik silinmez (ölçüldü: −10.8 "ambient").
+  const dry = join(out, workspace, 'mix.m4a');
+  const wet = join(out, workspace, 'final_mix_0.m4a');
   const d = report.details;
   const info = await probe(video);
 
@@ -192,7 +196,7 @@ async function buildAndMeasure(config, workDir) {
     totalSeconds: report.totalSeconds,
   };
   if (d['03']) {
-    for (const t of AMBIENT_SEGMENTS) measured.ambientIsolatedLufs[t] = await isolatedAmbient(video, assembled, t);
+    for (const t of AMBIENT_SEGMENTS) measured.ambientIsolatedLufs[t] = await isolatedAmbient(wet, dry, t);
   }
   for (const t of FRAME_TIMES) measured.frameAverages[t] = await frameAverages(video, t);
   return measured;

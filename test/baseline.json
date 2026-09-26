@@ -1,12 +1,58 @@
 {
   "generated": {
-    "at": "2026-09-14T13:18:54.406Z",
+    "at": "2026-09-26T21:45:30.303Z",
     "by": "node test/regression.js --update",
-    "commit": "6fee31da4646b265af5b16133bf63eb49e097190",
-    "commitSubject": "Aşama 6 P5: disk yetersizliği — boş alan enjeksiyonu + testler",
+    "commit": "e077a211d7989ae663a9c5cc38b37eba0d8fd023",
+    "commitSubject": "fix(audio-concat): wait for in-flight measurements before failing",
     "uncommitted": [
+      "D add-style.js",
+      "M lofi.js",
+      "M new-video.js",
       "M package.json",
-      "?? test/regression.js"
+      "D prep/describe-style.js",
+      "M prep/project-status.js",
+      "D prep/project-style.js",
+      "M prep/prompts.js",
+      "M prep/scaffold.js",
+      "M prep/styles.js",
+      "D prompts/faz1-master.txt",
+      "M prompts/faz2-angles.txt",
+      "D prompts/faz3-motion.txt",
+      "M server/project-api.js",
+      "M server/web-server.js",
+      "D test/branches/add-style.test.js",
+      "M test/branches/new-video.test.js",
+      "M test/branches/project-status.test.js",
+      "M test/branches/ui-actions.test.js",
+      "M test/regression.js",
+      "D test/unit/describe-style.test.js",
+      "M test/unit/project-status.test.js",
+      "M test/unit/prompts.test.js",
+      "M test/unit/scaffold.test.js",
+      "M test/unit/styles.test.js",
+      "M test/unit/ui-prompt.test.js",
+      "M test/unit/web-api.test.js",
+      "M test/unit/web-styles.test.js",
+      "M ui/actions.js",
+      "M ui/prompt.js",
+      "M ui/runner.js",
+      "M web/src/App.tsx",
+      "M web/src/api.ts",
+      "M web/src/components/AppLayout.tsx",
+      "D  web/src/components/ReferencePicker.tsx",
+      "M web/src/mockData.ts",
+      "M web/src/pages/Dashboard.tsx",
+      "M web/src/pages/NewProject.tsx",
+      "M web/src/pages/ProjectWorkspace.tsx",
+      "D  web/src/pages/StyleLibrary.tsx",
+      "M web/src/pages/workspace/CanonicalStages.tsx",
+      "M web/src/pages/workspace/StageSections.tsx",
+      "M web/src/pages/workspace/assetState.ts",
+      "M web/src/styles.css",
+      "M web/src/types.ts",
+      "M web/src/workflow.ts",
+      "?? web/src/musicStyle.ts",
+      "?? web/src/pages/MusicStyles.tsx"
     ],
     "node": "v24.12.0",
     "ffmpeg": "ffmpeg version 9.0.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers",
@@ -156,8 +202,8 @@
       "stepOrder": [
         "01",
         "02",
-        "04",
         "03",
+        "04",
         "05"
       ],
       "warnings": [],
@@ -272,10 +318,10 @@
         ]
       },
       "ambientMix": {
-        "musicI": -14.78,
+        "musicI": -14.76,
         "targetI": -33.6,
         "verificationAmbientI": -33.72,
-        "verificationMixI": -14.75
+        "verificationMixI": -14.74
       },
       "tracklist": {
         "count": 15,
@@ -293,16 +339,16 @@
       "channels": 2,
       "duration": 2885.8825,
       "frames": 69261,
-      "sizeBytes": 1085220503
+      "sizeBytes": 1084601793
     },
     "loudness": {
       "integratedLufs": -14.6,
       "rangeLu": 5.6,
-      "truePeakDb": 1.1
+      "truePeakDb": 0.1
     },
     "ambientIsolatedLufs": {
       "600": -33.7,
-      "1612": -33.6
+      "1612": -33.7
     },
     "frameAverages": {
       "300": {
@@ -319,13 +365,13 @@
   },
   "timing": {
     "stepSeconds": {
-      "01": 2.6,
-      "02": 116.3,
-      "04": 134.9,
-      "03": 278.9,
+      "01": 6.9,
+      "02": 87.1,
+      "03": 180.2,
+      "04": 78.2,
       "05": 0
     },
-    "totalSeconds": 532.8,
-    "note": "bilgi amaçlı, karşılaştırılmaz — bu değerler arka plan işi olarak yük altında ölçüldü; kullanıcının terminalinde aynı build generated.reference.totalSeconds"
+    "totalSeconds": 352.4,
+    "note": "bilgi amaçlı, karşılaştırılmaz"
   }
 }
