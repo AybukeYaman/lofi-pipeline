@@ -267,8 +267,13 @@ describe('regresyon (gerçek albüm)', { skip: ALBUM ? false : 'LOFI_ALBUM_DIR t
   }
 
   test('süreler (bilgi)', (t) => {
-    t.diagnostic(`adımlar (sn): ${JSON.stringify(measured.stepSeconds)} · toplam ${measured.totalSeconds} sn`);
-    t.diagnostic(`baseline: ${JSON.stringify(baseline.timing?.stepSeconds)} · toplam ${baseline.timing?.totalSeconds} sn`);
+    const before = baseline.timing?.stepSeconds ?? {};
+    const rows = [...Object.entries(measured.stepSeconds), ['toplam', measured.totalSeconds]];
+    for (const [tag, now] of rows) {
+      const was = tag === 'toplam' ? baseline.timing?.totalSeconds : before[tag];
+      const delta = Number.isFinite(was) ? ` (${now - was >= 0 ? '+' : ''}${(now - was).toFixed(1)})` : '';
+      t.diagnostic(`${tag.padEnd(6)} baseline ${String(was ?? '—').padStart(6)} sn → şimdi ${String(now).padStart(6)} sn${delta}`);
+    }
     if (UPDATE) t.diagnostic(`baseline yazıldı: ${BASELINE_PATH}`);
   });
 });
