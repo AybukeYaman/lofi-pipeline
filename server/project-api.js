@@ -16,6 +16,7 @@ import { AddStyleError, runAddStyle } from '../add-style.js';
 import { VIDEO_SOURCES } from '../core/config.js';
 import { AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, imageMimeType, listFiles } from '../core/files.js';
 import { probe } from '../core/probe.js';
+import { moveDirToTrash } from '../core/trash.js';
 import { readJsonFile, writeTextFile } from '../core/workspace.js';
 import { NewVideoError, runNewVideo } from '../new-video.js';
 import { AmbientError, DEFAULT_AMBIENT_DIR, listAmbients } from '../prep/ambients.js';
@@ -952,6 +953,28 @@ export async function completeMusic(id, body, { videosDir = DEFAULT_VIDEOS_DIR }
     throw new ApiError(409, 'project.json is invalid', { problem: error.message });
   }
   return getProject(id, { videosDir });
+}
+
+/**
+ * Projeyi siler: klasörün tamami (resimler, müzik, cikti) Geri Dönüşüm
+ * Kutusu'na tasinir, kalici silinmez. Montaji süren proje silinmez.
+ *
+ * @param {{ videosDir?: string, buildJobs?: { get: (id: string) => object|null }, trashFn?: typeof moveDirToTrash }} [options]
+ * @returns {Promise<{ deleted: string }>}
+ */
+export async function deleteProject(id, { videosDir = DEFAULT_VIDEOS_DIR, buildJobs, trashFn = moveDirToTrash } = {}) {
+  const projectDir = await resolveProjectDir(id, videosDir);
+  if (buildJobs?.get(id)?.state === 'running') {
+    throw new ApiError(409, 'Build is running for this project');
+  }
+  // Junction/symlink ile videolar\ disini gösteren klasör silinmez.
+  const realRoot = await realpath(videosDir).catch(() => null);
+  const realDir = await realpath(projectDir).catch(() => null);
+  if (!realRoot || !realDir || !isInside(realRoot, realDir)) {
+    throw new InvalidProjectIdError();
+  }
+  await trashFn(realDir);
+  return { deleted: id };
 }
 
 /**

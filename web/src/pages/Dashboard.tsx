@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { fetchProjects } from '../api';
+import { deleteProject, fetchProjects } from '../api';
 import { EmptyState } from '../components/Feedback';
 import { LayoutSwitcher, useCardLayout } from '../components/LayoutSwitcher';
 import { PageHeader } from '../components/PageHeader';
+import { showError, showSuccess } from '../toast';
 import type { LoadState, ProjectSummary } from '../types';
 
 type DashboardProps = {
@@ -15,6 +16,7 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loadState, setLoadState] = useState<LoadState>('idle');
   const [layoutCols, setLayoutCols] = useCardLayout('lofi-layout-projects', 1);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const loadProjects = useCallback(async () => {
     setLoadState('loading');
@@ -30,6 +32,24 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
   useEffect(() => {
     void loadProjects();
   }, [loadProjects]);
+
+  const handleDelete = async (project: ProjectSummary) => {
+    if (!window.confirm(
+      `"${project.name}" projesi silinsin mi?\n\nKlasörün tamamı (resimler, müzik, çıktı videosu) Geri Dönüşüm Kutusu'na taşınır.`,
+    )) {
+      return;
+    }
+    setDeletingId(project.id);
+    try {
+      await deleteProject(project.id);
+      setProjects((current) => current.filter((item) => item.id !== project.id));
+      showSuccess(`"${project.name}" Geri Dönüşüm Kutusu'na taşındı.`, 'Proje silindi');
+    } catch (err: unknown) {
+      showError(err, 'Proje silinemedi.');
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const sortedProjects = useMemo(
     () => [...projects].sort((a, b) => b.mtimeMs - a.mtimeMs),
@@ -88,32 +108,44 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
       {projects.length > 0 ? (
         <div className={`card-grid-layout cols-${layoutCols}`}>
           {sortedProjects.map((project) => (
-            <button
-              className="project-card project-card-button"
-              key={project.id}
-              type="button"
-              onClick={() => onOpenProject(project.id)}
-            >
-              <div className="project-card-main">
-                {project.thumbnailUrl ? (
-                  <img className="project-thumb" src={project.thumbnailUrl} alt="" loading="lazy" />
-                ) : (
-                  <span className="project-thumb" aria-hidden="true" />
-                )}
-                <div className="project-card-text">
-                  <h2>{project.name}</h2>
-                  <p>
-                    Adım:{' '}
-                    {project.workflow
-                      ? `${project.workflow.steps.find((step) => step.id === project.workflow?.current)?.number ?? '?'}/10 · ${project.workflow.currentTitle}`
-                      : project.step?.title ?? project.step?.id ?? 'Unknown'}
-                  </p>
+            <div className="project-card" key={project.id}>
+              <button
+                className="project-card-open"
+                type="button"
+                onClick={() => onOpenProject(project.id)}
+                disabled={deletingId === project.id}
+              >
+                <div className="project-card-main">
+                  {project.thumbnailUrl ? (
+                    <img className="project-thumb" src={project.thumbnailUrl} alt="" loading="lazy" />
+                  ) : (
+                    <span className="project-thumb" aria-hidden="true" />
+                  )}
+                  <div className="project-card-text">
+                    <h2>{project.name}</h2>
+                    <p>
+                      Adım:{' '}
+                      {project.workflow
+                        ? `${project.workflow.steps.find((step) => step.id === project.workflow?.current)?.number ?? '?'}/10 · ${project.workflow.currentTitle}`
+                        : project.step?.title ?? project.step?.id ?? 'Unknown'}
+                    </p>
+                  </div>
                 </div>
-              </div>
-              <time dateTime={new Date(project.mtimeMs).toISOString()}>
-                Updated: {formatUpdatedAt(project.mtimeMs)}
-              </time>
-            </button>
+                <time dateTime={new Date(project.mtimeMs).toISOString()}>
+                  Updated: {formatUpdatedAt(project.mtimeMs)}
+                </time>
+              </button>
+              <button
+                className="button project-delete"
+                type="button"
+                onClick={() => handleDelete(project)}
+                disabled={deletingId !== null}
+                aria-label={`Delete project ${project.name}`}
+                title="Geri Dönüşüm Kutusu'na taşı"
+              >
+                {deletingId === project.id ? 'Siliniyor…' : 'Sil'}
+              </button>
+            </div>
           ))}
         </div>
       ) : null}

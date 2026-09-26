@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { EventEmitter, once } from 'node:events';
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { request as httpRequest } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,7 +10,7 @@ import { after, before, describe, test } from 'node:test';
 
 import { createBuildJobs } from '../../server/build-jobs.js';
 import {
-  completeMusic, createProject, describeReadiness, getAsset, getBuild, getLibrary, getProject, getProjects, listClips,
+  completeMusic, createProject, deleteProject, describeReadiness, getAsset, getBuild, getLibrary, getProject, getProjects, listClips,
   getProjectPrompts, selectClip, startBuild, updateCrop, updateTrackOrder, updateWorkflow, uploadProjectAudio,
   uploadProjectClip, uploadProjectImage,
 } from '../../server/project-api.js';
@@ -104,6 +104,7 @@ before(async () => {
     projectApi: {
       getProjects: () => getProjects(options),
       getProject: (id) => getProject(id, options),
+      deleteProject: (id) => deleteProject(id, { videosDir, buildJobs, trashFn: async () => {} }),
       createProject: (body) => createProject(body, { videosDir, ambientDir, stylesDir }),
       getLibrary: () => getLibrary({ stylesDir, ambientDir }),
       selectClip: (id, body) => selectClip(id, body, options),
@@ -933,9 +934,9 @@ describe('build sonucu — çıktı, hata ve yeniden montaj', () => {
 
 describe('HTTP katmanı', () => {
   test('bilinen yolda yanlış yöntem 405, bilinmeyen yol 404', async () => {
-    const wrong = await send('DELETE', '/api/projects/ready');
+    const wrong = await send('PUT', '/api/projects/ready', { body: {} });
     assert.equal(wrong.status, 405);
-    assert.equal(wrong.headers.get('allow'), 'GET');
+    assert.equal(wrong.headers.get('allow'), 'GET, DELETE');
     assert.equal((await send('PUT', '/api/projects', { body: {} })).status, 405);
     assert.equal((await send('GET', '/api/projects/ready/unknown')).status, 404);
   });
@@ -1101,5 +1102,37 @@ describe('tek resim modu ve proje küçük resmi', () => {
     await writeProjectFolder('no-image');
     const list = await (await send('GET', '/api/projects')).json();
     assert.equal(list.find((p) => p.id === 'no-image').thumbnailUrl, null);
+  });
+});
+
+describe('DELETE /api/projects/:id — Geri Dönüşüm Kutusu', () => {
+  const trashed = [];
+  const trashFn = async (dir) => { trashed.push(dir); await rm(dir, { recursive: true, force: true }); };
+
+  test('proje klasörü çöpe gider, listeden düşer', async () => {
+    const dir = await realpath(await writeProjectFolder('to-delete', { files: ['resimler/MASTER.png'] }));
+    assert.deepEqual(await deleteProject('to-delete', { videosDir, trashFn }), { deleted: 'to-delete' });
+    assert.deepEqual(trashed, [dir]);
+    const names = (await getProjects({ videosDir })).map((p) => p.id);
+    assert.ok(!names.includes('to-delete'));
+  });
+
+  test('montajı süren proje silinmez (409), klasöre dokunulmaz', async () => {
+    await writeProjectFolder('building');
+    const buildJobs = { get: (id) => (id === 'building' ? { state: 'running' } : null) };
+    await assert.rejects(deleteProject('building', { videosDir, buildJobs, trashFn }), (e) => e.status === 409);
+    assert.ok((await stat(join(videosDir, 'building', 'project.json'))).isFile());
+  });
+
+  test('geçersiz ad ve olmayan proje çöpe hiçbir şey göndermez', async () => {
+    const before = trashed.length;
+    await assert.rejects(deleteProject('..', { videosDir, trashFn }), { name: 'InvalidProjectIdError' });
+    await assert.rejects(deleteProject('yok-boyle', { videosDir, trashFn }), { name: 'ProjectNotFoundError' });
+    assert.equal(trashed.length, before);
+  });
+
+  test('HTTP: DELETE rotası 404 ve gövdesiz istek kabul', async () => {
+    const response = await send('DELETE', '/api/projects/yok-boyle');
+    assert.equal(response.status, 404);
   });
 });

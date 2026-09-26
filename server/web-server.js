@@ -24,6 +24,7 @@ import {
   completeMusic,
   createLibraryStyle,
   createProject,
+  deleteProject,
   deleteProjectReference,
   generateStyle,
   getAsset,
@@ -65,6 +66,7 @@ export function createDefaultProjectApi({ buildJobs = createBuildJobs() } = {}) 
     getProjects: () => getProjects(),
     getProject: (id) => getProject(id),
     createProject: (body) => createProject(body),
+    deleteProject: (id) => deleteProject(id, { buildJobs }),
     getLibrary: () => getLibrary(),
     createLibraryStyle: (body) => createLibraryStyle(body),
     getStyle: (id) => getStyle(id),
@@ -154,6 +156,11 @@ const ROUTES = [
     method: 'GET',
     pattern: /^\/api\/projects\/([^/]*)$/,
     handle: async (api, { id }) => [200, await api.getProject(id)],
+  },
+  {
+    method: 'DELETE',
+    pattern: /^\/api\/projects\/([^/]*)$/,
+    handle: async (api, { id }) => [200, await api.deleteProject(id)],
   },
   {
     method: 'GET',

@@ -294,6 +294,12 @@ export async function deleteProjectReference(
   return handleResponse<ProjectDetail>(response, 'Reference image could not be deleted.');
 }
 
+/** Proje klasörü Geri Dönüşüm Kutusu'na taşınır (kalıcı silinmez). */
+export async function deleteProject(id: string): Promise<{ deleted: string }> {
+  const response = await fetch(`/api/projects/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  return handleResponse<{ deleted: string }>(response, 'Project could not be deleted.');
+}
+
 // ---------------------------------------------------------------- Music Library & Suno Ingest
 
 export async function fetchMusicLibrary(): Promise<import('./types').MusicLibraryResponse> {
