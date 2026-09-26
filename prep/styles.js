@@ -12,15 +12,12 @@
 import { basename, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { listFiles } from '../core/files.js';
+import { IMAGE_EXTENSIONS, listFiles } from '../core/files.js';
 import { readJsonFile } from '../core/workspace.js';
 import { findAmbient } from './ambients.js';
 
 /** Repodaki stil klasörü. */
 export const STYLES_DIR = fileURLToPath(new URL('../styles/', import.meta.url));
-
-/** Stil görselleri (Faz 1'in "Image 2"si) — styles/refs/<ad>.<uzantı>. */
-export const STYLE_REF_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
 
 /** Stil adı = dosya adı: küçük harf kebab-case ("neo-tokyo"). */
 /** Stil adı: küçük harf kebab-case (add-style, panel ve web aynı kuralı kullanır). */
@@ -85,7 +82,7 @@ export async function listStyles({ dir = STYLES_DIR } = {}) {
 export async function findStyleRefs(name, { dir = STYLES_DIR } = {}) {
   let paths;
   try {
-    paths = await listFiles(join(dir, 'refs'), STYLE_REF_EXTENSIONS);
+    paths = await listFiles(join(dir, 'refs'), IMAGE_EXTENSIONS);
   } catch (cause) {
     if (cause.code === 'ENOENT') return { paths: [], warnings: [] };
     throw cause;
@@ -95,7 +92,7 @@ export async function findStyleRefs(name, { dir = STYLES_DIR } = {}) {
   exactMatches.sort((a, b) => {
     const extA = extname(a).toLowerCase();
     const extB = extname(b).toLowerCase();
-    return STYLE_REF_EXTENSIONS.indexOf(extA) - STYLE_REF_EXTENSIONS.indexOf(extB);
+    return IMAGE_EXTENSIONS.indexOf(extA) - IMAGE_EXTENSIONS.indexOf(extB);
   });
 
   const secondaryMatches = paths.filter((path) => {

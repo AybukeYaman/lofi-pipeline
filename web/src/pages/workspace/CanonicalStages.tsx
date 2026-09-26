@@ -11,12 +11,11 @@ import {
 } from '../../api';
 import { AssetPreview } from '../../components/AssetPreview';
 import { EmptyState } from '../../components/Feedback';
+import { IMAGE_ACCEPT } from '../../imageTypes';
 import type { ProjectMusicInfo } from '../../types';
 import { ambientFiles, fileName, styleName } from './assetState';
 import { StagePanel, type StageProps } from './StageSections';
 import { CopyPrompt, errorText, UploadButton } from './StepWidgets';
-
-const IMAGE_ACCEPT = '.jpg,.jpeg,.png,.webp';
 
 // ---------------------------------------------------------------- 1. Proje başlat
 

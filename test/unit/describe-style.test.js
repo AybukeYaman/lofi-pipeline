@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+
+import { IMAGE_EXTENSIONS, imageMimeType } from '../../core/files.js';
 import {
   MAX_IMAGE_SIZE_BYTES,
-  SUPPORTED_IMAGE_EXTENSIONS,
   buildResponseSchema,
   buildStylePrompt,
-  getImageMimeType,
   toStyle,
 } from '../../prep/describe-style.js';
 
@@ -122,16 +122,19 @@ test('7. toStyle - yasak içerik (<, >, {{, }}) hatası', () => {
 });
 
 test('8. Görsel uzantı ve MIME tipi eşleşmesi', () => {
-  assert.equal(getImageMimeType('.jpg'), 'image/jpeg');
-  assert.equal(getImageMimeType('.JPEG'), 'image/jpeg');
-  assert.equal(getImageMimeType('.png'), 'image/png');
-  assert.equal(getImageMimeType('.webp'), 'image/webp');
-  assert.equal(getImageMimeType('.bmp'), null);
+  assert.equal(imageMimeType('.jpg'), 'image/jpeg');
+  assert.equal(imageMimeType('.JPEG'), 'image/jpeg');
+  assert.equal(imageMimeType('.png'), 'image/png');
+  assert.equal(imageMimeType('.webp'), 'image/webp');
+  assert.equal(imageMimeType('.jfif'), 'image/jpeg');
+  assert.equal(imageMimeType('.PJPEG'), 'image/jpeg');
+  assert.equal(imageMimeType('.pjp'), 'image/jpeg');
+  assert.equal(imageMimeType('.bmp'), null);
 });
 
-test('9. MAX_IMAGE_SIZE_BYTES ve SUPPORTED_IMAGE_EXTENSIONS sabiti', () => {
+test('9. MAX_IMAGE_SIZE_BYTES ve IMAGE_EXTENSIONS sabiti', () => {
   assert.equal(MAX_IMAGE_SIZE_BYTES, 15 * 1024 * 1024);
-  assert.deepEqual(SUPPORTED_IMAGE_EXTENSIONS, ['.jpg', '.jpeg', '.png', '.webp']);
+  assert.deepEqual(IMAGE_EXTENSIONS, ['.jpg', '.jpeg', '.png', '.webp', '.jfif', '.pjpeg', '.pjp']);
 });
 
 test('10. buildMultiReferenceStylePrompt visual language ve concept doğrulaması', async () => {

@@ -10,13 +10,11 @@ import { spawn } from 'node:child_process';
 import { mkdir, readdir, readFile, realpath, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
-import {
-  MAX_IMAGE_SIZE_BYTES, SUPPORTED_IMAGE_EXTENSIONS, describeMultiReferenceStyle, getImageMimeType,
-} from '../prep/describe-style.js';
+import { MAX_IMAGE_SIZE_BYTES, describeMultiReferenceStyle } from '../prep/describe-style.js';
 
 import { AddStyleError, runAddStyle } from '../add-style.js';
 import { VIDEO_SOURCES } from '../core/config.js';
-import { AUDIO_EXTENSIONS, listFiles } from '../core/files.js';
+import { AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, imageMimeType, listFiles } from '../core/files.js';
 import { probe } from '../core/probe.js';
 import { readJsonFile, writeTextFile } from '../core/workspace.js';
 import { NewVideoError, runNewVideo } from '../new-video.js';
@@ -69,10 +67,7 @@ const ASSET_TYPES = {
   },
 };
 const ASSET_MIME_TYPES = {
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.png': 'image/png',
-  '.webp': 'image/webp',
+  ...Object.fromEntries(IMAGE_EXTENSIONS.map((ext) => [ext, imageMimeType(ext)])),
   '.mp4': 'video/mp4',
   '.mp3': 'audio/mpeg',
   '.m4a': 'audio/mp4',
@@ -246,7 +241,7 @@ async function saveStyleReferences(name, refInput, stylesDir) {
     if (typeof ref === 'object' && ref !== null && typeof ref.data === 'string' && ref.data) {
       const originalName = typeof ref.name === 'string' ? ref.name : `ref-${i + 1}.png`;
       const ext = extname(originalName).toLowerCase() || '.png';
-      if (SUPPORTED_IMAGE_EXTENSIONS.includes(ext)) {
+      if (IMAGE_EXTENSIONS.includes(ext)) {
         const buffer = decodeUpload(ref.data, MAX_IMAGE_SIZE_BYTES, `Reference image ${originalName}`);
         const saveFilename = i === 0 ? `${name}${ext}` : `${name}-${i + 1}${ext}`;
         const targetPath = join(refsDir, saveFilename);
@@ -375,9 +370,9 @@ export async function createLibraryStyle(body, {
       if (typeof ref === 'object' && ref !== null && typeof ref.data === 'string' && ref.data) {
         const refName = typeof ref.name === 'string' ? ref.name : `ref-${i + 1}.png`;
         const ext = extname(refName).toLowerCase() || '.png';
-        if (SUPPORTED_IMAGE_EXTENSIONS.includes(ext)) {
+        if (IMAGE_EXTENSIONS.includes(ext)) {
           const buffer = decodeUpload(ref.data, MAX_IMAGE_SIZE_BYTES, `Reference image ${refName}`);
-          const mimeType = getImageMimeType(ext);
+          const mimeType = imageMimeType(ext);
           if (mimeType) {
             rawImages.push({ mimeType, buffer });
             const saveFilename = i === 0 ? `${name}${ext}` : `${name}-${i + 1}${ext}`;
@@ -1204,7 +1199,7 @@ export async function getStyleAsset(name, options = {}) {
 
   const info = await stat(targetPath);
   const ext = extname(targetPath).toLowerCase();
-  const contentType = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+  const contentType = imageMimeType(ext) ?? 'image/jpeg';
   return { path: targetPath, size: info.size, contentType };
 }
 
@@ -1399,7 +1394,7 @@ export async function addProjectReference(id, body, {
   videosDir = DEFAULT_VIDEOS_DIR,
 } = {}) {
   const projectDir = await resolveProjectDir(id, videosDir);
-  const { name, data } = uploadName(body, SUPPORTED_IMAGE_EXTENSIONS, 'reference');
+  const { name, data } = uploadName(body, IMAGE_EXTENSIONS, 'reference');
   const buffer = decodeUpload(data, MAX_IMAGE_SIZE_BYTES, 'Reference image');
 
   const refDir = join(projectDir, 'references');
@@ -1463,7 +1458,7 @@ const MAX_AUDIO_UPLOAD_BYTES = 100 * 1024 * 1024;
  */
 export async function uploadProjectImage(id, body, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
   const projectDir = await resolveProjectDir(id, videosDir);
-  const { data, ext } = uploadName(body, SUPPORTED_IMAGE_EXTENSIONS, 'image', { slot: 'string', index: 'number' });
+  const { data, ext } = uploadName(body, IMAGE_EXTENSIONS, 'image', { slot: 'string', index: 'number' });
   const { slot, index } = body;
 
   let base;

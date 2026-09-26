@@ -30,6 +30,7 @@ import { AssetPreview } from '../../components/AssetPreview';
 import { EmptyState, NotConnectedNotice } from '../../components/Feedback';
 import { StatusBadge, type AssetStatus } from '../../components/StatusBadge';
 import { TrackList } from '../../components/TrackList';
+import { IMAGE_ACCEPT, IMAGE_FORMATS_LABEL } from '../../imageTypes';
 import type { BuildJob, MasterFrameInfo, ProjectDetail, ProjectMusicInfo, ProjectPrompts, WorkflowStepId } from '../../types';
 import { fileName, musicTracks, styleName, type ProjectAssets } from './assetState';
 import { CopyPrompt, UploadButton } from './StepWidgets';
@@ -414,7 +415,7 @@ export function StyleStage({ project, assets, stageStatus, onProjectUpdate }: St
             <input
               ref={fileInputRef}
               type="file"
-              accept=".jpg,.jpeg,.png,.webp"
+              accept={IMAGE_ACCEPT}
               multiple
               className="visually-hidden"
               onChange={handleUploadFiles}
@@ -563,7 +564,7 @@ export function MasterStage({ project, stageStatus, onProjectUpdate, prompts, pr
 
           <UploadButton
             label={isMasterReady ? 'Master frame\'i değiştir' : 'Master frame\'i yükle'}
-            accept=".jpg,.jpeg,.png,.webp"
+            accept={IMAGE_ACCEPT}
             onFiles={async ([file]) => {
               onProjectUpdate?.(await uploadProjectImage(project.id, 'master', file));
             }}
@@ -614,7 +615,7 @@ export function MasterStage({ project, stageStatus, onProjectUpdate, prompts, pr
               </code>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)', fontSize: 12 }}>
                 <span>Supported formats:</span>
-                <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>.png, .jpg, .jpeg, .webp</span>
+                <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>{IMAGE_FORMATS_LABEL}</span>
               </div>
             </div>
           </div>

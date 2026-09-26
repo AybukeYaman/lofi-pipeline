@@ -3,9 +3,9 @@ import { copyFile, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
 
 import { moveFile, resolveDownloadsDir } from '../core/downloads.js';
-import { AUDIO_EXTENSIONS, listFiles, uniqueFileName } from '../core/files.js';
+import { AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, listFiles, uniqueFileName } from '../core/files.js';
 import {
-  DOWNLOAD_AUDIO_EXTENSIONS, DOWNLOAD_IMAGE_EXTENSIONS, DOWNLOAD_VIDEO_EXTENSIONS,
+  DOWNLOAD_AUDIO_EXTENSIONS, DOWNLOAD_VIDEO_EXTENSIONS,
   RECENT_WINDOW_MINUTES, cleanDownloadName, createDownloadWatcher,
 } from '../prep/download-watch.js';
 import { AmbientError, listAmbients } from '../prep/ambients.js';
@@ -339,7 +339,7 @@ export async function stepStyle(ctx, dir, status, { pollMs = 50 } = {}) {
         asset: 'Visual Style Reference Images',
         description: 'Stil analizi için beğendiğiniz referans görselleri buraya koyun.',
         folder: 'references/',
-        expected: `.jpg, .jpeg, .png, .webp (${cur.references.length} algılandı)`,
+        expected: `${IMAGE_EXTENSIONS.join(', ')} (${cur.references.length} algılandı)`,
         folderOpen,
       },
     });
@@ -359,7 +359,7 @@ export async function stepStyle(ctx, dir, status, { pollMs = 50 } = {}) {
       (ctx.openFolderFn ?? openFolder)(refDir);
       folderOpen = true;
       ctx.store?.set({ watchNotice: { file: `references/ (${cur.references.length} görseller)`, folderOpen: true } });
-      prompter.print('\x1b[32m[📂 Referans Klasörü Açıldı]\x1b[0m .jpg, .jpeg, .png, .webp görsellerini bu klasöre koyun.');
+      prompter.print(`\x1b[32m[📂 Referans Klasörü Açıldı]\x1b[0m ${IMAGE_EXTENSIONS.join(', ')} görsellerini bu klasöre koyun.`);
     } else if (choice === 'refresh') {
       const updated = await inspectProject(dir);
       if (updated.references.length > 0) {
@@ -391,7 +391,7 @@ export async function stepReference(ctx, dir, status) {
   await import('node:fs/promises').then((fs) => fs.mkdir(imgDir, { recursive: true }));
 
   for (;;) {
-    const curFiles = await listFiles(imgDir, ['.jpg', '.jpeg', '.png', '.webp']).catch(() => []);
+    const curFiles = await listFiles(imgDir, IMAGE_EXTENSIONS).catch(() => []);
     if (curFiles.length > 0) {
       prompter.print(`\x1b[32m[✓ Sahne Referansı Doğrulandı]\x1b[0m ${basename(curFiles[0])}`);
       return true;
@@ -425,7 +425,7 @@ export async function stepReference(ctx, dir, status) {
         prompter.print(`\x1b[33m[! Dosya Bulunamadı]\x1b[0m ${inputPath}`);
       }
     } else if (choice === 'refresh') {
-      const check = await listFiles(imgDir, ['.jpg', '.jpeg', '.png', '.webp']).catch(() => []);
+      const check = await listFiles(imgDir, IMAGE_EXTENSIONS).catch(() => []);
       if (check.length > 0) {
         prompter.print(`\x1b[32m[✓ Görsel Bulundu]\x1b[0m ${basename(check[0])}`);
         return true;
@@ -513,7 +513,7 @@ export async function stepMasterFrame(ctx, dir, status, { pollMs = 50 } = {}) {
       if (!recentMinutes) continue;
       const { detected } = await autoWatchAsset(ctx, {
         targetDir: imgDir,
-        extensions: DOWNLOAD_IMAGE_EXTENSIONS,
+        extensions: IMAGE_EXTENSIONS,
         nameFor: (src) => `MASTER${extname(src).toLowerCase()}`,
         recentMinutes,
         pollMs: ctx.downloadPollMs ?? pollMs,

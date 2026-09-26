@@ -63,6 +63,16 @@ describe('tek resim kaynağı', () => {
     assert.ok(Math.abs(report.result.duration - 12) < 0.05, `süre ${report.result.duration}`);
   });
 
+  test('.jfif (Chrome\'un JPEG\'i) da kaynak olur', async () => {
+    const jfif = dir.path('MASTER.jfif');
+    await ffmpeg(['-f', 'lavfi', '-i', 'testsrc2=s=1920x1080', '-frames:v', '1', '-update', '1', '-c:v', 'mjpeg', '-f', 'image2', '-y', jfif]);
+    const report = await prepareVideo({
+      clipPath: jfif, source: 'image', outputPath: dir.path('base-jfif.mp4'), workspace,
+    });
+    assert.deepEqual([report.result.width, report.result.height], [1920, 1080]);
+    assert.ok(Math.abs(report.result.duration - 5) < 0.05, `süre ${report.result.duration}`);
+  });
+
   test('clip modunda aynı görsel hâlâ ClipNotVideoError', async () => {
     await assert.rejects(
       prepareVideo({ clipPath: image, outputPath: dir.path('x.mp4'), workspace, cropFromConfig: true }),

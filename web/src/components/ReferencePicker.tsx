@@ -1,5 +1,7 @@
 import { useId, useRef, type ChangeEvent } from 'react';
 
+import { IMAGE_ACCEPT } from '../imageTypes';
+
 /** `data` = base64 data URL (yeni yükleme). `url` = sunucudaki görsel URL'i (mevcut referans). */
 export type ReferenceDraft = { id: string; name: string; data?: string; url?: string };
 
@@ -11,7 +13,6 @@ type ReferencePickerProps = {
   buttonLabel?: string;
 };
 
-const ACCEPT = '.jpg,.jpeg,.png,.webp';
 
 /**
  * Local reference list. Reads file data into memory for AI synthesis.
@@ -178,7 +179,7 @@ export function ReferencePicker({ items, onChange, emptyLabel, hint, buttonLabel
         id={inputId}
         className="visually-hidden"
         type="file"
-        accept={ACCEPT}
+        accept={IMAGE_ACCEPT}
         multiple
         onChange={handleFiles}
       />

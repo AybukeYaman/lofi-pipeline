@@ -13,6 +13,7 @@ import { LayoutSwitcher, useCardLayout } from '../components/LayoutSwitcher';
 import { PageHeader } from '../components/PageHeader';
 import { ReferencePicker, type ReferenceDraft } from '../components/ReferencePicker';
 import { StatusBadge } from '../components/StatusBadge';
+import { IMAGE_FORMATS_LABEL } from '../imageTypes';
 import { sampleStyles, type LibraryStyle } from '../mockData';
 import { showError, showSuccess, showInfo, showWarning } from '../toast';
 import type { BackendStyle, LoadState, StyleBlock, StyleMusic, StylePaletteColor } from '../types';
@@ -1345,7 +1346,7 @@ export function StyleLibrary({ onUseStyle }: { onUseStyle?: (styleId: string) =>
                 <ReferencePicker
                   items={aiReferences}
                   onChange={setAiReferences}
-                  emptyLabel="Add reference images (.jpg, .png, .webp) to extract visual style"
+                  emptyLabel={`Add reference images (${IMAGE_FORMATS_LABEL}) to extract visual style`}
                 />
               </fieldset>
 
@@ -1375,7 +1376,7 @@ export function StyleLibrary({ onUseStyle }: { onUseStyle?: (styleId: string) =>
                 <ReferencePicker
                   items={manualReferences}
                   onChange={setManualReferences}
-                  emptyLabel="Referans görseli ekle (.jpg, .png, .webp)"
+                  emptyLabel={`Referans görseli ekle (${IMAGE_FORMATS_LABEL})`}
                   buttonLabel="＋ Referans Görseli Ekle"
                 />
               </fieldset>
@@ -1623,7 +1624,7 @@ export function StyleLibrary({ onUseStyle }: { onUseStyle?: (styleId: string) =>
               <ReferencePicker
                 items={editReferences}
                 onChange={setEditReferences}
-                emptyLabel="Henüz referans görseli eklenmedi (.jpg, .png, .webp)"
+                emptyLabel={`Henüz referans görseli eklenmedi (${IMAGE_FORMATS_LABEL})`}
                 buttonLabel="＋ Referans Görseli Ekle"
               />
               {editReferences.length > 0 ? (

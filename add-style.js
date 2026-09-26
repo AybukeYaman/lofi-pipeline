@@ -10,13 +10,12 @@ import { parseArgs } from 'node:util';
 import { basename, extname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import { IMAGE_EXTENSIONS, imageMimeType } from './core/files.js';
 import { listAmbients } from './prep/ambients.js';
 import {
   MAX_IMAGE_SIZE_BYTES,
-  SUPPORTED_IMAGE_EXTENSIONS,
   buildResponseSchema,
   buildStylePrompt,
-  getImageMimeType,
   toStyle,
 } from './prep/describe-style.js';
 import { generateContent, getApiKey, getModel, listModels, loadEnv } from './prep/gemini.js';
@@ -35,7 +34,7 @@ export class AddStyleError extends Error {
 const USAGE = `Kullanım:
   node add-style.js <görsel-yolu> --name <stil-adı> [--overwrite]
 
-  <görsel-yolu>        Stil analizinde kullanılacak görsel (.jpg, .jpeg, .png, .webp, max 15MB)
+  <görsel-yolu>        Stil analizinde kullanılacak görsel (.jpg, .jpeg, .png, .webp, .jfif, max 15MB)
   --name <stil-adı>    Küçük harf kebab-case stil adı (ör. cozy-realistic)
   --overwrite          Var olan stil dosyasını ve referans görselini ezerek üzerine yazar
   --ambient-dir <yol>  Ortak ambient klasörü (varsayılan: DEFAULT_AMBIENT_DIR)
@@ -101,10 +100,10 @@ export async function runAddStyle({
   }
 
   const ext = extname(imagePath).toLowerCase();
-  const mimeType = getImageMimeType(ext);
-  if (!mimeType || !SUPPORTED_IMAGE_EXTENSIONS.includes(ext)) {
+  const mimeType = imageMimeType(ext);
+  if (!mimeType) {
     throw new AddStyleError(
-      `desteklenmeyen görsel uzantısı "${ext}" — desteklenenler: ${SUPPORTED_IMAGE_EXTENSIONS.join(', ')}`,
+      `desteklenmeyen görsel uzantısı "${ext}" — desteklenenler: ${IMAGE_EXTENSIONS.join(', ')}`,
     );
   }
 

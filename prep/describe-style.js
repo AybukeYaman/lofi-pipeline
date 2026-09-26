@@ -4,31 +4,10 @@
  * Network çağrısı yapmaz.
  */
 
+import { imageMimeType } from '../core/files.js';
 import { CUSTOM_STYLE_NAME, STYLE_FIELDS, validateStyle } from './styles.js';
 
 export const MAX_IMAGE_SIZE_BYTES = 15 * 1024 * 1024; // 15 MB
-
-export const SUPPORTED_IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
-
-/**
- * Görsel uzantısından MIME type belirler.
- * @param {string} ext
- * @returns {string | null}
- */
-export function getImageMimeType(ext) {
-  const normalized = ext.toLowerCase();
-  switch (normalized) {
-    case '.jpg':
-    case '.jpeg':
-      return 'image/jpeg';
-    case '.png':
-      return 'image/png';
-    case '.webp':
-      return 'image/webp';
-    default:
-      return null;
-  }
-}
 
 /**
  * Gemini'ye gönderilecek Türkçe prompt metnini kurar.
@@ -233,7 +212,7 @@ export async function describeMultiReferenceStyle({
 
   for (const imgPath of validPaths) {
     const ext = extname(imgPath).toLowerCase();
-    const mimeType = getImageMimeType(ext);
+    const mimeType = imageMimeType(ext);
     if (!mimeType) continue;
 
     const buffer = await readFileFn(imgPath);

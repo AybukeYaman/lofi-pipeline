@@ -13,9 +13,9 @@ import { readdir, stat } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 
 import { CONFIG_DEFAULTS } from '../core/config.js';
-import { AUDIO_EXTENSIONS, isImagePath, listFiles } from '../core/files.js';
+import { AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, isImagePath, listFiles } from '../core/files.js';
 import { readJsonFile } from '../core/workspace.js';
-import { CUSTOM_STYLE_NAME, STYLE_REF_EXTENSIONS } from './styles.js';
+import { CUSTOM_STYLE_NAME } from './styles.js';
 
 /** Faz 1 çıktısı: resimler/MASTER.<uzantı>. Master1.jpg gibi açı varyantları sayılmaz. */
 export const MASTER_PATTERN = /^master\.[a-z0-9]+$/i;
@@ -69,7 +69,7 @@ export async function inspectProject(dir) {
   const outputPath = resolve(outputDir, nonEmpty(output.name) ?? CONFIG_DEFAULTS.output.name);
   const tracklistPath = resolve(outputDir, nonEmpty(output.tracklist) ?? CONFIG_DEFAULTS.output.tracklist);
 
-  const references = await filesOrEmpty(join(dir, 'references'), STYLE_REF_EXTENSIONS);
+  const references = await filesOrEmpty(join(dir, 'references'), IMAGE_EXTENSIONS);
   const styleBlockExists = await isFile(join(dir, 'STYLE_BLOCK.txt'));
 
   return {
@@ -129,7 +129,7 @@ export function nextStep(s, { skipped = new Set() } = {}) {
   if (isCustomStylePending) {
     return step('style-references', 'manual', 'Stil Referansı Bekleniyor',
       `Stil analizi için referans görsellerinizi şu klasöre koyun: ${join(s.dir, 'references')}\n` +
-      `Desteklenen biçimler: .jpg, .jpeg, .png, .webp (${s.references.length} görsel bulundu)`);
+      `Desteklenen biçimler: ${IMAGE_EXTENSIONS.join(', ')} (${s.references.length} görsel bulundu)`);
   }
 
   if (!s.master && !skipped.has('faz1')) {

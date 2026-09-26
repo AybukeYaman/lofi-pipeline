@@ -65,9 +65,6 @@ export const RECENT_WINDOW_MINUTES = [5, 10, 15];
 /** İndirilenler'den alınan ses uzantıları (Suno: mp3/wav, paylaşım siteleri: m4a). */
 export const DOWNLOAD_AUDIO_EXTENSIONS = ['.mp3', '.m4a', '.wav'];
 
-/** İndirilenler'den alınan görsel uzantıları (Midjourney/DALL·E vb. png, webp de veriyor). */
-export const DOWNLOAD_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp'];
-
 /**
  * İndirilenler'den alınan klip uzantıları. Sadece .mp4: proje durumu (project-status)
  * videolar/ altında yalnızca .mp4 sayıyor, başka uzantı taşınsa da algılanmazdı.

@@ -15,12 +15,35 @@ import { basename, extname, join, sep } from 'node:path';
 /** gerçek codec kararı her zaman probe() ölçümüne dayanır (gizli Opus tuzağı). */
 export const AUDIO_EXTENSIONS = ['.m4a', '.mp3', '.wav', '.flac', '.aac', '.opus', '.ogg'];
 
-/** Tek resim video kaynağı olarak kabul edilen görsel uzantıları (video.source = "image"). */
-export const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
+/**
+ * Görsel uzantısı → MIME. Projenin kabul ettiği tek görsel listesi: master,
+ * açı, sahne/stil referansı, tek resim video kaynağı, yükleme ve Gemini.
+ * .jfif/.pjpeg/.pjp aynı JPEG biçimi (Chrome Windows'ta resmi .jfif kaydeder).
+ * Sıra önemli: stil referansı seçimi (prep/styles.js) önce gelen uzantıyı tercih eder.
+ */
+const IMAGE_MIME_TYPES = {
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+  '.jfif': 'image/jpeg',
+  '.pjpeg': 'image/jpeg',
+  '.pjp': 'image/jpeg',
+};
+
+export const IMAGE_EXTENSIONS = Object.keys(IMAGE_MIME_TYPES);
+
+/**
+ * @param {string} ext nokta dahil, büyük/küçük harf fark etmez
+ * @returns {string|null}
+ */
+export function imageMimeType(ext) {
+  return IMAGE_MIME_TYPES[ext.toLowerCase()] ?? null;
+}
 
 /** @param {string} path */
 export function isImagePath(path) {
-  return IMAGE_EXTENSIONS.includes(extname(path).toLowerCase());
+  return imageMimeType(extname(path)) !== null;
 }
 
 /**

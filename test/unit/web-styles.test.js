@@ -360,7 +360,7 @@ describe('GET /api/projects/:id/master — Faz 1 (elle)', () => {
     assert.equal(body.previewUrl, null);
     assert.equal(body.folder, join(dir, 'resimler'));
     assert.equal(body.expectedName, 'MASTER.png');
-    assert.deepEqual(body.acceptedExtensions, ['.jpg', '.jpeg', '.png', '.webp']);
+    assert.deepEqual(body.acceptedExtensions, ['.jpg', '.jpeg', '.png', '.webp', '.jfif', '.pjpeg', '.pjp']);
     assert.equal(body.promptError, null);
     assert.match(body.prompt, /Faz 1 — Master frame/);
     assert.match(body.prompt, /Style description:\nMedium \/ technique: \S/); // cozy-realistic stil bloğu
