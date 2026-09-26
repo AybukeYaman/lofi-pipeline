@@ -23,9 +23,11 @@ import { listFiles, findDuplicates, matchOrder } from '../core/files.js';
 import { durationsMatch, measureDecodedDuration, probe } from '../core/probe.js';
 
 /** Çıktı her zaman bu biçimde (referans videodaki değerler). */
-const TARGET = { codec: 'aac', sampleRate: 48000, channels: 2 };
-
-const DEFAULTS = { bitrate: '192k' };
+/**
+ * Çıktı her zaman bu biçimde. Ara dosya: sıkıştırılmamış float WAV — ses
+ * yalnız montajda bir kez AAC'ye encode edilir (her encode küçük bir kayıp).
+ */
+const TARGET = { codec: 'pcm_f32le', sampleRate: 48000, channels: 2 };
 
 /**
  * Bir dosyanın başlık süresi ile çözülen süresi arasında kabul edilen en büyük
@@ -47,7 +49,6 @@ const NOOP_LOGGER = { info() {}, warn() {} };
  * @param {string[]} [options.order] parça sırası (sade adlar, ör. "midnight-window");
  *   verilirse orderFile'dan önce gelir
  * @param {string} [options.orderFile] order.txt yolu (ikisi de yoksa alfabetik sıraya düşülür)
- * @param {string} [options.bitrate]
  * @param {{ info: Function, warn: Function }} [options.logger]
  * @param {(seconds: number) => void} [options.onProgress]
  * @returns {Promise<object>} manifest
@@ -58,7 +59,6 @@ export async function concatAudio(options) {
     outputPath,
     order,
     orderFile,
-    bitrate = DEFAULTS.bitrate,
     logger = NOOP_LOGGER,
     onProgress,
   } = options;
@@ -126,7 +126,7 @@ export async function concatAudio(options) {
 
   // 5 — Birleştir
   await mkdir(dirname(outputPath), { recursive: true });
-  await ffmpeg(buildFilterArgs(probes, outputPath, { bitrate }), { onProgress });
+  await ffmpeg(buildFilterArgs(probes, outputPath), { onProgress });
 
   // 6 — Doğrula (beklenen: çözülen sürelerin toplamı)
   const result = await probe(outputPath);
@@ -303,13 +303,12 @@ async function mapLimited(items, limit, fn) {
 
 /**
  * concat filtresi argümanları: her girdi ayrı açılır (priming doğru atılır),
- * ortak biçime çekilir, tek geçişte AAC'ye encode edilir.
+ * ortak biçime çekilir, tek geçişte float WAV'a yazılır.
  *
  * @param {Array<{ path: string, channels: number|null }>} inputs
  * @param {string} outputPath
- * @param {{ bitrate: string }} format
  */
-function buildFilterArgs(inputs, outputPath, { bitrate }) {
+function buildFilterArgs(inputs, outputPath) {
   const branches = inputs.map((input, i) => normalizeBranch(i, input));
   const labels = inputs.map((_, i) => `[a${i}]`).join('');
 
@@ -320,7 +319,6 @@ function buildFilterArgs(inputs, outputPath, { bitrate }) {
     '-map', '[out]',
     '-vn',
     '-c:a', TARGET.codec,
-    '-b:a', bitrate,
     '-ar', String(TARGET.sampleRate),
     '-ac', String(TARGET.channels),
     '-y', outputPath,

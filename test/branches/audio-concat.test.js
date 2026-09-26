@@ -49,7 +49,7 @@ describe('ses birleştirme', () => {
 
   /** Birleştir, tıkları bul, manifest'le karşılaştır. */
   const measureDrift = async (folder, name) => {
-    const r = await concatAudio({ audioDir: folder, outputPath: dir.path(`${name}.m4a`) });
+    const r = await concatAudio({ audioDir: folder, outputPath: dir.path(`${name}.wav`) });
     const { onsets } = await findOnsets(r.output, { dir });
     assert.equal(onsets.length, TRACKS, `${name}: bulunan tık ${onsets.length}`);
     const driftMs = onsets.map((t, i) => Math.round((t - r.tracks[i].startSeconds) * 1000 * 10) / 10);
@@ -104,7 +104,7 @@ describe('ses birleştirme', () => {
     const sourceStereo = await channelStats(`${folder}/02.m4a`, { start: 1, duration: 1 });
     assert.deepEqual(sourceStereo.map((c) => Math.round(c.hz / 10) * 10), [500, 900], 'fixture');
 
-    const r = await concatAudio({ audioDir: folder, outputPath: dir.path('mixed.m4a') });
+    const r = await concatAudio({ audioDir: folder, outputPath: dir.path('mixed.wav') });
     assert.deepEqual([r.format.sampleRate, r.format.channels], [48000, 2]);
 
     const mono = await channelStats(r.output, { start: 1, duration: 1 });
@@ -135,7 +135,7 @@ describe('ses birleştirme', () => {
     assert.equal((await probe(damaged)).duration, 20);
 
     await assert.rejects(
-      concatAudio({ audioDir: folder, outputPath: dir.path('truncated.m4a') }),
+      concatAudio({ audioDir: folder, outputPath: dir.path('truncated.wav') }),
       /"02\.m4a" bozuk ya da kesik olabilir: başlık 20\.00 sn diyor, çözülebilen ses 9\.\d\d sn/,
     );
   });

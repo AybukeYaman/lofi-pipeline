@@ -9,7 +9,7 @@
  */
 
 import { mkdir } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { dirname, parse } from 'node:path';
 
 import { ffmpeg } from '../core/ffmpeg.js';
 import {
@@ -36,7 +36,6 @@ import { durationsMatch, probe } from '../core/probe.js';
 const DEFAULTS = {
   ambientOffsetDb: -18.8,
   fadeOut: 5,
-  bitrate: '192k',
   truePeak: -6,
   loudnessRange: 7,
   /** Doğrulama örneğinin alınacağı yer — videonun ortalarından kısa bir kesit. */
@@ -55,7 +54,6 @@ const NOOP_LOGGER = { info() {}, warn() {} };
  * @param {object} options.workspace core/workspace.js örneği (doğrulama örnekleri için)
  * @param {number} [options.ambientOffsetDb] ambient müziğin kaç LU altında kalsın
  * @param {number} [options.fadeOut] sondaki fade süresi (sn)
- * @param {string} [options.bitrate]
  * @param {{ startSeconds: number, duration: number }|null} [options.sample]
  *   null verilirse doğrulama atlanır (hızlı ama körlemesine)
  * @param {{ info: Function, warn: Function }} [options.logger]
@@ -70,7 +68,6 @@ export async function mixAmbient(options) {
     workspace,
     ambientOffsetDb = DEFAULTS.ambientOffsetDb,
     fadeOut = DEFAULTS.fadeOut,
-    bitrate = DEFAULTS.bitrate,
     sample = DEFAULTS.sample,
     logger = NOOP_LOGGER,
     onProgress,
@@ -134,13 +131,25 @@ export async function mixAmbient(options) {
     measured: ambientMeasured,
   });
 
-  // 3 — Kısa örneklerle doğrula
+  // 3 — Ambient'i bir kez, kendi uzunluğunda hazırla. Ağır zincir (aresample +
+  // loudnorm) 48 dakikalık döngüye değil yalnız bu dosyaya uygulanır; döngü
+  // hazır dosyayı tekrarlar. Linear loudnorm dosyanın kendi ölçümünden gelen
+  // düz bir kazanç → döngüde de aynı. Float WAV: ara adımda kayıp yok.
+  const preparedPath = workspace.path(`${parse(outputPath).name}.ambient.wav`);
+  await ffmpeg([
+    '-i', ambientPath,
+    '-af', `${ambientFilter},aresample=${sampleRate}`,
+    '-ar', String(sampleRate),
+    '-c:a', 'pcm_f32le',
+    '-y', preparedPath,
+  ]);
+
+  // 4 — Kısa örneklerle doğrula
   const verification = sampleWindow
     ? await verifyLevels({
       audioPath,
-      ambientPath,
+      preparedPath,
       workspace,
-      ambientFilter,
       sample: sampleWindow,
       targetI,
       musicI: music.inputI,
@@ -153,27 +162,27 @@ export async function mixAmbient(options) {
     warn('Doğrulama örneği atlandı (sample: null) — seviye körlemesine uygulanıyor.');
   }
 
-  // 4 — Nihai çıktı
+  // 5 — Nihai çıktı
   await mkdir(dirname(outputPath), { recursive: true });
 
   const fadeStart = Math.max(0, musicFile.duration - fadeOut);
   const filterComplex =
-    `[1:a]${ambientFilter},afade=t=out:st=${fadeStart}:d=${fadeOut}[amb];` +
+    `[1:a]afade=t=out:st=${fadeStart}:d=${fadeOut}[amb];` +
     `[0:a][amb]${AMIX}[out]`;
 
   logger.info('Nihai ses karıştırma başlıyor (video yok).');
 
   await ffmpeg([
     '-i', audioPath,
-    '-stream_loop', '-1', '-i', ambientPath,
+    '-stream_loop', '-1', '-i', preparedPath,
     '-filter_complex', filterComplex,
     '-map', '[out]',
-    '-c:a', 'aac',
-    '-b:a', bitrate,
+    // Ara dosya: float WAV. Ses yalnız montajda bir kez AAC'ye encode edilir.
+    '-c:a', 'pcm_f32le',
     '-y', outputPath,
   ], { onProgress });
 
-  // 5 — Çıktıyı doğrula
+  // 6 — Çıktıyı doğrula
   const result = await probe(outputPath);
 
   if (!durationsMatch(result.duration, musicFile.duration)) {
@@ -196,7 +205,7 @@ export async function mixAmbient(options) {
       maxVolume: ambientVolume.maxVolume,
       loudnormPasses: 2,
     },
-    audio: { codec: result.audioCodec, sampleRate: result.sampleRate, bitrate },
+    audio: { codec: result.audioCodec, sampleRate: result.sampleRate },
     fade: { start: fadeStart, duration: fadeOut },
     verification,
     warnings,
@@ -250,22 +259,22 @@ function buildAmbientFilter({ sampleRate, targetI, truePeak, loudnessRange, meas
  *   1. Ambient gerçekten hedef seviyeye indi mi (loudnorm tuttu mu).
  *   2. amix müziğin seviyesini düşürdü mü (normalize=0 çalışıyor mu).
  *
- * Örnekler PCM olarak üretiliyor — encoder renklendirmesi ölçümü kirletmesin.
+ * Örnekler hazırlanmış ambient'in döngüsünden, nihai karışımla aynı şekilde
+ * alınır. PCM üretiliyor — encoder renklendirmesi ölçümü kirletmesin.
  * 48 dakika yerine 30 saniye işleniyor, döngü saniyeler sürüyor.
  */
 async function verifyLevels(params) {
   const {
-    audioPath, ambientPath, workspace, ambientFilter,
+    audioPath, preparedPath, workspace,
     sample, targetI, musicI, logger, warn,
   } = params;
 
   const seek = ['-ss', String(sample.startSeconds), '-t', String(sample.duration)];
 
-  // 1 — Ambient tek başına, normalize edilmiş hali
+  // 1 — Ambient tek başına, hazırlanmış (normalize edilmiş) hali
   const ambientSample = workspace.path('verify-ambient.wav');
   await ffmpeg([
-    '-stream_loop', '-1', ...seek, '-i', ambientPath,
-    '-af', ambientFilter,
+    '-stream_loop', '-1', ...seek, '-i', preparedPath,
     '-c:a', 'pcm_s16le',
     '-y', ambientSample,
   ]);
@@ -275,8 +284,8 @@ async function verifyLevels(params) {
   const mixSample = workspace.path('verify-mix.wav');
   await ffmpeg([
     ...seek, '-i', audioPath,
-    '-stream_loop', '-1', ...seek, '-i', ambientPath,
-    '-filter_complex', `[1:a]${ambientFilter}[amb];[0:a][amb]${AMIX}[out]`,
+    '-stream_loop', '-1', ...seek, '-i', preparedPath,
+    '-filter_complex', `[0:a][1:a]${AMIX}[out]`,
     '-map', '[out]',
     '-c:a', 'pcm_s16le',
     '-y', mixSample,

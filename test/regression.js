@@ -13,7 +13,7 @@
  *     kare parlaklık/renk ortalamaları, loop SSIM.
  *   - Süreler (adım saniyeleri) yalnızca raporlanır — makine yüküne bağlı (bkz. HANDOFF bölüm 15 notu).
  *
- * Ambient AYNI build'in workspace'inde ayrıştırılır (`--keep`): final_mix_0.m4a − mix.m4a.
+ * Ambient AYNI build'in workspace'inde ayrıştırılır (`--keep`): final_mix_0.wav − mix.wav.
  * Yayınlanan videoya karşı ayrıştırma geçersiz: montaj sesi yeniden encode eder, müzik
  * konumu ms'lerce kayar ve çıkarma müziği silmez (ölçüldü: −10.8 / −12.4 LUFS "ambient").
  *
@@ -147,10 +147,10 @@ async function buildAndMeasure(config, workDir) {
   const report = JSON.parse(await readFile(join(out, 'final_ambient.report.json'), 'utf8'));
   const video = join(out, 'final_ambient.mp4');
   // Ambient ayrıştırması aynı zincirin iki sesi arasında: ambientli karışım
-  // (final_mix_0.m4a) − ambientsiz müzik (mix.m4a). Montajın ek encode'u
+  // (final_mix_0.wav) − ambientsiz müzik (mix.wav). Montajın ek encode'u
   // araya girerse örnekler kayar ve müzik silinmez (ölçüldü: −10.8 "ambient").
-  const dry = join(out, workspace, 'mix.m4a');
-  const wet = join(out, workspace, 'final_mix_0.m4a');
+  const dry = join(out, workspace, 'mix.wav');
+  const wet = join(out, workspace, 'final_mix_0.wav');
   const d = report.details;
   const info = await probe(video);
 

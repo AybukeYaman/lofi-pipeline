@@ -2,7 +2,7 @@
  * Geçici çalışma alanı — ara dosyaların ömrünü yönetir.
  *
  * Tek sorumluluk: klasör aç, içine güvenli biçimde dosya yaz, sonunda temizle.
- * Dosyaların ne olduğunu bilmez (list.txt mi mix.m4a mi umursamaz),
+ * Dosyaların ne olduğunu bilmez (list.txt mi mix.wav mi umursamaz),
  * ffmpeg çalıştırmaz. BOM'a dayanıklı metin/JSON okuma-yazma da burada —
  * aynı tuzak (bölüm 8) hem build'in hem prep/'in dosyalarında var.
  *

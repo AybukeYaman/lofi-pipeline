@@ -9,7 +9,7 @@
  *
  *   0  konfig doğrulama + çıktı çakışma kontrolü      (encode yok)
  *   1  01-video-prep    kırpma onayı, watermark + 16:9 → base.mp4
- *   2  02-audio-concat  parçalar → mix.m4a, sonra disk kontrolü
+ *   2  02-audio-concat  parçalar → mix.wav, sonra disk kontrolü
  *   3  03-ambient-mix   (opsiyonel) ambient → mix'e karışır (yalnız ses; video bir kez yazılır)
  *   4  04-assemble      base × n + ses + fade → nihai video
  *   5  05-tracklist     damgalar
@@ -159,12 +159,15 @@ export async function runBuild(config, options = {}) {
     // --- 2: ses
     const audio = await step('02', 'Ses birleştirme', (logger) => concatAudio({
       audioDir: config.audioDir,
-      outputPath: workspace.path('mix.m4a'),
+      outputPath: workspace.path('mix.wav'),
       order: config.order ?? undefined,
-      bitrate: config.audio.bitrate,
       logger,
       onProgress: progress('02', null),
     }));
+
+    const ambientPaths = config.ambient
+      ? (Array.isArray(config.ambient) ? config.ambient : [config.ambient])
+      : [];
 
     const disk = await checkDiskSpace({
       dir: config.output.dir,
@@ -172,6 +175,8 @@ export async function runBuild(config, options = {}) {
       baseDuration: video.result.duration,
       targetDuration: audio.duration,
       copies: 1, // ambient sese karıştığı için video yalnızca montajda yazılır
+      // Her ambient karışımı mix.wav boyutunda bir WAV daha yazar.
+      extraBytes: audio.format.size * ambientPaths.length,
       diskFree,
     });
     log.info(
@@ -179,10 +184,7 @@ export async function runBuild(config, options = {}) {
     );
 
     // --- 3: ambient (03, opsiyonel) — videoya değil sese karışır: 48 dakikalık
-    // video yalnızca montajda bir kez yazılır. Müzik seviyesi mix.m4a'dan ölçülür.
-    const ambientPaths = config.ambient
-      ? (Array.isArray(config.ambient) ? config.ambient : [config.ambient])
-      : [];
+    // video yalnızca montajda bir kez yazılır. Müzik seviyesi mix.wav'dan ölçülür.
     let finalAudio = audio.output;
     for (let i = 0; i < ambientPaths.length; i++) {
       const stepName = ambientPaths.length > 1
@@ -191,11 +193,10 @@ export async function runBuild(config, options = {}) {
       const mixed = await step('03', stepName, (logger) => mixAmbient({
         audioPath: finalAudio,
         ambientPath: ambientPaths[i],
-        outputPath: workspace.path(`final_mix_${i}.m4a`),
+        outputPath: workspace.path(`final_mix_${i}.wav`),
         workspace,
         ambientOffsetDb: config.audio.ambientOffsetDb,
         fadeOut: config.video.fadeOut,
-        bitrate: config.audio.bitrate,
         logger,
         onProgress: progress('03', audio.duration),
       }));
@@ -302,11 +303,11 @@ async function keepCropFrame(error, outDir) {
  * Kalan adımların ihtiyacını tahmin eder ve boş alanla karşılaştırır.
  *
  * Montaj çıktısı ≈ base.mp4 × (müzik süresi / klip süresi) — gövde kopyalandığı
- * için tahmin gerçekçi. Ambient varsa zirvede iki video workspace'te aynı anda durur.
+ * için tahmin gerçekçi. `extraBytes`: kalan adımların yazacağı ara ses dosyaları.
  */
-async function checkDiskSpace({ dir, baseSize, baseDuration, targetDuration, copies, diskFree }) {
+async function checkDiskSpace({ dir, baseSize, baseDuration, targetDuration, copies, extraBytes = 0, diskFree }) {
   const videoBytes = baseSize * (targetDuration / baseDuration);
-  const requiredBytes = Math.round(videoBytes * copies * DISK_MARGIN.ratio + DISK_MARGIN.bytes);
+  const requiredBytes = Math.round((videoBytes * copies + extraBytes) * DISK_MARGIN.ratio + DISK_MARGIN.bytes);
 
   const freeBytes = await diskFree(dir);
   // --overwrite: eski çıktılar ancak rename anında serbest kalır, boş alana sayılmaz.

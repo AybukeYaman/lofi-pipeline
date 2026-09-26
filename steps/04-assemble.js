@@ -1,7 +1,7 @@
 /**
  * Aşama 4b — Montaj.
  *
- * base.mp4 (5 sn, sessiz) + mix.m4a (48 dk) → sona fade'li, müzikli video.
+ * base.mp4 (5 sn, sessiz) + mix.wav (48 dk, float PCM) → sona fade'li, müzikli video.
  * Ambient bu çıktının üzerine 03-ambient-mix.js ile eklenir.
  *
  * Elle yapılan süreçte (bölüm 6, adım 6–7) önce kopyayla mux edilip sonra
@@ -40,7 +40,7 @@ const NOOP_LOGGER = { info() {}, warn() {} };
  *
  * @param {object} options
  * @param {string} options.videoPath base.mp4 (01-video-prep.js çıktısı)
- * @param {string} options.audioPath mix.m4a (02-audio-concat.js çıktısı)
+ * @param {string} options.audioPath mix.wav ya da final_mix_N.wav (02/03 çıktısı)
  * @param {string} options.outputPath
  * @param {object} options.workspace core/workspace.js örneği
  * @param {number} [options.fadeOut] sondaki fade süresi (sn), 0 = fade yok
