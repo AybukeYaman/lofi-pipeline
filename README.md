@@ -4,7 +4,7 @@ Lofi müzik videoları üretimi için otomatik prep (hazırlık) ve ffmpeg taban
 
 Bu proje iki ana katmandan oluşur:
 1. **Montaj Otomasyonu (Katman 1 - `build.js`):** Suno müzik parçalarını, Hailuo video klip döngüsünü ve ambient ses efektlerini otomatik olarak birleştirir, YouTube uyumlu tracklist ve rapor üretir.
-2. **Hazırlık Otomasyonu (Aşama 7 / `prep`):** Proje iskeleti oluşturma, prompt şablonları doldurma, `prompts.md` üretimi ve Gemini API ile stil kartı (`add-style.js`) analiz otomasyonu.
+2. **Hazırlık Otomasyonu (Aşama 7 / `prep`):** Proje iskeleti oluşturma, kamera açısı promptları (`prompts.md`) ve Gemini API ile albüm müzik planı. Görseller elle üretilir; stil yalnızca müzik profilidir (`styles/<ad>.json` → `music`).
 3. **Panel (Aşama 8–9 / `npm start`):** Üç komutu ok tuşlu bir menüden çalıştırır; istenirse proje klasörüne bakıp kaldığı yerden devam eder, birden fazla projeyi sırayla derler.
 
 ---
@@ -17,9 +17,9 @@ Gereksinimler:
 
 Depoyu klonlayıp dizinde `npm install` çalıştırın. Tek bağımlılık `enquirer` 2.4.1'dir (sabit sürüm; panelin ok tuşlu menüsü). Geri kalan her şey Node.js dahili modülleriyle yazılmıştır.
 
-### `.env` Kurulumu (Opsiyonel - Stil Analizi İçin)
+### `.env` Kurulumu (Opsiyonel - Müzik Planı İçin)
 
-Stil kartı oluşturma (`node add-style.js`) özelliğini kullanmak için projenin kök dizininde `.env` dosyası oluşturun:
+Albüm müzik planını Gemini ile üretmek için projenin kök dizininde `.env` dosyası oluşturun (yoksa yerel plan kullanılır):
 
 ```env
 GEMINI_API_KEY=your_gemini_api_key_here
@@ -66,7 +66,7 @@ lofi — üretim paneli
 
 Onay soruları "Evet / Hayır" seçimidir (yazarak değil).
 
-- **Tek tek:** Menü öğeleri ilgili işi yapar. Komutlar (`new-video.js`, `add-style.js`, `build.js`) aşağıdaki bayraklarla, ayrı süreçte çalışır; çıktıları doğrudan terminale akar.
+- **Tek tek:** Menü öğeleri ilgili işi yapar. Komutlar (`new-video.js`, `build.js`) aşağıdaki bayraklarla, ayrı süreçte çalışır; çıktıları doğrudan terminale akar.
 - **Toplu montaj:** Montaja hazır projeler (klip seçili, `audio\` dolu, çıktı yok) listelenir. Boşluk ile işaretlenenler sırayla `build.js` ile derlenir. Çıktısı olan projeler listede görünür ama seçilemez. Bir projenin hatası diğerlerini durdurmaz; Ctrl+C ile bir montaj durdurulursa kalanların iptal edilip edilmeyeceği sorulur. Sonda özet basılır.
 - **Sıralı mod (Projeye devam et):** Panel proje klasörüne bakıp sıradaki adımı bulur. Durum hiçbir yere kaydedilmez, her seferinde dosyalardan okunur; ertesi gün aynı projeyi seçince oradan sürer.
 
@@ -84,26 +84,14 @@ Onay soruları "Evet / Hayır" seçimidir (yazarak değil).
 - Panel etkileşimli terminal ister; çıktı dosyaya ya da boruya yönlendirilirse (ör. Git Bash) çıkış kodu 2 ile kapanır.
 - **Terminal kontrolü:** Ok tuşlarının bir terminalde güvenilir çalıştığını doğrulamak için `npm run tty-check`. Betik; seçim, kaydırma, çoklu seçim, Türkçe giriş, Esc, alt süreç devri ve Ctrl+C adımlarını tek tek sınar ve sonuç satırı basar.
 
-### 1. Yeni Stil Kartı Analizi (`add-style.js`)
-Referans bir görselden Gemini Flash ile stil analizi yapıp `styles/<name>.json` ve `styles/refs/<name>.<ext>` üretir:
-
-```bash
-node add-style.js "C:\yol\referans.jpg" --name "cozy-realistic"
-```
-
-Var olan stili güncellemek için:
-```bash
-node add-style.js "C:\yol\referans.jpg" --name "cozy-realistic" --overwrite
-```
-
-### 2. Yeni Video Projesi İskeleti Oluşturma (`new-video.js`)
-Seçilen stil ve opsiyonel ambient ses efekti ile proje iskeletini (`STYLE_BLOCK.txt`, `project.json`, `prompts.md`) açar:
+### 1. Yeni Video Projesi İskeleti Oluşturma (`new-video.js`)
+İsteğe bağlı müzik stili ve ambient ses efekti ile proje iskeletini (`project.json`, `prompts.md`) açar:
 
 ```bash
 node new-video.js "video3-Neo Tokyo Night" --style cozy-realistic --ambient heavyRain
 ```
 
-### 3. Video Montajını Başlatma (`build.js`)
+### 2. Video Montajını Başlatma (`build.js`)
 Hazırlanan projenin montajını ve işlenmesini başlatır:
 
 ```bash
@@ -128,7 +116,6 @@ Tüm testler (248 test) network bağımlılığı olmadan mock `fetch` / `sleep`
 
 ```
 lofi/
-├── add-style.js           # Gemini API ile görsel stil analizi CLI
 ├── build.js               # Montaj ve ffmpeg build CLI
 ├── lofi.js                # Panel (npm start)
 ├── new-video.js           # Proje iskeleti oluşturma CLI
@@ -146,5 +133,5 @@ lofi/
 
 ## ⚙️ Manuel ve Otomatik İş Bölümü
 
-- **Otomatik (Pipeline):** Proje iskelet kurulumu, prompt markdown üretimi, Gemini ile stil kartı analizi, ffmpeg montajı, crossfade loop, ambient miksajı, tracklist ve rapor üretimi. Panel ayrıca sıradaki adımı bulur, `clip` alanını yazar ve birden fazla projeyi sırayla derler.
+- **Otomatik (Pipeline):** Proje iskelet kurulumu, açı promptları, Gemini ile müzik planı, ffmpeg montajı, crossfade loop, ambient miksajı, tracklist ve rapor üretimi. Panel ayrıca sıradaki adımı bulur, `clip` alanını yazar ve birden fazla projeyi sırayla derler.
 - **Manuel (Kullanıcı Yargısı):** Suno'da müzik üretimi, Google AI Studio / Gemini Image ile master frame üretimi, Hailuo ile video klip üretimi. Donanım VRAM kısıtları nedeniyle medya üretimi bulut/manuel araçlarda kalmaktadır.

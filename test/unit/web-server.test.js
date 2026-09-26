@@ -60,7 +60,7 @@ describe('web server project API', () => {
       assert.equal(projects[0].name, fixture.projectName);
       assert.equal(typeof projects[0].mtimeMs, 'number');
       assert.equal(projects[0].step.id, 'faz1');
-      assert.match(projects[0].step.detail, /prompts\.md/);
+      assert.match(projects[0].step.detail, /MASTER\.png/);
     } finally {
       await server.close();
       await fixture.cleanup();

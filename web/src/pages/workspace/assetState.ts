@@ -7,16 +7,14 @@
 import type { AssetStatus } from '../../components/StatusBadge';
 import type { MusicTrack, ProjectDetail } from '../../types';
 
-const CUSTOM_STYLE = 'custom-generated';
-
 export function fileName(path?: string | null) {
   if (!path) return null;
   return path.split(/[\\/]/).pop() || path;
 }
 
+/** Projenin müzik stili; seçilmediyse null. */
 export function styleName(project: ProjectDetail) {
-  const style = project.style ?? project.projectJson?.data?.style;
-  return style && style !== '-' ? style : null;
+  return project.style ?? project.projectJson?.data?.style ?? null;
 }
 
 export function musicTracks(project: ProjectDetail): MusicTrack[] {
@@ -31,23 +29,18 @@ export function ambientFiles(project: ProjectDetail): string[] {
 }
 
 export type ProjectAssets = Record<
-  'style' | 'references' | 'master' | 'clip' | 'music' | 'ambient' | 'assembly' | 'output',
+  'master' | 'clip' | 'music' | 'ambient' | 'assembly' | 'output',
   AssetStatus
 >;
 
 export function deriveAssets(project: ProjectDetail): ProjectAssets {
   const readiness = project.readiness;
-  const style = styleName(project);
-  const isCustomStyle = style === CUSTOM_STYLE;
-  const referenceCount = readiness?.style ? readiness.style.referenceCount : (project.references?.length ?? 0);
   const clipCount = readiness?.clip ? readiness.clip.availableCount : (project.clips?.length ?? 0);
   const ambientCount = ambientFiles(project).length;
   const outputExists = readiness?.output ? readiness.output.exists : Boolean(project.output?.exists);
 
   if (readiness) {
     return {
-      style: readiness.style.ready ? 'ready' : (!readiness.style.name ? 'missing' : 'waiting'),
-      references: referenceCount > 0 ? 'ready' : isCustomStyle ? 'missing' : 'optional',
       master: readiness.master.ready ? 'ready' : 'missing',
       clip: readiness.clip.ready ? 'ready' : (readiness.clip.selected || clipCount > 0 ? 'waiting' : 'missing'),
       music: readiness.music.ready ? 'ready' : (readiness.music.audioCount > 0 || readiness.music.completedTrackCount > 0 ? 'waiting' : 'missing'),
@@ -58,8 +51,6 @@ export function deriveAssets(project: ProjectDetail): ProjectAssets {
   }
 
   return {
-    style: !style ? 'missing' : isCustomStyle && !project.styleBlockExists ? 'waiting' : 'ready',
-    references: referenceCount > 0 ? 'ready' : isCustomStyle ? 'missing' : 'optional',
     master: project.master ? 'ready' : 'missing',
     clip: project.clip?.exists ? 'ready' : !project.clip?.value && clipCount > 0 ? 'waiting' : 'missing',
     music: musicStatus(project),

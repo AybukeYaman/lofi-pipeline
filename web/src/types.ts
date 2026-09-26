@@ -6,11 +6,9 @@ export type ProjectStep = {
   skippable?: boolean;
 };
 
-/** Canonical 10 adım — backend canonicalWorkflow (prep/project-status.js). */
+/** Canonical 8 adım — backend canonicalWorkflow (prep/project-status.js). */
 export type WorkflowStepId =
   | 'project'
-  | 'style'
-  | 'reference'
   | 'master'
   | 'angles'
   | 'video'
@@ -102,11 +100,9 @@ export type MusicTrack = {
 };
 
 export type ProjectReadiness = {
+  /** Müzik stili; seçilmediyse null. */
   style: {
-    ready: boolean;
     name: string | null;
-    styleBlockExists?: boolean;
-    referenceCount: number;
   };
   master: {
     ready: boolean;
@@ -156,13 +152,9 @@ export type ProjectDetail = {
   name: string;
   dir?: string;
   promptsPath?: string;
-  styleBlockExists?: boolean;
-  references?: string[];
   projectJson?: ProjectJsonState;
   style?: string | null;
   master?: string | null;
-  styleRef?: string | null;
-  sceneRef?: string | null;
   angles?: string[];
   /** 'image': tüm video boyunca tek resim; clips o zaman MASTER + açı görselleri. */
   videoSource?: VideoSource;
@@ -176,10 +168,9 @@ export type ProjectDetail = {
   readiness?: ProjectReadiness;
 };
 
+/** Kopyalanacak kamera açısı promptları. */
 export type ProjectPrompts = {
-  master: string | null;
   angles: Array<{ title: string; prompt: string }>;
-  video: string | null;
 };
 
 export type ProjectMusicAudio = {
@@ -201,7 +192,7 @@ export type ProjectMusicInfo = {
 /** 8. adım sıralama yöntemi — project.json workflow.order. */
 export type TrackOrderMode = 'alphabetical' | 'added' | 'manual';
 
-export type ImageSlot = 'scene' | 'master' | 'angle';
+export type ImageSlot = 'master' | 'angle';
 
 export type MasterFrameInfo = {
   ready: boolean;
@@ -210,48 +201,33 @@ export type MasterFrameInfo = {
   folder: string;
   expectedName: string;
   acceptedExtensions: string[];
-  prompt: string | null;
-  promptError?: string | null;
 };
 
-export type StylePaletteColor = {
-  hex: string;
-  role: string;
-};
-
-export type StyleBlock = {
-  medium?: string;
-  lines?: string;
-  palette?: StylePaletteColor[];
-  light?: string;
-  texture?: string;
-  contrast?: string;
-  shading?: string;
-};
-
+/** Müzik profili — sunucudaki prep/styles.js MUSIC_FIELDS; her alan metin ya da metin listesi. */
 export type StyleMusic = {
-  genre?: string;
-  production?: string[];
-  instruments?: string[];
-  aesthetic?: string;
-  exclude?: string[];
+  genre?: string | string[];
+  production?: string | string[];
+  instruments?: string | string[];
+  aesthetic?: string | string[];
+  exclude?: string | string[];
 };
 
+/** Müzik stili (GET /api/library, /api/styles). */
 export type BackendStyle = {
   name: string;
-  kind: 'custom' | 'library';
   valid: boolean;
-  suggestedAmbient?: string[] | string | null;
-  hasReference?: boolean;
-  refUrl?: string | null;
-  refUrls?: string[];
-  references?: { name: string; url: string }[];
-  styleBlock?: StyleBlock | string;
-  motionHints?: string[] | string;
-  music?: StyleMusic;
-  raw?: Record<string, unknown>;
+  music?: StyleMusic | null;
+  hasMusicProfile?: boolean;
+  suggestedAmbient?: string | null;
   problems?: string[];
   warnings?: string[];
+};
+
+/** POST/PUT /api/styles gövdesi; music: null profili siler, boş suggestedAmbient öneriyi siler. */
+export type StylePayload = {
+  name?: string;
+  music?: StyleMusic | null;
+  suggestedAmbient?: string;
 };
 
 export type BackendAmbient = {
@@ -268,7 +244,8 @@ export type VideoSource = 'clip' | 'image';
 
 export type CreateProjectPayload = {
   name: string;
-  style: string;
+  /** Müzik stili, isteğe bağlı. */
+  style?: string;
   ambient?: string[];
   videoSource?: VideoSource;
   concept?: string;

@@ -6,7 +6,7 @@
  *
  * Numaralı menü: adımlar tek tek çalıştırılır ya da "Projeye devam et" ile
  * proje klasörüne bakılıp kaldığı yerden sürdürülür. Komutlar (new-video,
- * add-style, build) ayrı süreçte çalışır ve terminali devralır.
+ * build) ayrı süreçte çalışır ve terminali devralır.
  */
 
 import { basename, resolve } from 'node:path';
@@ -19,7 +19,7 @@ import { inspectProject, listProjects, nextStep } from './prep/project-status.js
 import { DEFAULT_VIDEOS_DIR } from './prep/scaffold.js';
 import { STYLES_DIR } from './prep/styles.js';
 import {
-  addStyle, batchBuild, buildProject, chooseClip, continueProject, createSession, newProject,
+  batchBuild, buildProject, chooseClip, continueProject, createSession, newProject,
   selectProject, showLibrary, showStatus,
 } from './ui/actions.js';
 import { createInkPrompter } from './ui/ink-prompter.js';

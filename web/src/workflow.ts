@@ -7,8 +7,6 @@ import type { ProjectWorkflow, WorkflowStepId, WorkflowStepInfo } from './types'
  */
 export const STEP_ORDER: WorkflowStepId[] = [
   'project',
-  'style',
-  'reference',
   'master',
   'angles',
   'video',
@@ -21,26 +19,11 @@ export const STEP_ORDER: WorkflowStepId[] = [
 export const STEP_GUIDE: Record<WorkflowStepId, { who: 'user' | 'system'; lines: string[] }> = {
   project: {
     who: 'user',
-    lines: ['Proje adı, stil ve ambient ses seçildi; proje ayarları ve promptlar hazırlandı.'],
-  },
-  style: {
-    who: 'user',
-    lines: [
-      'Beğendiğin bir stil görseli yükle; sistem görseli analiz edip stil tarifini kaydeder.',
-      'Kayıtlı bir kütüphane stili seçtiysen bu adım tamamdır, yeniden görsel vermen gerekmez.',
-    ],
-  },
-  reference: {
-    who: 'user',
-    lines: ['Sahnenin ne olacağını gösteren bir görsel bul ve yükle.'],
+    lines: ['Proje adı, müzik stili ve ambient ses seçildi; proje ayarları hazırlandı.'],
   },
   master: {
     who: 'user',
-    lines: [
-      "Bu promptu AI Studio'ya yapıştır.",
-      'İki görseli yükle: biri sahne referansı, biri stil görseli.',
-      'Görseli üret, en iyisini seç ve buraya yükle.',
-    ],
+    lines: ['Ürettiğin ana görseli buraya yükle (ya da resimler\\MASTER.png olarak kaydet).'],
   },
   angles: {
     who: 'user',
@@ -48,11 +31,7 @@ export const STEP_GUIDE: Record<WorkflowStepId, { who: 'user' | 'system'; lines:
   },
   video: {
     who: 'user',
-    lines: [
-      "Bu promptu Hailuo'ya yapıştır.",
-      'Görseli yükle. 5 saniye, motion düşük kullan.',
-      'Videoyu üret ve buraya yükle.',
-    ],
+    lines: ['Ürettiğin döngü klibini (.mp4) yükle — tek resim modunda videoda kalacak görseli seç.'],
   },
   music: {
     who: 'user',

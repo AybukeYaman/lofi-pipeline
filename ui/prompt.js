@@ -181,18 +181,3 @@ export function createPrompter({ stdin = process.stdin, stdout = process.stdout,
     },
   };
 }
-
-/**
- * PowerShell'e sürükle-bırakla gelen yol: `"C:\a b.jpg"`, `'C:\a b.jpg'`,
- * `& 'C:\a b.jpg'` → `C:\a b.jpg`.
- *
- * @param {string} text
- * @returns {string}
- */
-export function cleanPath(text) {
-  let path = String(text ?? '').trim().replace(/^&\s*(?=["'])/, '');
-  if (path.length >= 2 && (path[0] === '"' || path[0] === "'") && path.at(-1) === path[0]) {
-    path = path.slice(1, -1);
-  }
-  return path.trim();
-}

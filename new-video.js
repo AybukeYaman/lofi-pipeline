@@ -2,13 +2,13 @@
 /**
  * Aşama 7a — yeni video projesi.
  *
- *   node new-video.js "<isim>" --style <ad> [--ambient <ad>] [--video-source clip|image]
+ *   node new-video.js "<isim>" [--style <ad>] [--ambient <ad>] [--video-source clip|image]
  *                     [--videos-dir <yol>] [--ambient-dir <yol>]
  *
- * videolar/<isim>/ altına audio/, resimler/, videolar/ + STYLE_BLOCK.txt,
- * project.json (clip boş), prompts.md; stilin referans görseli varsa
- * resimler/style-ref.<uzantı>. Önce her şey doğrulanır, sonra yazılır;
- * klasör zaten varsa hiçbir şeye dokunulmaz.
+ * videolar/<isim>/ altına audio/, resimler/, videolar/ + project.json (clip
+ * boş), prompts.md (kamera açısı promptları). Stil isteğe bağlı bir müzik
+ * profilidir; görseller elle üretilir. Önce her şey doğrulanır, sonra
+ * yazılır; klasör zaten varsa hiçbir şeye dokunulmaz.
  */
 
 import { resolve } from 'node:path';
@@ -19,9 +19,9 @@ import { VIDEO_SOURCES } from './core/config.js';
 import { AmbientError, DEFAULT_AMBIENT_DIR, findAmbient, listAmbients } from './prep/ambients.js';
 import { PromptError, loadTemplates } from './prep/prompts.js';
 import {
-  DEFAULT_VIDEOS_DIR, ProjectExistsError, planProject, planProjectAsync, validateVideoName, writeProject,
+  DEFAULT_VIDEOS_DIR, ProjectExistsError, planProjectAsync, validateVideoName, writeProject,
 } from './prep/scaffold.js';
-import { STYLES_DIR, StyleError, findStyleRef, listStyles, loadStyle } from './prep/styles.js';
+import { STYLES_DIR, StyleError, loadStyle } from './prep/styles.js';
 
 export class NewVideoError extends Error {
   /** @param {string[]} problems */
@@ -37,22 +37,23 @@ export class NewVideoError extends Error {
  *
  * @param {{
  *   videoName: string,
- *   styleName: string,
- *   ambientName?: string,
+ *   styleName?: string,
+ *   ambientName?: string|string[],
  *   videoSource?: 'clip'|'image',
  *   videosDir?: string,
  *   ambientDir?: string,
  *   stylesDir?: string,
  *   promptsDir?: string,
- * }} input
+ *   concept?: string,
+ *   totalTracks?: number,
+ * }} input styleName: müzik stili, isteğe bağlı
  * @returns {Promise<{
  *   dir: string,
  *   files: string[],
- *   copies: string[],
  *   warnings: string[],
  *   ambient: { name: string, path: string } | null,
  *   suggestion: { name: string, ambient: { name: string, path: string } | null } | null,
- * }>} suggestion: ambient seçilmediyse stilin önerisi
+ * }>} suggestion: ambient seçilmediyse ve stil öneriyorsa stilin önerisi
  */
 export async function runNewVideo({
   videoName,
@@ -82,13 +83,15 @@ export async function runNewVideo({
   }
 
   let style = null;
-  try {
-    const loaded = await loadStyle(styleName, { dir: stylesDir, ambients: ambients ?? undefined });
-    style = loaded.style;
-    warnings.push(...loaded.warnings);
-  } catch (error) {
-    if (!(error instanceof StyleError)) throw error;
-    problems.push(...error.problems.map((p) => `stil "${styleName}": ${p}`));
+  if (styleName !== undefined) {
+    try {
+      const loaded = await loadStyle(styleName, { dir: stylesDir, ambients: ambients ?? undefined });
+      style = loaded.style;
+      warnings.push(...loaded.warnings);
+    } catch (error) {
+      if (!(error instanceof StyleError)) throw error;
+      problems.push(...error.problems.map((p) => `stil "${styleName}": ${p}`));
+    }
   }
 
   let ambient = null;
@@ -118,27 +121,24 @@ export async function runNewVideo({
 
   if (problems.length > 0) throw new NewVideoError(problems);
 
-  const ref = await findStyleRef(styleName, { dir: stylesDir });
-  warnings.push(...ref.warnings);
-
   let plan;
   try {
-    plan = await planProjectAsync({ videosDir, videoName, style, ambient, styleRef: ref.path, templates, concept, totalTracks, videoSource });
+    plan = await planProjectAsync({ videosDir, videoName, style, ambient, templates, concept, totalTracks, videoSource });
   } catch (error) {
     if (!(error instanceof PromptError)) throw error;
     throw new NewVideoError(error.problems);
   }
   await writeProject(plan);
 
+  const suggested = style?.suggestedAmbient;
   return {
     dir: plan.dir,
     files: plan.files.map((f) => f.path),
-    copies: plan.copies.map((c) => c.path),
     warnings,
     ambient,
-    suggestion: ambient ? null : {
-      name: style.suggestedAmbient,
-      ambient: ambients ? findAmbient(ambients, style.suggestedAmbient) : null,
+    suggestion: ambient || !suggested ? null : {
+      name: suggested,
+      ambient: ambients ? findAmbient(ambients, suggested) : null,
     },
   };
 }
@@ -146,11 +146,11 @@ export async function runNewVideo({
 // ---------------------------------------------------------------- CLI
 
 const USAGE = `Kullanım:
-  node new-video.js "<isim>" --style <ad> [--ambient <ad>] [--video-source clip|image]
+  node new-video.js "<isim>" [--style <ad>] [--ambient <ad>] [--video-source clip|image]
                     [--concept <metin>] [--total-tracks <sayı>]
 
   <isim>               videolar klasöründe açılacak proje (boşluk varsa tırnak içinde)
-  --style <ad>         styles/ içindeki stil — verilmezse mevcut stiller listelenir
+  --style <ad>         styles/ içindeki müzik stili — verilmezse varsayılan lofi profili
   --ambient <ad>       ortak ses efekti (ör. heavyRain) — verilmezse project.json'da ambient olmaz
   --video-source <tür> clip: döngü video (.mp4, varsayılan) · image: tüm video boyunca tek resim
   --concept <metin>    albüm konsepti (ör. "2:17 AM — Everyone Is Asleep")
@@ -200,45 +200,12 @@ export function parseCli(argv) {
   };
 }
 
-/** --style verilmediğinde basılan kütüphane özeti. */
-async function describeLibrary({ ambientDir, stylesDir = STYLES_DIR }) {
-  const lines = ['Stil seçilmedi (--style). Mevcut stiller:'];
-
-  let ambients;
-  try {
-    ambients = await listAmbients(ambientDir);
-  } catch (error) {
-    if (!(error instanceof AmbientError)) throw error;
-  }
-
-  const names = await listStyles({ dir: stylesDir });
-  const width = Math.max(0, ...names.map((n) => n.length));
-  for (const name of names) {
-    const ref = (await findStyleRef(name, { dir: stylesDir })).path ? 'referans görseli var' : 'referans görseli yok';
-    try {
-      const { style } = await loadStyle(name, { dir: stylesDir, ambients });
-      lines.push(`  ${name.padEnd(width)}  öneri: --ambient ${style.suggestedAmbient} · ${ref}`);
-    } catch (error) {
-      if (!(error instanceof StyleError)) throw error;
-      lines.push(`  ${name.padEnd(width)}  (geçersiz — ${error.problems.length} problem)`);
-    }
-  }
-  if (names.length === 0) lines.push('  (yok)');
-
-  lines.push('', ambients
-    ? `Ambient'ler: ${ambients.map((a) => a.name).join(', ') || '(yok)'}`
-    : `Ambient klasörü okunamadı: ${ambientDir ?? DEFAULT_AMBIENT_DIR}`);
-  lines.push('', 'Örnek: node new-video.js "video3-Neo Tokyo Night" --style cozy-realistic --ambient heavyRain');
-  return lines.join('\n');
-}
-
 /** @param {Awaited<ReturnType<typeof runNewVideo>>} result */
 function describeResult(result) {
   const lines = [
     `Proje oluşturuldu: ${result.dir}`,
     '  audio\\  resimler\\  videolar\\',
-    `  ${['STYLE_BLOCK.txt', 'project.json', 'prompts.md'].join(' · ')}` +
-      (result.copies.length > 0 ? ' · resimler\\style-ref' : ''),
+    '  project.json · prompts.md',
   ];
 
   if (result.warnings.length > 0) {
@@ -251,16 +218,13 @@ function describeResult(result) {
       lines.push('Eklemek için project.json\'a:', `  "ambient": ${JSON.stringify(result.suggestion.ambient.path)},`);
     }
   }
-  if (result.copies.length === 0) {
-    lines.push('', 'Stilin referans görseli yok — Faz 1\'de Image 2 olarak stil görselini elle ekle.');
-  }
 
   lines.push(
     '',
     'Sıradaki adımlar:',
-    '  1. prompts.md → Faz 1–3 (görseller resimler\\, klip videolar\\ altına)',
-    '  2. Suno parçalarını audio\\ altına koy',
-    '  3. project.json → "clip" alanına klibin yolunu yaz (ör. ./videolar/in.mp4)',
+    '  1. Master görselini resimler\\MASTER.png olarak koy (açı promptları: prompts.md)',
+    '  2. Klibi videolar\\ altına koy (tek resim modunda gerekmez)',
+    '  3. Suno parçalarını audio\\ altına koy',
     `  4. node build.js --project "${resolve(result.dir, 'project.json')}"`,
   );
   return lines.join('\n');
@@ -285,10 +249,6 @@ export async function main(argv) {
     console.log(USAGE);
     return 0;
   }
-  if (cli.styleName === undefined) {
-    console.error(await describeLibrary({ ambientDir: cli.ambientDir, stylesDir: cli.stylesDir }));
-    return 2;
-  }
   if (cli.videoName === undefined) {
     console.error(`proje ismi eksik\n\n${USAGE}`);
     return 2;
@@ -300,6 +260,8 @@ export async function main(argv) {
       styleName: cli.styleName,
       ambientName: cli.ambientName,
       videoSource: cli.videoSource,
+      concept: cli.concept,
+      totalTracks: cli.totalTracks,
       videosDir: cli.videosDir,
       ambientDir: cli.ambientDir,
       stylesDir: cli.stylesDir,

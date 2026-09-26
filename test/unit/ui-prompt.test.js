@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { PassThrough } from 'node:stream';
 import { describe, test } from 'node:test';
 
-import { PromptClosedError, cleanPath, createPrompter } from '../../ui/prompt.js';
+import { PromptClosedError, createPrompter } from '../../ui/prompt.js';
 
 /** Tuş adları: 'down' 'up' 'space' 'backspace' 'escape' 'ctrl+c' ya da { type: 'metin' }. */
 async function press(prompt, key) {
@@ -226,18 +226,4 @@ describe('gerçek klavye yolu (sahte TTY) — enquirer #483 Ctrl+C çökmesi', (
     assert.equal(stdin.isRaw, false);
     assert.deepEqual(unhandled, []);
   });
-});
-
-describe('cleanPath', () => {
-  for (const [raw, expected] of [
-    ['"C:\\Users\\a b\\x.jpg"', 'C:\\Users\\a b\\x.jpg'],
-    ["'C:\\a b.png'", 'C:\\a b.png'],
-    ["& 'C:\\a b.png'", 'C:\\a b.png'],
-    ['  C:\\duz.jpg  ', 'C:\\duz.jpg'],
-    ['"yarım', '"yarım'],
-    ['&isim.jpg', '&isim.jpg'],
-    ['', ''],
-  ]) {
-    test(`${JSON.stringify(raw)} → ${JSON.stringify(expected)}`, () => assert.equal(cleanPath(raw), expected));
-  }
 });

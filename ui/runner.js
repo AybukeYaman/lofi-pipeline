@@ -3,7 +3,7 @@
  *
  * Neden aynı süreçte main() değil: build.js çift Ctrl+C'de process.exit(130)
  * çağırıyor (paneli de öldürürdü) ve kırpma onayı için stdin'de kendi
- * readline'ını açıyor; add-style process.env'i değiştiriyor. Ayrı süreç,
+ * readline'ını açıyor. Ayrı süreç,
  * test edilmiş CLI davranışını birebir korur.
  */
 
@@ -37,7 +37,7 @@ export function isParentAlive({ ppid = process.ppid, killFn = process.kill } = {
  * @param {string} script repo köküne göre betik (ör. "build.js")
  * @param {string[]} [args]
  * @param {{ cwd?: string, spawnFn?: typeof spawn }} [options]
- *   cwd repo kökü olmalı: add-style .env'i process.cwd()'den okuyor
+ *   cwd repo kökü olmalı: betikler göreli yolları (ör. .env) buna göre çözer
  * @returns {Promise<number>} çıkış kodu (sinyalle bittiyse 130, başlatılamadıysa 1)
  */
 export function runScript(script, args = [], { cwd = REPO_ROOT, spawnFn = spawn } = {}) {

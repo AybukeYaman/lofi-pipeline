@@ -6,21 +6,21 @@
  * üretmez. Var olan klasöre asla yazmaz.
  */
 
-import { copyFile, mkdir, rm } from 'node:fs/promises';
-import { extname, join } from 'node:path';
+import { mkdir, rm } from 'node:fs/promises';
+import { join } from 'node:path';
 
 import { VIDEO_SOURCES } from '../core/config.js';
 import { writeTextFile } from '../core/workspace.js';
 import { DEFAULT_CROP_BOTTOM } from './project-file.js';
 import { generateMusicPlan, generateMusicPlanAsync } from './music-planner.js';
 import { buildPromptsMd } from './prompts.js';
-import { CUSTOM_STYLE_NAME, renderStyleBlock } from './styles.js';
+import { musicStyleText } from './styles.js';
 
 /** Albüm klasörlerinin kökü. `--videos-dir` ezer. */
 export const DEFAULT_VIDEOS_DIR = 'C:\\Users\\Aybuke Yeni\\Desktop\\Youtube\\videolar';
 
 /** Kullanıcının mevcut düzeni (HANDOFF bölüm 9). */
-export const PROJECT_SUBDIRS = ['audio', 'resimler', 'videolar', 'references'];
+export const PROJECT_SUBDIRS = ['audio', 'resimler', 'videolar'];
 
 export class ProjectExistsError extends Error {
   /** @param {string} dir */
@@ -57,23 +57,23 @@ export function validateVideoName(name) {
  * @param {{
  *   videosDir: string,
  *   videoName: string,
- *   style: object,
+ *   style?: object | null,
  *   ambient: { name: string, path: string } | null,
- *   styleRef: string | null,
  *   templates: { file: string, text: string }[],
  *   concept?: string,
  *   totalTracks?: number,
  *   musicPlan?: object,
  *   videoSource?: 'clip'|'image',
- * }} input videoSource: 'image' → tüm video boyunca tek resim (watermark yok, kırpma 0) style doğrulanmış (loadStyle), isim doğrulanmış (validateVideoName)
+ * }} input style: müzik stili, isteğe bağlı (loadStyle ile doğrulanmış);
+ *   videoSource: 'image' → tüm video boyunca tek resim (watermark yok, kırpma 0);
+ *   isim doğrulanmış (validateVideoName)
  * @returns {{
  *   dir: string,
  *   subdirs: string[],
  *   files: { name: string, path: string, content: string, bom: boolean }[],
- *   copies: { from: string, path: string }[],
  * }}
  */
-export function planProject({ videosDir, videoName, style, ambient, styleRef, templates, concept, totalTracks, musicPlan, videoSource = 'clip' }) {
+export function planProject({ videosDir, videoName, style = null, ambient, templates, concept, totalTracks, musicPlan, videoSource = 'clip' }) {
   if (!VIDEO_SOURCES.includes(videoSource)) {
     throw new Error(`videoSource: ${VIDEO_SOURCES.join(' | ')} olmalı (verilen: ${JSON.stringify(videoSource)})`);
   }
@@ -83,11 +83,7 @@ export function planProject({ videosDir, videoName, style, ambient, styleRef, te
     ? ambient.map((a) => a.path)
     : (ambient ? ambient.path : null);
 
-  const plan = musicPlan || generateMusicPlan({
-    concept: concept || `${videoName} Album Concept`,
-    style: style.name,
-    totalTracks: totalTracks || 17,
-  });
+  const plan = musicPlan || generateMusicPlan(musicPlanInput({ videoName, style, concept, totalTracks }));
 
   const project = {
     clip: '',
@@ -99,33 +95,33 @@ export function planProject({ videosDir, videoName, style, ambient, styleRef, te
       : { cropBottom: DEFAULT_CROP_BOTTOM, aspect: '16:9' },
     output: { dir: './out' },
     music: plan,
-    style: style.name,
-    ...(style.name === CUSTOM_STYLE_NAME && style.styleBlock ? { styleBlock: style.styleBlock, motionHints: style.motionHints } : {}),
+    ...(style ? { style: style.name } : {}),
   };
 
   const files = [
-    ...(style.name === CUSTOM_STYLE_NAME && !style.styleBlock ? [] : [{ name: 'STYLE_BLOCK.txt', content: renderStyleBlock(style) + '\n', bom: true }]),
     { name: 'project.json', content: JSON.stringify(project, null, 2) + '\n', bom: false },
-    { name: 'prompts.md', content: buildPromptsMd({ videoName, style, templates }), bom: true },
+    { name: 'prompts.md', content: buildPromptsMd({ videoName, templates }), bom: true },
   ];
 
   return {
     dir,
     subdirs: PROJECT_SUBDIRS.map((name) => join(dir, name)),
     files: files.map((file) => ({ ...file, path: join(dir, file.name) })),
-    copies: styleRef
-      ? [{ from: styleRef, path: join(dir, 'resimler', `style-ref${extname(styleRef).toLowerCase()}`) }]
-      : [],
   };
 }
 
 export async function planProjectAsync(options) {
-  const musicPlan = await generateMusicPlanAsync({
-    concept: options.concept || `${options.videoName} Album Concept`,
-    style: options.style.name,
-    totalTracks: options.totalTracks || 17,
-  });
+  const musicPlan = await generateMusicPlanAsync(musicPlanInput(options));
   return planProject({ ...options, musicPlan });
+}
+
+/** Müzik planlayıcısının girdisi: stil seçilmediyse ya da profili boşsa planlayıcı varsayılanı. */
+function musicPlanInput({ videoName, style, concept, totalTracks }) {
+  return {
+    concept: concept || `${videoName} Album Concept`,
+    ...(musicStyleText(style) ? { style: musicStyleText(style) } : {}),
+    totalTracks: totalTracks || 17,
+  };
 }
 
 /**
@@ -136,11 +132,10 @@ export async function planProjectAsync(options) {
  * @param {ReturnType<typeof planProject>} plan
  * @param {{
  *   writeText?: (path: string, content: string, options: { bom: boolean }) => Promise<unknown>,
- *   copy?: (from: string, to: string) => Promise<unknown>,
- * }} [options] testte yazım/kopya hatası taklidi için
+ * }} [options] testte yazım hatası taklidi için
  * @returns {Promise<string>} proje klasörü
  */
-export async function writeProject(plan, { writeText = writeTextFile, copy = copyFile } = {}) {
+export async function writeProject(plan, { writeText = writeTextFile } = {}) {
   try {
     await mkdir(plan.dir);
   } catch (cause) {
@@ -153,7 +148,6 @@ export async function writeProject(plan, { writeText = writeTextFile, copy = cop
 
   try {
     for (const subdir of plan.subdirs) await mkdir(subdir);
-    for (const { from, path } of plan.copies) await copy(from, path);
     for (const file of plan.files) await writeText(file.path, file.content, { bom: file.bom });
   } catch (error) {
     await rm(plan.dir, { recursive: true, force: true });

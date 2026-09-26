@@ -1,4 +1,4 @@
-/** Canonical akışta daha önce ekranı olmayan adımlar: 1, 3, 5 ve 8. */
+/** Canonical akışta StageSections dışındaki adımlar: 1 (proje), 3 (açılar), 6 (sıralama). */
 
 import { useEffect, useState } from 'react';
 
@@ -29,15 +29,15 @@ export function ProjectStartStage({ project, stageStatus }: StageProps) {
           <dd>{project.name}</dd>
         </div>
         <div>
-          <dt>Görsel Stili (Image Style)</dt>
-          <dd>{styleName(project) ?? '—'}</dd>
+          <dt>Müzik stili</dt>
+          <dd>{styleName(project) ?? 'Varsayılan (lofi)'}</dd>
         </div>
         <div>
           <dt>Ambient ses</dt>
           <dd>{ambients.length > 0 ? ambients.map((path) => fileName(path)).join(', ') : 'Yok'}</dd>
         </div>
         <div>
-          <dt>Promptlar</dt>
+          <dt>Açı promptları</dt>
           <dd>
             <code>{project.promptsPath ?? 'prompts.md'}</code>
           </dd>
@@ -47,49 +47,7 @@ export function ProjectStartStage({ project, stageStatus }: StageProps) {
   );
 }
 
-// ---------------------------------------------------------------- 3. Referans görsel
-
-export function ReferenceStage({ project, stageStatus, onProjectUpdate }: StageProps) {
-  const sceneUrl = project.sceneRef ? getProjectImageUrl(project.id, 'scene', project.sceneRef) : null;
-  const hasScene = Boolean(project.sceneRef);
-  const inferred = !hasScene && Boolean(project.master);
-
-  return (
-    <StagePanel
-      section="reference"
-      title="3. Referans görsel"
-      status={hasScene || inferred ? 'ready' : 'waiting'}
-      statusLabel={hasScene ? 'Referans hazır' : inferred ? 'Master mevcut' : 'Görsel bekleniyor'}
-      stageStatus={stageStatus}
-    >
-      <div className="stage-media">
-        <AssetPreview
-          kind="image"
-          fileName={fileName(project.sceneRef)}
-          src={sceneUrl}
-          emptyLabel={
-            inferred
-              ? 'Sahne referansı kaydı yok; master frame zaten üretildiği için bu adım tamam sayılır.'
-              : 'Henüz sahne referansı yok.'
-          }
-        />
-        <div className="stage-actions">
-          {hasScene ? <p className="field-hint field-success">✓ Referans alındı: {fileName(project.sceneRef)}</p> : null}
-          <UploadButton
-            label={hasScene ? 'Referansı değiştir' : 'Sahne görselini yükle'}
-            accept={IMAGE_ACCEPT}
-            onFiles={async ([file]) => {
-              onProjectUpdate?.(await uploadProjectImage(project.id, 'scene', file));
-            }}
-          />
-          <p className="field-hint">JPG, PNG, WEBP (en fazla 15 MB). resimler\scene-ref olarak kaydedilir.</p>
-        </div>
-      </div>
-    </StagePanel>
-  );
-}
-
-// ---------------------------------------------------------------- 5. Kamera açıları
+// ---------------------------------------------------------------- 3. Kamera açıları
 
 const MAX_ANGLES = 5;
 
@@ -138,7 +96,7 @@ export function AnglesStage({
   return (
     <StagePanel
       section="angles"
-      title="5. Kamera açıları (opsiyonel)"
+      title="3. Kamera açıları (opsiyonel)"
       status={decision?.wanted === false ? 'optional' : wanted && uploaded >= requested ? 'ready' : 'waiting'}
       statusLabel={statusLabel}
       stageStatus={stageStatus}
@@ -205,7 +163,7 @@ export function AnglesStage({
   );
 }
 
-// ---------------------------------------------------------------- 8. Sıralama
+// ---------------------------------------------------------------- 6. Sıralama
 
 export function OrderStage({ project, stageStatus, onProjectUpdate }: StageProps) {
   const [music, setMusic] = useState<ProjectMusicInfo | null>(null);
@@ -274,7 +232,7 @@ export function OrderStage({ project, stageStatus, onProjectUpdate }: StageProps
   return (
     <StagePanel
       section="order"
-      title="8. Sıralama"
+      title="6. Sıralama"
       status={savedOrder && savedOrder.length > 0 ? 'ready' : 'waiting'}
       statusLabel={savedOrder && savedOrder.length > 0 ? 'Sıra kaydedildi' : 'Sıra bekleniyor'}
       stageStatus={stageStatus}

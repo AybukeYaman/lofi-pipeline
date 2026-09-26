@@ -13,16 +13,12 @@ import { readdir, stat } from 'node:fs/promises';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 
 import { CONFIG_DEFAULTS } from '../core/config.js';
-import { AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, isImagePath, listFiles } from '../core/files.js';
+import { AUDIO_EXTENSIONS, isImagePath, listFiles } from '../core/files.js';
 import { readJsonFile } from '../core/workspace.js';
-import { CUSTOM_STYLE_NAME } from './styles.js';
 
-/** Faz 1 çıktısı: resimler/MASTER.<uzantı>. Master1.jpg gibi açı varyantları sayılmaz. */
+/** Master görseli: resimler/MASTER.<uzantı> (elle üretilir). Master1.jpg gibi açı varyantları sayılmaz. */
 export const MASTER_PATTERN = /^master\.[a-z0-9]+$/i;
-const STYLE_REF_PATTERN = /^style-ref\.[a-z0-9]+$/i;
-/** Adım 3 (sahne referansı): resimler/scene-ref.<uzantı>. */
-export const SCENE_REF_PATTERN = /^scene-ref\.[a-z0-9]+$/i;
-/** Adım 5 (kamera açıları): resimler/Master1.jpg … — Faz 2 şablonunun adları. */
+/** Kamera açıları: resimler/Master1.jpg … — Faz 2 şablonunun adları. */
 export const ANGLE_PATTERN = /^master(\d+)\.[a-z0-9]+$/i;
 
 /** Sıralı modda "bu oturumda atla" denebilen adımlar — kanıt gerektirmeyen elle işler. */
@@ -41,8 +37,6 @@ export async function inspectProject(dir) {
 
   const images = await fileNames(join(dir, 'resimler'));
   const master = images.find((n) => MASTER_PATTERN.test(n));
-  const styleRef = images.find((n) => STYLE_REF_PATTERN.test(n));
-  const sceneRef = images.find((n) => SCENE_REF_PATTERN.test(n));
   const angles = images
     .filter((n) => ANGLE_PATTERN.test(n))
     .sort((a, b) => Number(ANGLE_PATTERN.exec(a)[1]) - Number(ANGLE_PATTERN.exec(b)[1]));
@@ -56,8 +50,6 @@ export async function inspectProject(dir) {
   // bağlama ve web listesi iki modda da aynı `clips` listesiyle çalışır.
   const videoSource = data.video?.source === 'image' ? 'image' : 'clip';
   const masterPath = master ? join(dir, 'resimler', master) : null;
-  const sceneRefPath = sceneRef ? join(dir, 'resimler', sceneRef) : null;
-  const styleRefPath = styleRef ? join(dir, 'resimler', styleRef) : null;
   const anglePaths = angles.map((n) => join(dir, 'resimler', n));
   const clips = videoSource === 'image'
     ? [...(masterPath ? [masterPath] : []), ...anglePaths]
@@ -69,30 +61,23 @@ export async function inspectProject(dir) {
   const outputPath = resolve(outputDir, nonEmpty(output.name) ?? CONFIG_DEFAULTS.output.name);
   const tracklistPath = resolve(outputDir, nonEmpty(output.tracklist) ?? CONFIG_DEFAULTS.output.tracklist);
 
-  const references = await filesOrEmpty(join(dir, 'references'), IMAGE_EXTENSIONS);
-  const styleBlockExists = await isFile(join(dir, 'STYLE_BLOCK.txt'));
-
   return {
     name: dir.split(/[\\/]/).pop(),
     dir,
     projectPath,
     promptsPath: join(dir, 'prompts.md'),
-    styleBlockPath: join(dir, 'STYLE_BLOCK.txt'),
-    styleBlockExists,
-    references,
     projectJson,
-    style: data.style || data.music?.style || '-',
+    /** Müzik stili (styles/<ad>), seçilmediyse null. */
+    style: nonEmpty(data.style) ?? null,
     master: masterPath,
-    styleRef: styleRefPath,
-    sceneRef: sceneRefPath,
     angles: anglePaths,
     videoSource,
     clips,
     clip: { value: clipValue, path: clipPath, exists: clipExists },
     // Proje listesindeki küçük resim — kullanıcı seçmez: videoda görünen
-    // görsel, yoksa master, yoksa sahne/stil referansı.
+    // görsel, yoksa master, yoksa ilk açı.
     thumbnail: (clipExists && isImagePath(clipPath) ? clipPath : null)
-      ?? masterPath ?? sceneRefPath ?? styleRefPath,
+      ?? masterPath ?? anglePaths[0] ?? null,
     audioDir,
     audioCount: (await filesOrEmpty(audioDir, AUDIO_EXTENSIONS)).length,
     output: {
@@ -125,17 +110,9 @@ export function nextStep(s, { skipped = new Set() } = {}) {
 
   const missingClip = s.clip.value && !s.clip.exists ? `clip'teki dosya bulunamadı: ${s.clip.path}\n` : '';
 
-  const isCustomStylePending = s.style === CUSTOM_STYLE_NAME && !s.styleBlockExists;
-  if (isCustomStylePending) {
-    return step('style-references', 'manual', 'Stil Referansı Bekleniyor',
-      `Stil analizi için referans görsellerinizi şu klasöre koyun: ${join(s.dir, 'references')}\n` +
-      `Desteklenen biçimler: ${IMAGE_EXTENSIONS.join(', ')} (${s.references.length} görsel bulundu)`);
-  }
-
   if (!s.master && !skipped.has('faz1')) {
-    return step('faz1', 'manual', 'Faz 1 — Master frame',
-      `${missingClip}prompts.md → Faz 1 ile master frame'i üret, resimler\\MASTER.png olarak kaydet.\n` +
-      `Promptlar: ${s.promptsPath}`);
+    return step('faz1', 'manual', 'Master görseli',
+      `${missingClip}Ürettiğin görseli resimler\\MASTER.png olarak kaydet: ${join(s.dir, 'resimler')}`);
   }
 
   const isStill = s.videoSource === 'image';
@@ -147,15 +124,15 @@ export function nextStep(s, { skipped = new Set() } = {}) {
       : step('clip', 'auto', 'Klibi seç', `${missingClip}videolar\\ altında ${s.clips.length} klip var — kullanılacak olanı seç.`);
   }
 
-  // Tek resim: image-to-video (Faz 3) yok, video master görselinden üretilir.
+  // Tek resim: klip üretimi yok, video master görselinden üretilir.
   if (isStill && !s.clip.exists) {
     return step('clip', 'manual', 'Görsel bekleniyor', `${missingClip}Tek resim modu: resimler\\ altına MASTER.png koy: ${join(s.dir, 'resimler')}`);
   }
 
   if (!s.clip.exists && !skipped.has('faz3')) {
-    return step('faz3', 'manual', 'Faz 3 — Klip (image-to-video)',
-      `${missingClip}prompts.md → Faz 3 ile 5 sn'lik döngü klibini üret, videolar\\ altına .mp4 olarak koy.\n` +
-      `(Faz 2 açı varyantları isteğe bağlı.) Promptlar: ${s.promptsPath}`);
+    return step('faz3', 'manual', 'Klip',
+      `${missingClip}Ürettiğin döngü klibini videolar\\ altına .mp4 olarak koy: ${join(s.dir, 'videolar')}\n` +
+      `(Kamera açıları isteğe bağlı; promptları: ${s.promptsPath})`);
   }
 
   if (!s.clip.exists) {
@@ -178,19 +155,17 @@ export function nextStep(s, { skipped = new Set() } = {}) {
 }
 
 /**
- * Canonical kullanıcı akışı — 10 adım, sırası sabit. Her adımın "tamam"
+ * Canonical kullanıcı akışı — 8 adım, sırası sabit. Her adımın "tamam"
  * olması yalnızca diskteki kanıttan (dosyalar + project.json) hesaplanır;
  * UI'nin son tıklanan durumu kullanılmaz. `current` ilk tamamlanmamış adım,
  * hepsi tamamsa `publish`.
  *
  * Eski projelerde kaydı olmayan adımlar sonraki adımın kanıtından çıkarılır:
- * master varsa sahne referansı, klip varsa açı kararı, çıktı varsa her şey.
+ * klip varsa açı kararı, çıktı varsa her şey.
  */
 export const WORKFLOW_STEPS = [
   { id: 'project', title: 'Proje başlat', kind: 'manual', optional: false },
-  { id: 'style', title: 'Stil görseli', kind: 'manual', optional: false },
-  { id: 'reference', title: 'Referans görsel', kind: 'manual', optional: false },
-  { id: 'master', title: 'Master Frame', kind: 'manual', optional: false },
+  { id: 'master', title: 'Master görseli', kind: 'manual', optional: false },
   { id: 'angles', title: 'Kamera açıları', kind: 'manual', optional: true },
   { id: 'video', title: 'Video', kind: 'manual', optional: false },
   { id: 'music', title: 'Müzik', kind: 'manual', optional: false },
@@ -218,8 +193,6 @@ export function canonicalWorkflow(s) {
 
   const done = {
     project: s.projectJson.ok,
-    style: s.projectJson.ok && !(s.style === CUSTOM_STYLE_NAME && !s.styleBlockExists),
-    reference: Boolean(s.sceneRef || s.master) || built,
     master: Boolean(s.master) || built,
     angles: isStill
       || angles?.wanted === false

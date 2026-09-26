@@ -1,4 +1,5 @@
 import type {
+  BackendStyle,
   BuildJob,
   ImageSlot,
   ProjectMusicInfo,
@@ -8,6 +9,7 @@ import type {
   LibraryResponse,
   ProjectDetail,
   ProjectSummary,
+  StylePayload,
 } from './types';
 
 export class ApiError extends Error {
@@ -94,7 +96,7 @@ export async function getStyleDetail(name: string): Promise<BackendStyle> {
   return handleResponse<BackendStyle>(response, 'Style could not be loaded.');
 }
 
-export async function createLibraryStyleApi(payload: unknown): Promise<{ style: BackendStyle }> {
+export async function createLibraryStyleApi(payload: StylePayload): Promise<{ style: BackendStyle }> {
   const response = await fetch('/api/styles', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -103,7 +105,7 @@ export async function createLibraryStyleApi(payload: unknown): Promise<{ style: 
   return handleResponse<{ style: BackendStyle }>(response, 'Style could not be created.');
 }
 
-export async function updateStyleDetail(name: string, payload: unknown): Promise<{ style: BackendStyle }> {
+export async function updateStyleDetail(name: string, payload: StylePayload): Promise<{ style: BackendStyle }> {
   const response = await fetch(`/api/styles/${encodeURIComponent(name)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -224,11 +226,6 @@ export function getProjectMasterUrl(projectId: string, fileName?: string | null)
   return `/api/projects/${encodeURIComponent(projectId)}/assets/master/${encodeURIComponent(name)}`;
 }
 
-export function getProjectReferenceUrl(projectId: string, refPathOrName: string): string {
-  const name = refPathOrName.split(/[\\/]/).pop() || refPathOrName;
-  return `/api/projects/${encodeURIComponent(projectId)}/assets/reference/${encodeURIComponent(name)}`;
-}
-
 export function getProjectClipUrl(projectId: string, clipPathOrName?: string | null): string {
   if (!clipPathOrName) return '';
   const name = clipPathOrName.split(/[\\/]/).pop() || clipPathOrName;
@@ -238,21 +235,6 @@ export function getProjectClipUrl(projectId: string, clipPathOrName?: string | n
 export function getProjectOutputUrl(projectId: string, fileName?: string | null): string {
   const name = (fileName && (fileName.split(/[\\/]/).pop() || fileName)) || 'final_ambient.mp4';
   return `/api/projects/${encodeURIComponent(projectId)}/assets/output/${encodeURIComponent(name)}`;
-}
-
-export async function generateProjectStyle(
-  id: string,
-  options: { overwrite?: boolean } = {},
-): Promise<{ project: ProjectDetail; warnings?: string[] }> {
-  const response = await fetch(`/api/projects/${encodeURIComponent(id)}/style/generate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(options),
-  });
-  return handleResponse<{ project: ProjectDetail; warnings?: string[] }>(
-    response,
-    'Project style could not be generated.',
-  );
 }
 
 export async function openProjectFolder(
@@ -265,33 +247,6 @@ export async function openProjectFolder(
     body: JSON.stringify(folder ? { folder } : {}),
   });
   return handleResponse<{ ok: boolean; path: string }>(response, 'Folder could not be opened.');
-}
-
-export async function uploadProjectReference(
-  id: string,
-  file: File,
-): Promise<ProjectDetail> {
-  const base64Data = await readAsDataUrl(file);
-
-  const response = await fetch(`/api/projects/${encodeURIComponent(id)}/references`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: file.name, data: base64Data }),
-  });
-  return handleResponse<ProjectDetail>(response, 'Reference image could not be uploaded.');
-}
-
-export async function deleteProjectReference(
-  id: string,
-  name: string,
-): Promise<ProjectDetail> {
-  const response = await fetch(
-    `/api/projects/${encodeURIComponent(id)}/references/${encodeURIComponent(name)}`,
-    {
-      method: 'DELETE',
-    },
-  );
-  return handleResponse<ProjectDetail>(response, 'Reference image could not be deleted.');
 }
 
 /** Proje klasörü Geri Dönüşüm Kutusu'na taşınır (kalıcı silinmez). */
@@ -463,7 +418,7 @@ export async function saveTrackOrder(
   return sendJson<ProjectDetail>('PUT', projectUrl(id, 'order'), payload, 'Track order could not be saved.');
 }
 
-export function getProjectImageUrl(projectId: string, assetType: 'scene' | 'angle', path: string): string {
+export function getProjectImageUrl(projectId: string, assetType: 'angle', path: string): string {
   const name = path.split(/[\\/]/).pop() || path;
   return projectUrl(projectId, `assets/${assetType}/${encodeURIComponent(name)}`);
 }

@@ -7,23 +7,20 @@ import { StatusBadge } from '../components/StatusBadge';
 import type { LoadState, ProjectDetail, ProjectPrompts, WorkflowStepId } from '../types';
 import { isStepReachable, nextStepId, previousStep, stepInfo } from '../workflow';
 import { deriveAssets, styleName } from './workspace/assetState';
-import { AnglesStage, OrderStage, ProjectStartStage, ReferenceStage } from './workspace/CanonicalStages';
+import { AnglesStage, OrderStage, ProjectStartStage } from './workspace/CanonicalStages';
 import {
   BuildStage,
   MasterStage,
   MusicStage,
   OutputStage,
-  StyleStage,
   VideoStage,
   type StageProps,
 } from './workspace/StageSections';
 import { errorText, StepGuide } from './workspace/StepWidgets';
 
-/** Canonical 10 adımın ekranları — sıra workflow.ts STEP_ORDER'dır. */
+/** Canonical 8 adımın ekranları — sıra workflow.ts STEP_ORDER'dır. */
 const stageComponents: Record<WorkflowStepId, ComponentType<StageProps>> = {
   project: ProjectStartStage,
-  style: StyleStage,
-  reference: ReferenceStage,
   master: MasterStage,
   angles: AnglesStage,
   video: VideoStage,
@@ -130,7 +127,7 @@ function WorkspaceContent({
     return () => {
       active = false;
     };
-  }, [project.id, project.styleBlockExists, project.style]);
+  }, [project.id]);
 
   const goTo = useCallback(
     (step: WorkflowStepId) => {
@@ -254,8 +251,7 @@ function WorkspaceContent({
       <details className="panel evidence-panel">
         <summary>Project Assets & Filesystem Evidence</summary>
         <dl className="asset-list">
-          <AssetRow label="Style" value={styleName(project)} />
-          <AssetRow label="Style images" value={<StatusBadge status={assets.references} label={`${project.references?.length ?? 0}`} />} />
+          <AssetRow label="Music style" value={styleName(project) ?? 'Default (lofi)'} />
           <AssetRow label="Master Frame" value={<StatusBadge status={assets.master} />} />
           <AssetRow label="Video Clip" value={<StatusBadge status={assets.clip} />} />
           <AssetRow label="Music" value={<StatusBadge status={assets.music} />} />
@@ -264,8 +260,7 @@ function WorkspaceContent({
         </dl>
         <dl className="evidence-list">
           <AssetRow label="Project folder" value={project.dir} />
-          <AssetRow label="Prompts" value={project.promptsPath} />
-          <AssetRow label="Scene reference" value={project.sceneRef} />
+          <AssetRow label="Angle prompts" value={project.promptsPath} />
           <AssetRow label="Master frame" value={project.master} />
           <AssetRow label="Camera angles" value={project.angles?.length ? project.angles.join(', ') : undefined} />
           <AssetRow label="Video clip" value={project.clip?.path ?? project.clip?.value} />

@@ -38,7 +38,6 @@ describe('inspectProject — taze projeden montaja', () => {
     const s = await inspectProject(dir);
     assert.equal(s.projectJson.ok, true);
     assert.equal(s.master, null);
-    assert.equal(s.styleRef, null);
     assert.deepEqual(s.clips, []);
     assert.deepEqual(s.clip, { value: '', path: null, exists: false });
     assert.equal(s.audioDir, join(dir, 'audio'));
@@ -181,11 +180,11 @@ describe('tek resim modu — new-video\'dan montaj konfigine', () => {
   });
   after(() => root?.cleanup());
 
-  test('project.json: source image, kırpma 0; küçük resim stil referansına düşer', async () => {
+  test('project.json: source image, kırpma 0; görsel yokken küçük resim yok', async () => {
     const s = await inspectProject(dir);
     assert.deepEqual(s.projectJson.data.video, { source: 'image', cropBottom: 0, aspect: '16:9' });
     assert.equal(s.videoSource, 'image');
-    assert.equal(s.thumbnail, s.styleRef);
+    assert.equal(s.thumbnail, null);
   });
 
   test('adaylar MASTER + açılar (videolar\ yok sayılır); seçilen görsel küçük resim olur', async () => {

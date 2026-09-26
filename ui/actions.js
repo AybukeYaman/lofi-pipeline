@@ -13,16 +13,16 @@ import {
   ProjectFileError, completeMusicByUser, cropForWatermark, recordAudioAdded, setProjectClip, setProjectCropBottom,
   setProjectField,
 } from '../prep/project-file.js';
-import { audioAddedOrder, inspectProject, isMusicCompleted, listProjects, nextStep } from '../prep/project-status.js';
-import { generateProjectStyle, projectPromptStyle } from '../prep/project-style.js';
-import { getPhasePrompts } from '../prep/prompts.js';
+import {
+  WORKFLOW_STEPS, audioAddedOrder, inspectProject, isMusicCompleted, listProjects, nextStep,
+} from '../prep/project-status.js';
+import { getAnglePrompts } from '../prep/prompts.js';
 import { validateVideoName } from '../prep/scaffold.js';
 import {
-  CUSTOM_STYLE_NAME, STYLE_NAME_PATTERN, StyleError, findStyleRef, listStyles, loadStyle,
+  StyleError, hasMusicProfile, listStyles, loadStyle,
 } from '../prep/styles.js';
 import { ingestSunoUrl, sanitizeFilename } from '../prep/suno-ingest.js';
 import { SunoIngestError } from '../prep/suno-errors.js';
-import { cleanPath } from './prompt.js';
 
 /** Auto Watch: İndirilenler ve audio/ tarama aralığı. */
 const DOWNLOAD_POLL_MS = 1000;
@@ -49,7 +49,7 @@ export function openFolder(folderPath) {
 }
 
 /**
- * Terminal UI kutu çizici (ANSI renkli & 10 Adımlı Akış).
+ * Terminal UI kutu çizici (ANSI renkli, canonical akış adım numarasıyla).
  * @param {number} stepNumber
  * @param {string} title
  * @param {string|string[]} instructions
@@ -58,7 +58,7 @@ export function renderStepBox(stepNumber, title, instructions) {
   const width = 64;
   const top = `┌${'─'.repeat(width)}┐`;
   const bot = `└${'─'.repeat(width)}┘`;
-  const header = `│ \x1b[1;36m[Adım ${stepNumber}/10]\x1b[0m \x1b[1;37m${title.padEnd(width - 15)}\x1b[0m │`;
+  const header = `│ \x1b[1;36m[Adım ${stepNumber}/${WORKFLOW_STEPS.length}]\x1b[0m \x1b[1;37m${title.padEnd(width - 15)}\x1b[0m │`;
   const div = `├${'─'.repeat(width)}┤`;
   const lines = [top, header, div];
   if (Array.isArray(instructions)) {
@@ -163,12 +163,12 @@ export async function selectProject(ctx, { force = false } = {}) {
 }
 
 // ============================================================================
-// 10 ADIMLI İŞ AKIŞI
+// 8 ADIMLI İŞ AKIŞI (prep/project-status.js WORKFLOW_STEPS)
 // ============================================================================
 
 /**
  * 1. Adım: Proje Başlat (Otomatik)
- * Kullanıcı verir: proje adı, stil seçimi, ambient seçimi
+ * Kullanıcı verir: proje adı, müzik stili (isteğe bağlı), ambient seçimi
  * Sistem yapar: klasör yapısı + project.json + prompts.md oluşturur
  */
 export async function newProject(ctx) {
@@ -187,27 +187,26 @@ export async function newProject(ctx) {
     for (const problem of problems) prompter.print(`  - ${problem}`);
   }
 
-  const items = [
-    { label: '✨ [ Multi-Reference Visual Style ] — Görsellerden Yapay Zeka ile Stil Üret', value: { name: CUSTOM_STYLE_NAME, suggestedAmbient: 'none', isMultiRef: true } },
-  ];
+  const items = [{ label: '— Varsayılan (lofi profili, stil yok)', value: 'none' }];
   for (const styleName of await listStyles({ dir: ctx.stylesDir })) {
     try {
       const { style } = await loadStyle(styleName, { dir: ctx.stylesDir });
-      const ref = (await findStyleRef(styleName, { dir: ctx.stylesDir })).path ? 'referans görseli var' : 'referans görseli yok';
-      items.push({ label: `${styleName} — öneri: ${style.suggestedAmbient} · ${ref}`, value: style });
+      items.push({ label: `${styleName} — müzik profili ${hasMusicProfile(style) ? 'var' : 'boş'}`, value: style });
     } catch (error) {
       if (!(error instanceof StyleError)) throw error;
       items.push({ label: `${styleName} (geçersiz stil dosyası)`, value: null, disabled: true });
     }
   }
-  const style = await prompter.choose('Select Style:', items, { zeroLabel: 'Geri' });
-  if (!style) return false;
+  const choice = await prompter.choose('Music Style:', items, { zeroLabel: 'Geri' });
+  if (!choice) return false;
+  const style = choice === 'none' ? null : choice;
 
   const ambients = await ambientsOrEmpty(ctx);
-  const suggested = ambients.find((a) => a.name.toLowerCase() === style.suggestedAmbient.toLowerCase());
+  const suggestedName = style?.suggestedAmbient?.toLowerCase();
+  const suggested = suggestedName ? ambients.find((a) => a.name.toLowerCase() === suggestedName) : undefined;
   const ordered = suggested ? [suggested, ...ambients.filter((a) => a !== suggested)] : ambients;
   const selectedAmbients = await prompter.chooseMany(
-    `Select Ambient (stilin önerisi: ${style.suggestedAmbient}; Boşluk ile çoklu seç):`,
+    `Select Ambient (${suggested ? `stilin önerisi: ${suggested.name}; ` : ''}Boşluk ile çoklu seç):`,
     ordered.map((a) => ({ label: a === suggested ? `${a.name} (öneri)` : a.name, value: a.name })),
     { zeroLabel: 'Ambient yok' },
   );
@@ -248,7 +247,8 @@ export async function newProject(ctx) {
   }
 
   const code = await ctx.run('new-video.js', [
-    name, '--style', style.name,
+    name,
+    ...(style ? ['--style', style.name] : []),
     ...(ambientArg ? ['--ambient', ambientArg] : []),
     '--concept', concept,
     '--total-tracks', String(totalTracks),
@@ -284,173 +284,11 @@ export async function newProject(ctx) {
 }
 
 /**
- * 2. Adım: Stil Görseli (Yarı Otomatik)
- * Kullanıcı verir: beğendiği bir görsel dosyası
- * Sistem yapar: görselden stil tarifini çıkarır ve kaydeder (add-style.js / Gemini API)
- */
-export async function addStyle(ctx) {
-  const { prompter } = ctx;
-
-  let image;
-  for (;;) {
-    image = cleanPath(await prompter.ask('Stil görseli (dosyayı buraya sürükleyebilirsin; Esc = geri)'));
-    if (image === '') return false;
-    if (await isFile(image)) break;
-    prompter.print(`Dosya bulunamadı: ${image}`);
-  }
-
-  let name;
-  for (;;) {
-    name = await prompter.ask('Stil adı (küçük harf, rakam, tire — ör. neo-tokyo; Esc = geri)');
-    if (!name) return false;
-    if (STYLE_NAME_PATTERN.test(name) && name !== CUSTOM_STYLE_NAME) break;
-    prompter.print('Ad küçük harf, rakam ve tireden oluşmalı (ör. neo-tokyo).');
-  }
-
-  const overwrite = await isFile(join(ctx.stylesDir, `${name}.json`));
-  if (overwrite && !await prompter.confirm(`"${name}" zaten var. Üzerine yazılsın mı? (Gemini'ye yeni istek gider)`)) {
-    prompter.print('Vazgeçildi.');
-    return false;
-  }
-
-  const code = await ctx.run('add-style.js', [
-    image, '--name', name,
-    ...(overwrite ? ['--overwrite'] : []),
-    '--styles-dir', ctx.stylesDir, '--ambient-dir', ctx.ambientDir,
-  ]);
-  prompter.print(code === 0 ? `Stil eklendi: ${name}` : `Stil eklenemedi (çıkış kodu ${code}).`);
-  return code === 0;
-}
-
-/**
- * 2. Adım Proje İçi: Stil Görseli Analizi
- */
-export async function stepStyle(ctx, dir, status, { pollMs = 50 } = {}) {
-  const { prompter } = ctx;
-  const refDir = join(dir, 'references');
-  await import('node:fs/promises').then((fs) => fs.mkdir(refDir, { recursive: true }));
-
-  let folderOpen = false;
-  for (;;) {
-    const cur = await inspectProject(dir);
-    if (cur.styleBlockExists) return true;
-
-    ctx.store?.set({
-      watchNotice: {
-        asset: 'Visual Style Reference Images',
-        description: 'Stil analizi için beğendiğiniz referans görselleri buraya koyun.',
-        folder: 'references/',
-        expected: `${IMAGE_EXTENSIONS.join(', ')} (${cur.references.length} algılandı)`,
-        folderOpen,
-      },
-    });
-
-    const choice = await prompter.choose(`STYLE REFERENCES — ${cur.references.length} images detected`, [
-      { label: '📂 [ Open Reference Folder ] - Referans Klasörünü Aç', value: 'open' },
-      { label: '🔄 [ Refresh ] - Klasörü Yeniden Tara ve Görselleri Algıla', value: 'refresh' },
-      { label: '🏠 Ana Menüye Dön', value: 'menu' },
-    ]);
-
-    if (!choice || choice === 'menu') {
-      ctx.store?.set({ watchNotice: null });
-      return 'menu';
-    }
-
-    if (choice === 'open') {
-      (ctx.openFolderFn ?? openFolder)(refDir);
-      folderOpen = true;
-      ctx.store?.set({ watchNotice: { file: `references/ (${cur.references.length} görseller)`, folderOpen: true } });
-      prompter.print(`\x1b[32m[📂 Referans Klasörü Açıldı]\x1b[0m ${IMAGE_EXTENSIONS.join(', ')} görsellerini bu klasöre koyun.`);
-    } else if (choice === 'refresh') {
-      const updated = await inspectProject(dir);
-      if (updated.references.length > 0) {
-        prompter.print(`\x1b[36m[🎨 Yapay Zeka Stil Analizi Başlatılıyor...]\x1b[0m ${updated.references.length} referans görsel analiz ediliyor...`);
-        try {
-          await generateProjectStyle(updated, {
-            ambientDir: ctx.ambientDir,
-            describeOptions: { generateContentFn: ctx.generateContentFn, ...(ctx.describeOptions || {}) },
-          });
-          prompter.print('\x1b[32m[✓ Visual Style Başarıyla Üretildi & Persist Edildi!]\x1b[0m STYLE_BLOCK.txt oluşturuldu.');
-          ctx.store?.set({ watchNotice: null });
-          return true;
-        } catch (err) {
-          prompter.print(`\x1b[31m[! Stil Üretimi Başarısız]\x1b[0m ${err.message}`);
-        }
-      } else {
-        prompter.print('\x1b[33m[! Görsel Bulunamadı]\x1b[0m references/ klasörüne en az 1 görsel ekleyin.');
-      }
-    }
-  }
-}
-
-/**
- * 3. Adım: Referans Görsel (Sahne Kompozisyonu)
- */
-export async function stepReference(ctx, dir, status) {
-  const { prompter } = ctx;
-  const imgDir = join(dir, 'resimler');
-  await import('node:fs/promises').then((fs) => fs.mkdir(imgDir, { recursive: true }));
-
-  for (;;) {
-    const curFiles = await listFiles(imgDir, IMAGE_EXTENSIONS).catch(() => []);
-    if (curFiles.length > 0) {
-      prompter.print(`\x1b[32m[✓ Sahne Referansı Doğrulandı]\x1b[0m ${basename(curFiles[0])}`);
-      return true;
-    }
-
-    prompter.print(renderStepBox(3, 'Referans Görsel (Sahne Kompozisyonu)', [
-      'Sahnenin ne olacağını gösteren bir referans görsel bul ve resimler/ klasörüne koy.',
-      '(Bu görsel ortam/oda düzenini ve kamera açısını belirler.)',
-    ]));
-
-    const choice = await prompter.choose('Referans Görsel — Ne yapmak istersiniz?', [
-      { label: '📥 [ Dosya Yolu Ver / Sürükle-Bırak ] - Görseli yapıştır', value: 'path' },
-      { label: '📂 [ Klasörü Aç ] - resimler/ klasörünü Windows Explorer\'da aç', value: 'open' },
-      { label: '🔄 [ Hazır / Kontrol Et ] - resimler/ klasörünü tara', value: 'refresh' },
-      { label: '🏠 Ana Menüye Dön', value: 'menu' },
-    ]);
-
-    if (!choice || choice === 'menu') return 'menu';
-
-    if (choice === 'open') {
-      (ctx.openFolderFn ?? openFolder)(imgDir);
-      prompter.print('\x1b[32m[📂 Klasör Açıldı]\x1b[0m resimler/ klasörüne referans görselini koyun.');
-    } else if (choice === 'path') {
-      const inputPath = cleanPath(await prompter.ask('Referans görsel dosya yolu (Esc = geri):'));
-      if (inputPath && await isFile(inputPath)) {
-        const dest = join(imgDir, `scene-ref${extname(inputPath).toLowerCase()}`);
-        await copyFile(inputPath, dest);
-        prompter.print(`\x1b[32m[✓ Görsel Kopyalandı]\x1b[0m ${dest}`);
-        return true;
-      } else if (inputPath) {
-        prompter.print(`\x1b[33m[! Dosya Bulunamadı]\x1b[0m ${inputPath}`);
-      }
-    } else if (choice === 'refresh') {
-      const check = await listFiles(imgDir, IMAGE_EXTENSIONS).catch(() => []);
-      if (check.length > 0) {
-        prompter.print(`\x1b[32m[✓ Görsel Bulundu]\x1b[0m ${basename(check[0])}`);
-        return true;
-      }
-      prompter.print('\x1b[33m[! Görsel Bulunamadı]\x1b[0m resimler/ klasörüne henüz bir görsel eklenmedi.');
-    }
-  }
-}
-
-/**
- * 4. Adım: Master Frame
+ * 2. Adım: Master görseli — elle üretilir, resimler/MASTER.png olarak konur.
  */
 export async function stepMasterFrame(ctx, dir, status, { pollMs = 50 } = {}) {
   const { prompter } = ctx;
   const imgDir = join(dir, 'resimler');
-
-  let phasePrompt = '';
-  try {
-    const styleObj = await projectPromptStyle(status, { stylesDir: ctx.stylesDir });
-    const prompts = await getPhasePrompts({ videoName: basename(dir), style: styleObj });
-    phasePrompt = prompts.faz1;
-  } catch {
-    phasePrompt = 'Prompts dosyasından Faz 1 promptunu alın.';
-  }
 
   let folderOpen = false;
   for (;;) {
@@ -463,8 +301,8 @@ export async function stepMasterFrame(ctx, dir, status, { pollMs = 50 } = {}) {
 
     ctx.store?.set({
       watchNotice: {
-        asset: 'Environment / Composition Reference',
-        description: 'Bu görsel sahne/ortam kompozisyonunu ve kamera açısını belirler. STYLE_BLOCK üzerine uygulanır.',
+        asset: 'Master Image',
+        description: 'Ürettiğin ana görsel — video bu görselden (ya da ondan üretilen klipten) oluşur.',
         folder: 'resimler/',
         expected: 'MASTER.png',
         folderOpen,
@@ -474,8 +312,6 @@ export async function stepMasterFrame(ctx, dir, status, { pollMs = 50 } = {}) {
     const choice = await prompter.choose('MASTER FRAME READY — Ne yapmak istersiniz?', [
       { label: '📂 [ Klasörü Aç ] - Resim Klasörünü Windows\'ta Aç', value: 'open' },
       { label: '🔄 [ Yenile ] - Klasörü Yeniden Tara', value: 'refresh' },
-      { label: '📋 [ Copy Prompt ] - Panoya Kopyala', value: 'copy' },
-      { label: '👁 [ View Prompt ] - Prompt Overlay Aç', value: 'view' },
       { label: '⏳ [ Auto Watch ] - Otomatik Dosya Bekle', value: 'watch' },
       { label: '🏠 Ana Menüye Dön', value: 'menu' },
     ]);
@@ -498,13 +334,6 @@ export async function stepMasterFrame(ctx, dir, status, { pollMs = 50 } = {}) {
         return true;
       }
       prompter.print('\x1b[33m[! Dosya Henüz Bulunamadı]\x1b[0m resimler/MASTER.png bekleniyor...');
-    } else if (choice === 'copy') {
-      copyToClipboard(phasePrompt);
-      prompter.print('\x1b[32m[✓] Master Frame promptu panoya kopyalandı!\x1b[0m');
-    } else if (choice === 'view') {
-      ctx.store?.set({ promptDetail: { title: 'FAZ 1: Master Frame Promptu', content: phasePrompt } });
-      await prompter.choose('Prompt Overlay', [{ label: 'Overlay Kapat', value: 'close' }]);
-      ctx.store?.set({ promptDetail: null });
     } else if (choice === 'watch') {
       const recentMinutes = await prompter.choose(
         'Auto Watch — İndirilenler\'de ne kadar önce inmiş dosyalar da alınsın?',
@@ -532,12 +361,12 @@ export async function stepMasterFrame(ctx, dir, status, { pollMs = 50 } = {}) {
 }
 
 /**
- * 5. Adım: Kamera Açıları (Opsiyonel)
+ * 3. Adım: Kamera Açıları (Opsiyonel)
  */
 export async function stepCameraAngles(ctx, dir, status) {
   const { prompter } = ctx;
 
-  prompter.print(renderStepBox(5, 'Kamera Açıları (Opsiyonel Varyantlar)', [
+  prompter.print(renderStepBox(3, 'Kamera Açıları (Opsiyonel Varyantlar)', [
     'Farklı kamera açıları (Geniş açı, yakın plan, farklı perspektifler) ister misiniz?',
     '(Bu adım opsiyoneldir ve montajı asla engellemez.)',
   ]));
@@ -554,11 +383,9 @@ export async function stepCameraAngles(ctx, dir, status) {
   if (choice === 'view') {
     let anglePrompts = '';
     try {
-      const styleObj = await projectPromptStyle(status, { stylesDir: ctx.stylesDir });
-      const prompts = await getPhasePrompts({ videoName: basename(dir), style: styleObj });
-      anglePrompts = prompts.faz2;
+      anglePrompts = await getAnglePrompts();
     } catch {
-      anglePrompts = 'Faz 2 kamera açı promptları prompts.md dosyasında mevcuttur.';
+      anglePrompts = 'Kamera açısı promptları prompts.md dosyasında mevcuttur.';
     }
 
     prompter.print('\n\x1b[1;36m=== FAZ 2: KAMERA AÇI PROMPTLARI ===\x1b[0m\n' + anglePrompts);
@@ -574,22 +401,12 @@ export async function stepCameraAngles(ctx, dir, status) {
 }
 
 /**
- * 6. Adım: Video (Hailuo Image-to-Video)
+ * 4. Adım: Video — elle üretilen döngü klibi videolar/ altına konur.
  */
 export async function stepMotionVideo(ctx, dir, status, { pollMs = 50 } = {}) {
   const { prompter } = ctx;
   const vidDir = join(dir, 'videolar');
   await import('node:fs/promises').then((fs) => fs.mkdir(vidDir, { recursive: true }));
-
-  let phasePrompt = '';
-  try {
-    const projectStyleName = status.style !== '-' ? status.style : (status.projectJson.data?.style ?? 'cozy-realistic');
-    const loadedStyle = await loadStyle(projectStyleName, { dir: ctx.stylesDir }).catch(() => null);
-    const prompts = await getPhasePrompts({ videoName: basename(dir), style: loadedStyle?.style });
-    phasePrompt = `${prompts.faz2}\n\n${prompts.faz3}`;
-  } catch {
-    phasePrompt = 'Hailuo motion promptu prompts.md dosyasında mevcuttur.';
-  }
 
   let folderOpen = false;
   let detectedClip = null;
@@ -603,8 +420,8 @@ export async function stepMotionVideo(ctx, dir, status, { pollMs = 50 } = {}) {
 
     ctx.store?.set({
       watchNotice: {
-        asset: 'Animated Video Clip (Image-to-Video)',
-        description: 'MASTER.png görselinden üretilmiş 5 saniyelik döngüsel video klibi (.mp4).',
+        asset: 'Looping Video Clip',
+        description: 'Ürettiğin döngüsel video klibi (.mp4).',
         folder: 'videolar/',
         expected: '*.mp4',
         folderOpen,
@@ -614,8 +431,6 @@ export async function stepMotionVideo(ctx, dir, status, { pollMs = 50 } = {}) {
     const choice = await prompter.choose('CAMERA / VIDEO CLIP READY — Ne yapmak istersiniz?', [
       { label: '📂 [ Klasörü Aç ] - Video Klasörünü Windows\'ta Aç', value: 'open' },
       { label: '🔄 [ Yenile ] - Klasörü Yeniden Tara', value: 'refresh' },
-      { label: '📋 [ Copy Prompt ] - Panoya Kopyala', value: 'copy' },
-      { label: '👁 [ View Prompt ] - Prompt Overlay Aç', value: 'view' },
       { label: '⏳ [ Auto Watch ] - Otomatik Dosya Bekle', value: 'watch' },
       { label: '🏠 Ana Menüye Dön', value: 'menu' },
     ]);
@@ -637,13 +452,6 @@ export async function stepMotionVideo(ctx, dir, status, { pollMs = 50 } = {}) {
         break;
       }
       prompter.print('\x1b[33m[! Dosya Henüz Bulunamadı]\x1b[0m videolar/*.mp4 bekleniyor...');
-    } else if (choice === 'copy') {
-      copyToClipboard(phasePrompt);
-      prompter.print('\x1b[32m[✓] Video Klip promptu panoya kopyalandı!\x1b[0m');
-    } else if (choice === 'view') {
-      ctx.store?.set({ promptDetail: { title: 'FAZ 3: Klip (Image-to-Video) Promptu', content: phasePrompt } });
-      await prompter.choose('Prompt Overlay', [{ label: 'Overlay Kapat', value: 'close' }]);
-      ctx.store?.set({ promptDetail: null });
     } else if (choice === 'watch') {
       const recentMinutes = await prompter.choose(
         'Auto Watch — İndirilenler\'de ne kadar önce inmiş dosyalar da alınsın?',
@@ -682,7 +490,7 @@ export async function stepMotionVideo(ctx, dir, status, { pollMs = 50 } = {}) {
 }
 
 /**
- * 7. Adım: Müzik
+ * 5. Adım: Müzik
  */
 export async function stepMusic(ctx, dir, status, { pollMs = 50 } = {}) {
   const { prompter } = ctx;
@@ -932,7 +740,7 @@ export async function stepMusic(ctx, dir, status, { pollMs = 50 } = {}) {
 }
 
 /**
- * 8. Adım: Sıralama
+ * 6. Adım: Sıralama
  */
 export async function stepOrdering(ctx, dir, status) {
   const { prompter } = ctx;
@@ -941,7 +749,7 @@ export async function stepOrdering(ctx, dir, status) {
 
   const baseNames = files.map((f) => basename(f));
 
-  prompter.print(renderStepBox(8, 'Parça Sıralaması', [
+  prompter.print(renderStepBox(6, 'Parça Sıralaması', [
     `Bulunan Parçalar (Toplam ${baseNames.length} adet):`,
     ...baseNames.slice(0, 8).map((name, i) => `  ${i + 1}. ${name}`),
     baseNames.length > 8 ? `  ... ve ${baseNames.length - 8} parça daha` : '',
@@ -985,7 +793,7 @@ export async function stepOrdering(ctx, dir, status) {
 }
 
 /**
- * 9. Adım: Montaj
+ * 7. Adım: Montaj
  */
 export async function stepMontage(ctx, dir, status, { forceOverwrite = false } = {}) {
   const { prompter } = ctx;
@@ -996,7 +804,7 @@ export async function stepMontage(ctx, dir, status, { forceOverwrite = false } =
     if (!confirmOverwrite) return false;
   }
 
-  prompter.print(renderStepBox(9, 'Montaj (Build Automation)', [
+  prompter.print(renderStepBox(7, 'Montaj (Build Automation)', [
     `Klip: ${status.clip.value || 'videolar/*.mp4'}`,
     `Parça Sayısı: ${status.audioCount} adet`,
     `Ambient: ${status.projectJson.data?.ambient || 'none'}`,
@@ -1015,7 +823,7 @@ export async function stepMontage(ctx, dir, status, { forceOverwrite = false } =
 }
 
 /**
- * 10. Adım: Yayın
+ * 8. Adım: Yayın
  */
 export async function stepPublish(ctx, dir, status) {
   const { prompter } = ctx;
@@ -1027,7 +835,7 @@ export async function stepPublish(ctx, dir, status) {
     tracklistText = '00:00 - Tracklist dosyası out/tracklist.txt içinde bulunamadı.';
   }
 
-  prompter.print(renderStepBox(10, 'Yayın & YouTube Açıklaması', [
+  prompter.print(renderStepBox(8, 'Yayın & YouTube Açıklaması', [
     `Final Video Hazır: ${join(dir, 'out', 'final_ambient.mp4')}`,
     'YouTube\'a yükle, aşağıdaki tracklist\'i açıklamaya yapıştır!',
   ]));
@@ -1112,35 +920,28 @@ export async function continueProject(ctx, targetDir = null, { pollMs = 50 } = {
       },
     });
 
-    // 2. ADIM: Stil Referansı
-    if (step.id === 'style-references') {
-      const res = await stepStyle(ctx, dir, status, { pollMs });
-      if (res === 'menu' || res === false) return;
-      continue;
-    }
-
-    // 4. ADIM: Master Frame
+    // 2. ADIM: Master görseli
     if (step.id === 'faz1') {
       const res = await stepMasterFrame(ctx, dir, status, { pollMs });
       if (res === 'menu' || res === false) return;
       continue;
     }
 
-    // 7. ADIM: Müzik
+    // 5. ADIM: Müzik
     if (step.id === 'audio') {
       const res = await stepMusic(ctx, dir, status, { pollMs });
       if (res === 'menu' || res === false) return;
       continue;
     }
 
-    // 6. ADIM: Video Klip
+    // 4. ADIM: Video Klip
     if (step.id === 'faz3' || step.id === 'clip') {
       const res = await stepMotionVideo(ctx, dir, status, { pollMs });
       if (res === 'menu' || res === false) return;
       continue;
     }
 
-    // 9. ADIM: Montaj
+    // 7. ADIM: Montaj
     if (step.id === 'build' || step.kind === 'auto') {
       ctx.store?.set({ watchNotice: { file: 'Montaj Yapılıyor (build.js)...', folderOpen: false } });
       prompter.print('\n\x1b[33m[Montaj Başlatılıyor...]\x1b[0m build.js otomasyonu çalışıyor.');
@@ -1153,7 +954,7 @@ export async function continueProject(ctx, targetDir = null, { pollMs = 50 } = {
       continue;
     }
 
-    // 10. ADIM: Bitiş & Yayın
+    // 8. ADIM: Bitiş & Yayın
     if (step.kind === 'done') {
       ctx.store?.set({ watchNotice: null });
       const tracklistFile = join(dir, 'out', 'tracklist.txt');
@@ -1304,9 +1105,8 @@ export async function showStatus(ctx, dir) {
   ctx.prompter.print([
     `Proje: ${dir}`,
     `  ${mark(s.projectJson.ok)} project.json${s.projectJson.ok ? '' : ` — ${s.projectJson.error}`}`,
-    `  ${mark(s.styleRef)} stil görseli (resimler\\style-ref.*)`,
-    `  ${mark(s.master)} Faz 1 — resimler\\MASTER.*`,
-    `  ${mark(s.clips.length > 0)} Faz 3 — videolar\\ altında ${s.clips.length} klip`,
+    `  ${mark(s.master)} master görseli — resimler\\MASTER.*`,
+    `  ${mark(s.clips.length > 0)} ${s.videoSource === 'image' ? `görsel adayı — ${s.clips.length}` : `klip — videolar\\ altında ${s.clips.length}`}`,
     `  ${mark(s.clip.exists)} clip${clipNote}`,
     `  ${mark(s.audioCount > 0)} müzik — ${s.audioCount} parça`,
     `  ${mark(s.output.exists)} çıktı — ${s.output.path}`,
@@ -1316,14 +1116,14 @@ export async function showStatus(ctx, dir) {
   ].join('\n'));
 }
 
-/** 7) Stiller ve ambient'ler */
+/** Ayarlar: müzik stilleri ve ambient'ler */
 export async function showLibrary(ctx) {
-  const lines = ['Stiller:'];
+  const lines = ['Müzik stilleri:'];
   for (const name of await listStyles({ dir: ctx.stylesDir })) {
     try {
       const { style } = await loadStyle(name, { dir: ctx.stylesDir });
-      const ref = (await findStyleRef(name, { dir: ctx.stylesDir })).path ? 'referans görseli var' : 'referans görseli yok';
-      lines.push(`  ${name} — öneri: ${style.suggestedAmbient} · ${ref}`);
+      const ambient = style.suggestedAmbient ? ` · ambient önerisi: ${style.suggestedAmbient}` : '';
+      lines.push(`  ${name} — müzik profili ${hasMusicProfile(style) ? 'var' : 'boş'}${ambient}`);
     } catch (error) {
       if (!(error instanceof StyleError)) throw error;
       lines.push(`  ${name} (geçersiz: ${error.problems.length} problem)`);

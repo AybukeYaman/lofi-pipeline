@@ -15,7 +15,7 @@ import { parseCli as parseNewVideoCli, runNewVideo } from '../../new-video.js';
 import { createDownloadWatcher } from '../../prep/download-watch.js';
 import { STYLES_DIR } from '../../prep/styles.js';
 import {
-  addStyle, batchBuild, buildProject, chooseClip, continueProject, createSession, newProject,
+  batchBuild, buildProject, chooseClip, continueProject, createSession, newProject,
 } from '../../ui/actions.js';
 import { inspectProject, nextStep } from '../../prep/project-status.js';
 import { BACK, createFakePrompter, pick, picks } from '../helpers/fake-prompter.js';
@@ -119,47 +119,19 @@ describe('newProject', () => {
     assert.ok(out().includes('Proje oluşturulamadı (çıkış kodu 2).'));
   });
 
+  test('müzik stili seçilmezse (varsayılan) --style gönderilmez', async () => {
+    const { ctx, calls } = makeCtx(['v', pick('Varsayılan'), pick('Ambient yok'), '2:17 AM', '17', pick('default'), true], { code: 2 });
+    assert.equal(await newProject(ctx), false);
+    assert.equal(calls[0][0], 'new-video.js');
+    assert.ok(!calls[0].includes('--style'), calls[0].join(' '));
+  });
+
   test('geçersiz stil dosyası listede devre dışı; seçilemez', async () => {
     await writeFile(join(env.stylesDir, 'bozuk.json'), '{}');
     const { ctx, prompter } = makeCtx(['v', pick('bozuk')]);
     await assert.rejects(newProject(ctx), /devre dışı seçeneği gösteriyor: bozuk \(geçersiz stil dosyası\)/);
-    const style = prompter.questions.find((q) => q.question === 'Select Style:');
+    const style = prompter.questions.find((q) => q.question === 'Music Style:');
     assert.equal(style.items.find((i) => i.label.startsWith('bozuk')).disabled, true);
-  });
-});
-
-describe('addStyle', () => {
-  test('tırnaklı yol temizlenir, geçersiz ad tekrar sorulur, yeni ad → --overwrite yok', async () => {
-    const image = join(env.base, 'pin görsel.jpg');
-    await writeFile(image, 'x');
-    const { ctx, calls } = makeCtx([`"${image}"`, 'Neo Tokyo', 'neo-tokyo']);
-    assert.equal(await addStyle(ctx), true);
-    assert.deepEqual(calls, [[
-      'add-style.js', image, '--name', 'neo-tokyo', '--styles-dir', env.stylesDir, '--ambient-dir', env.ambientDir,
-    ]]);
-  });
-
-  test('olmayan görsel tekrar sorulur; var olan stil + evet → --overwrite, hayır → komut yok', async () => {
-    const image = join(env.base, 'a.png');
-    await writeFile(image, 'x');
-
-    const yes = makeCtx(['yok.png', image, 'anime-cel', true]);
-    assert.equal(await addStyle(yes.ctx), true);
-    assert.ok(yes.out().includes('Dosya bulunamadı: yok.png'));
-    assert.ok(yes.calls[0].includes('--overwrite'));
-
-    const no = makeCtx([image, 'anime-cel', false]);
-    assert.equal(await addStyle(no.ctx), false);
-    assert.deepEqual(no.calls, []);
-  });
-
-  test('görselde ya da adda geri (Esc) → komut yok', async () => {
-    const image = join(env.base, 'a.png');
-    await writeFile(image, 'x');
-    assert.equal(await addStyle(makeCtx([BACK]).ctx), false);
-    const { ctx, calls } = makeCtx([image, BACK]);
-    assert.equal(await addStyle(ctx), false);
-    assert.deepEqual(calls, []);
   });
 });
 
@@ -293,7 +265,7 @@ describe('continueProject', () => {
     await project('yeni');
     const { ctx, prompter } = makeCtx([pick('yeni'), pick('🏠 Ana Menüye Dön')]);
     await continueProject(ctx);
-    assert.deepEqual(itemsOf(prompter, 'Proje seç'), ['yeni — Faz 1 — Master frame', 'eski — Faz 1 — Master frame', 'Geri']);
+    assert.deepEqual(itemsOf(prompter, 'Proje seç'), ['yeni — Master görseli', 'eski — Master görseli', 'Geri']);
     assert.equal(ctx.session.project, join(env.videosDir, 'yeni'));
   });
 });
@@ -358,7 +330,7 @@ describe('runPanel', () => {
     const { ctx, out } = makeCtx([pick('Settings'), pick('Quit')]);
     assert.equal(await runPanel(ctx), 0);
     assert.ok(out().includes('lofi — üretim paneli'));
-    assert.ok(out().includes('anime-cel — öneri: gentleRain · referans görseli yok'));
+    assert.ok(out().includes('anime-cel — müzik profili var · ambient önerisi: gentleRain'));
     assert.ok(out().includes("Ambient'ler: campfire, gentleRain, heavyRain"));
   });
 
@@ -442,85 +414,6 @@ describe('multi-track music workflow in continueProject', () => {
     // project-status ile nextStep kontrol et: Montaj yapıldığı için çıktı dosyası oluştu ve durum done oldu
     const status = await inspectProject(dir);
     assert.equal(nextStep(status).id, 'done');
-  });
-
-  test('Multi-Reference Visual Style seçildiğinde style-references adımına geçilir, Explorer açma state değiştirmez, görsel eklenince analiz başlatılır', async () => {
-    const { dir } = await project('multi-ref-test');
-    
-    // Projeyi custom-generated style ile kur ve STYLE_BLOCK.txt'yi sil
-    const projectJsonPath = join(dir, 'project.json');
-    const projectData = JSON.parse(await readFile(projectJsonPath, 'utf8'));
-    projectData.style = 'custom-generated';
-    delete projectData.styleBlock;
-    await writeFile(projectJsonPath, JSON.stringify(projectData, null, 2));
-    const styleBlockFile = join(dir, 'STYLE_BLOCK.txt');
-    const { rm } = await import('node:fs/promises');
-    await rm(styleBlockFile, { force: true });
-
-    let status = await inspectProject(dir);
-    assert.equal(nextStep(status).id, 'style-references');
-
-    // 1. Kullanıcı 'open' der (Explorer açılır, görseller henüz yok, state değişmez)
-    // 2. 'refresh' der (klasörde henüz dosya yok, uyarır, step değişmez)
-    // 3. Klasöre referans görseller eklenir (ref1.png, ref2.jpg)
-    // 4. 'refresh' der (analiz çalışır, STYLE_BLOCK.txt ve project.json güncellenir)
-    // 5. Sonraki faz1 adımında 'menu' ile çıkılır
-    const mockGenerateContent = async () => ({
-      candidates: [{
-        content: {
-          parts: [{
-            text: JSON.stringify({
-              styleBlock: {
-                medium: 'Digital watercolor & ink',
-                lines: 'Organic soft lines',
-                palette: [
-                  { hex: '#112233', role: 'Background' },
-                  { hex: '#445566', role: 'Midtone' },
-                  { hex: '#778899', role: 'Accent' },
-                  { hex: '#AABBCC', role: 'Light' },
-                  { hex: '#DDEEFF', role: 'Highlight' },
-                ],
-                light: 'Warm ambient glow',
-                texture: 'Paper grain',
-                contrast: 'Medium contrast',
-                shading: 'Soft gradient',
-              },
-              suggestedAmbient: 'heavyRain',
-              motionHints: ['Raindrops falling'],
-            }),
-          }],
-        },
-      }],
-    });
-
-    const { ctx, openedFolders } = makeCtx([
-      pick('open'),
-      pick('refresh'),
-      async () => {
-        await writeFile(join(dir, 'references', 'ref1.png'), 'fake-image-1');
-        await writeFile(join(dir, 'references', 'ref2.jpg'), 'fake-image-2');
-        return pick('refresh');
-      },
-      pick('menu'),
-    ]);
-
-    ctx.generateContentFn = mockGenerateContent;
-    process.env.GEMINI_API_KEY = 'mock-key';
-
-    ctx.session.project = dir;
-
-    await continueProject(ctx);
-
-    assert.deepEqual(openedFolders, [join(dir, 'references')]);
-
-    const updatedData = await readProject(dir);
-    assert.equal(updatedData.style, 'custom-generated');
-    assert.ok(updatedData.styleBlock);
-    assert.equal(updatedData.styleBlock.medium, 'Digital watercolor & ink');
-
-    status = await inspectProject(dir);
-    assert.equal(status.styleBlockExists, true);
-    assert.equal(nextStep(status).id, 'faz1');
   });
 
   test('Müzik completed_by_user durumu: view "project" olur, sonraki adıma (faz3) geçer ve tekrar müzik ekranı açılmaz', async () => {

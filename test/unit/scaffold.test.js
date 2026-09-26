@@ -43,54 +43,42 @@ describe('validateVideoName', () => {
 
 describe('planProject', async () => {
   const templates = await loadTemplates();
-  const { style } = await loadStyle('cozy-realistic');
-  const base = { videosDir: 'X:\\videolar', videoName: 'video3-Test', style, templates };
+  const { style } = await loadStyle('anime-cel');
+  const base = { videosDir: 'X:\\videolar', videoName: 'video3-Test', templates };
   const ambient = { name: 'heavyRain', path: 'X:\\ortak\\heavyRain.mp3' };
 
-  test('klasörler ve dosyalar', () => {
-    const plan = planProject({ ...base, ambient, styleRef: null });
+  test('klasörler ve dosyalar: stil görseli ve referans yok', () => {
+    const plan = planProject({ ...base, style, ambient });
     const dir = join('X:\\videolar', 'video3-Test');
     assert.equal(plan.dir, dir);
+    assert.deepEqual(PROJECT_SUBDIRS, ['audio', 'resimler', 'videolar']);
     assert.deepEqual(plan.subdirs, PROJECT_SUBDIRS.map((d) => join(dir, d)));
-    assert.deepEqual(plan.files.map((f) => [f.name, f.bom]), [
-      ['STYLE_BLOCK.txt', true], ['project.json', false], ['prompts.md', true],
-    ]);
-    assert.deepEqual(plan.copies, []);
+    assert.deepEqual(plan.files.map((f) => [f.name, f.bom]), [['project.json', false], ['prompts.md', true]]);
     for (const f of plan.files) {
       assert.equal(f.path, join(dir, f.name));
       assert.ok(f.content.endsWith('\n') && !f.content.endsWith('\n\n'), f.name);
     }
   });
 
-  test('project.json ambient ile', () => {
-    const plan = planProject({ ...base, ambient, styleRef: null });
-    const json = JSON.parse(plan.files[1].content);
+  test('project.json: müzik stili adı ve profili plana gider', () => {
+    const json = JSON.parse(planProject({ ...base, style, ambient }).files[0].content);
     assert.equal(json.clip, '');
-    assert.equal(json.audioDir, './audio');
     assert.equal(json.ambient, 'X:\\ortak\\heavyRain.mp3');
     assert.deepEqual(json.video, { cropBottom: 150, aspect: '16:9' });
-    assert.deepEqual(json.output, { dir: './out' });
-    assert.ok(json.music);
+    assert.equal(json.style, 'anime-cel');
+    assert.ok(json.music.style.includes('lofi'), json.music.style);
   });
 
-  test('project.json ambient yoksa anahtar hiç yok', () => {
-    const json = JSON.parse(planProject({ ...base, ambient: null, styleRef: null }).files[1].content);
-    assert.ok(!Object.hasOwn(json, 'ambient'));
-    assert.deepEqual(Object.keys(json), ['clip', 'audioDir', 'video', 'output', 'music', 'style']);
+  test('stil yoksa style anahtarı yok, planlayıcı varsayılanı; ambient yoksa anahtar yok', () => {
+    const json = JSON.parse(planProject({ ...base, ambient: null }).files[0].content);
+    assert.deepEqual(Object.keys(json), ['clip', 'audioDir', 'video', 'output', 'music']);
+    assert.equal(json.music.style, 'Lo-fi / mellow / instrumental');
   });
 
-  test('referans görseli resimler/style-ref olarak kopyalanır, uzantı küçük harf', () => {
-    const plan = planProject({ ...base, ambient: null, styleRef: 'Y:\\styles\\refs\\cozy-realistic.JPG' });
-    assert.deepEqual(plan.copies, [{
-      from: 'Y:\\styles\\refs\\cozy-realistic.JPG',
-      path: join('X:\\videolar', 'video3-Test', 'resimler', 'style-ref.jpg'),
-    }]);
-  });
-
-  test('STYLE_BLOCK.txt ve prompts.md stili taşır', () => {
-    const [block, , prompts] = planProject({ ...base, ambient: null, styleRef: null }).files;
-    assert.ok(block.content.startsWith('Medium / technique: Digital photograph'));
-    assert.ok(prompts.content.startsWith('# video3-Test — Üretim promptları\n'));
-    assert.ok(prompts.content.includes(block.content.trimEnd()));
+  test('prompts.md yalnızca kamera açısı promptlarını taşır', () => {
+    const prompts = planProject({ ...base, ambient: null }).files[1].content;
+    assert.ok(prompts.startsWith('# video3-Test — Kamera açısı promptları\n'));
+    assert.ok(prompts.includes('Extreme low angle'));
+    assert.ok(!prompts.includes('Style description'));
   });
 });

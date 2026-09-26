@@ -1,38 +1,33 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
 import {
   assignAlbumToProject,
   completeProjectMusic,
-  deleteProjectReference,
   fetchBuildStatus,
   fetchMusicLibrary,
   fetchProject,
   fetchProjectMaster,
-  generateProjectStyle,
   getProjectClipUrl,
   getProjectMasterUrl,
   getProjectOutputUrl,
-  getProjectReferenceUrl,
   ingestSunoToProject,
   openProjectFolder,
   selectProjectClip,
   startBuild,
   updateProjectCrop,
-  uploadProjectReference,
   uploadProjectAudio,
   uploadProjectClip,
   uploadProjectImage,
   fetchProjectMusic,
-  getProjectImageUrl,
   ApiError,
 } from '../../api';
 import { AssetPreview } from '../../components/AssetPreview';
-import { EmptyState, NotConnectedNotice } from '../../components/Feedback';
+import { EmptyState } from '../../components/Feedback';
 import { StatusBadge, type AssetStatus } from '../../components/StatusBadge';
 import { TrackList } from '../../components/TrackList';
 import { IMAGE_ACCEPT, IMAGE_FORMATS_LABEL } from '../../imageTypes';
 import type { BuildJob, MasterFrameInfo, ProjectDetail, ProjectMusicInfo, ProjectPrompts, WorkflowStepId } from '../../types';
-import { fileName, musicTracks, styleName, type ProjectAssets } from './assetState';
+import { fileName, musicTracks, type ProjectAssets } from './assetState';
 import { CopyPrompt, UploadButton } from './StepWidgets';
 
 /** Adımın canonical akıştaki durumu (backend workflow.steps[].status). */
@@ -47,8 +42,6 @@ export type StageProps = {
   prompts?: ProjectPrompts | null;
   promptsError?: string | null;
 };
-
-const NOT_CONNECTED_HINT = 'Not connected yet';
 
 function sectionAnchor(section: string) {
   return `stage-${section}`;
@@ -103,362 +96,12 @@ export function StagePanel({ section, title, status, statusLabel, stageStatus, c
   );
 }
 
-function ReferenceThumbnail({ src, alt }: { src: string; alt: string }) {
-  const [failed, setFailed] = useState(false);
-  if (failed) return null;
-  return (
-    <img
-      src={src}
-      alt={alt}
-      onError={() => setFailed(true)}
-      style={{
-        width: 32,
-        height: 32,
-        borderRadius: 4,
-        objectFit: 'cover',
-        border: '1px solid var(--border)',
-        flexShrink: 0,
-      }}
-    />
-  );
-}
-
-export function StyleStage({ project, assets, stageStatus, onProjectUpdate }: StageProps) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isUploading, setIsUploading] = useState(false);
-  const [deletingName, setDeletingName] = useState<string | null>(null);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [refError, setRefError] = useState<string | null>(null);
-  const [refSuccess, setRefSuccess] = useState<string | null>(null);
-
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [generateError, setGenerateError] = useState<string | null>(null);
-  const [generateSuccess, setGenerateSuccess] = useState<string | null>(null);
-
-  const style = styleName(project);
-  const isCustomStyle = style === 'custom-generated';
-  const references = project.references ?? [];
-  const hasReferences = references.length > 0;
-  const isStyleReady = project.styleBlockExists || (!isCustomStyle && Boolean(style));
-
-  const handleUploadFiles = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? []);
-    if (files.length === 0) return;
-    event.target.value = '';
-
-    setIsUploading(true);
-    setRefError(null);
-    setRefSuccess(null);
-
-    try {
-      let latestProject = project;
-      for (const file of files) {
-        latestProject = await uploadProjectReference(project.id, file);
-      }
-      if (onProjectUpdate) {
-        onProjectUpdate(latestProject);
-      }
-      setRefSuccess(
-        `Added ${files.length} reference image${files.length > 1 ? 's' : ''} to references/ folder.`,
-      );
-    } catch (err: unknown) {
-      if (err instanceof ApiError) {
-        setRefError(err.message);
-      } else {
-        setRefError(err instanceof Error ? err.message : 'Could not upload reference image.');
-      }
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
-  const handleDeleteReference = async (name: string) => {
-    if (deletingName) return;
-    setDeletingName(name);
-    setRefError(null);
-    setRefSuccess(null);
-    try {
-      const updated = await deleteProjectReference(project.id, name);
-      if (onProjectUpdate) {
-        onProjectUpdate(updated);
-      }
-      setRefSuccess(`Removed ${name}.`);
-    } catch (err: unknown) {
-      if (err instanceof ApiError) {
-        setRefError(err.message);
-      } else {
-        setRefError(err instanceof Error ? err.message : 'Could not delete reference image.');
-      }
-    } finally {
-      setDeletingName(null);
-    }
-  };
-
-  const handleOpenFolder = async () => {
-    try {
-      await openProjectFolder(project.id, 'references');
-      setRefSuccess('Opened references/ folder in Explorer.');
-    } catch {
-      setRefError('Could not open folder in Explorer.');
-    }
-  };
-
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
-    setRefError(null);
-    setRefSuccess(null);
-    try {
-      const updated = await fetchProject(project.id);
-      if (onProjectUpdate) {
-        onProjectUpdate(updated);
-      }
-      setRefSuccess(`Refreshed. Found ${updated.references?.length ?? 0} saved reference(s).`);
-    } catch {
-      setRefError('Could not refresh references.');
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
-
-  const handleGenerateStyle = async () => {
-    setIsGenerating(true);
-    setGenerateError(null);
-    setGenerateSuccess(null);
-    try {
-      const response = await generateProjectStyle(project.id, { overwrite: Boolean(project.styleBlockExists) });
-      if (onProjectUpdate) {
-        onProjectUpdate(response.project);
-      }
-      setGenerateSuccess('Visual style successfully generated with Gemini!');
-    } catch (err: unknown) {
-      if (err instanceof ApiError) {
-        setGenerateError(err.message);
-      } else {
-        setGenerateError(err instanceof Error ? err.message : 'Could not generate project style.');
-      }
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  return (
-    <StagePanel
-      section="style"
-      title="2. Görsel Stili (Image Style)"
-      status={isStyleReady ? 'ready' : 'waiting'}
-      statusLabel={isStyleReady ? (project.styleBlockExists ? 'Ready' : 'Selected') : 'Waiting'}
-      stageStatus={stageStatus}
-    >
-      <div className="stage-grid">
-        <div className="stage-block">
-          <h3>Current Image Style</h3>
-          {style ? (
-            <div className="style-summary">
-              <div className="swatch swatch-neutral" aria-hidden="true" />
-              <div style={{ flex: 1 }}>
-                <strong style={{ fontSize: 15 }}>{style}</strong>
-                <p className="muted" style={{ margin: '4px 0 0' }}>
-                  Image Style Block: {project.styleBlockExists ? '✓ available (STYLE_BLOCK.txt)' : 'not generated yet'}
-                </p>
-                <p className="field-hint" style={{ margin: '6px 0 0' }}>
-                  {isCustomStyle
-                    ? 'Custom visual image style block — reference images in references/ are analyzed by Gemini to generate your style block.'
-                    : 'Pre-built template image style block is active. Extra reference images are optional.'}
-                </p>
-                {isCustomStyle ? (
-                  <div style={{ marginTop: 14 }}>
-                    {hasReferences ? (
-                      <button
-                        className="button button-primary"
-                        type="button"
-                        onClick={handleGenerateStyle}
-                        disabled={isGenerating}
-                      >
-                        {isGenerating
-                          ? 'Generating Image Style Block with Gemini...'
-                          : project.styleBlockExists
-                          ? '🔄 Regenerate Image Style Block with Gemini'
-                          : '✨ Generate Image Style Block from References'}
-                      </button>
-                    ) : (
-                      <p className="field-hint" style={{ color: 'var(--text-muted)' }}>
-                        Add at least 1 reference image to synthesize your image style block.
-                      </p>
-                    )}
-                  </div>
-                ) : null}
-                {generateError ? (
-                  <p className="field-hint field-error" role="alert" style={{ marginTop: 8 }}>
-                    {generateError}
-                  </p>
-                ) : null}
-                {generateSuccess ? (
-                  <p className="field-hint" style={{ marginTop: 8, color: '#34603f' }}>
-                    ✓ {generateSuccess}
-                  </p>
-                ) : null}
-              </div>
-            </div>
-          ) : (
-            <EmptyState compact title="No style block selected." />
-          )}
-        </div>
-
-        <div className="stage-block">
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginBottom: 8 }}>
-            <h3 style={{ margin: 0 }}>
-              Saved References <span className="count">({references.length})</span>
-            </h3>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <StatusBadge status={hasReferences ? 'ready' : 'waiting'} label={`${references.length} saved`} />
-            </div>
-          </div>
-
-          <div
-            style={{
-              padding: '8px 12px',
-              borderRadius: 6,
-              background: 'var(--bg-surface-subtle)',
-              border: '1px solid var(--border-subtle)',
-              marginBottom: 10,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 8,
-              fontSize: 12,
-            }}
-          >
-            <span style={{ color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              📁 <code>references/</code> ({references.length} files)
-            </span>
-            <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-              <button
-                type="button"
-                className="button"
-                style={{ fontSize: 11.5, minHeight: 24, padding: '1px 8px' }}
-                onClick={handleOpenFolder}
-              >
-                📂 Open Folder
-              </button>
-              <button
-                type="button"
-                className="button"
-                style={{ fontSize: 11.5, minHeight: 24, padding: '1px 8px' }}
-                onClick={handleRefresh}
-                disabled={isRefreshing}
-              >
-                {isRefreshing ? '...' : '🔄 Refresh'}
-              </button>
-            </div>
-          </div>
-
-          {references.length > 0 ? (
-            <ul className="file-list" style={{ maxHeight: 180, overflowY: 'auto', margin: '0 0 12px' }}>
-              {references.map((path) => {
-                const name = fileName(path);
-                const refUrl = name ? getProjectReferenceUrl(project.id, name) : null;
-                const isDeleting = deletingName === name;
-                return (
-                  <li
-                    key={path}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '4px 8px',
-                      borderRadius: 6,
-                      background: 'var(--bg-surface)',
-                      border: '1px solid var(--border-subtle)',
-                      marginBottom: 4,
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                      {refUrl ? <ReferenceThumbnail src={refUrl} alt={name || ''} /> : null}
-                      <span style={{ fontSize: 13, wordBreak: 'break-all' }}>{name}</span>
-                    </div>
-                    {name ? (
-                      <button
-                        type="button"
-                        aria-label={`Remove ${name}`}
-                        disabled={isDeleting}
-                        onClick={() => handleDeleteReference(name)}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          color: 'var(--text-muted)',
-                          cursor: 'pointer',
-                          fontSize: 16,
-                          lineHeight: 1,
-                          padding: '2px 6px',
-                          borderRadius: 4,
-                        }}
-                      >
-                        {isDeleting ? '...' : '×'}
-                      </button>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
-          ) : (
-            <EmptyState
-              compact
-              title={
-                isCustomStyle
-                  ? 'No reference images in references/ folder.'
-                  : 'No reference images in references/ folder (optional for pre-built styles).'
-              }
-            />
-          )}
-
-          <div style={{ marginTop: 8 }}>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept={IMAGE_ACCEPT}
-              multiple
-              className="visually-hidden"
-              onChange={handleUploadFiles}
-            />
-            <button
-              type="button"
-              className="button"
-              disabled={isUploading}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              {isUploading ? 'Uploading reference...' : '➕ Add Reference Images'}
-            </button>
-            <p className="field-hint" style={{ margin: '6px 0 0' }}>
-              Supported: JPG, PNG, WEBP (up to 15 MB). Uploaded directly to <code>references/</code>.
-            </p>
-          </div>
-
-          {refError ? (
-            <p className="field-hint field-error" role="alert" style={{ marginTop: 8 }}>
-              {refError}
-            </p>
-          ) : null}
-
-          {refSuccess ? (
-            <p className="field-hint" style={{ marginTop: 8, color: '#34603f' }}>
-              ✓ {refSuccess}
-            </p>
-          ) : null}
-        </div>
-      </div>
-    </StagePanel>
-  );
-}
-
-export function MasterStage({ project, stageStatus, onProjectUpdate, prompts, promptsError }: StageProps) {
+export function MasterStage({ project, stageStatus, onProjectUpdate }: StageProps) {
   const masterName = fileName(project.master);
   const masterUrl = masterName ? getProjectMasterUrl(project.id, masterName) : null;
   const isMasterReady = project.readiness?.master?.ready ?? Boolean(project.master);
   const masterBadgeStatus: AssetStatus = isMasterReady ? 'ready' : 'waiting';
   const masterBadgeLabel = isMasterReady ? 'Hazır' : 'Master bekleniyor';
-  const sceneName = fileName(project.sceneRef);
-  const sceneUrl = project.sceneRef ? getProjectImageUrl(project.id, 'scene', project.sceneRef) : null;
-  const styleImages = [...(project.references ?? []), ...(project.styleRef ? [project.styleRef] : [])];
 
   const [masterInfo, setMasterInfo] = useState<MasterFrameInfo | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -498,7 +141,7 @@ export function MasterStage({ project, stageStatus, onProjectUpdate, prompts, pr
       }
       setSuccess(
         updated.master || updated.readiness?.master?.ready
-          ? 'Master frame detected and loaded.'
+          ? 'Master image detected and loaded.'
           : 'Project refreshed. Save image as resimler\\MASTER.png when ready.',
       );
     } catch {
@@ -520,7 +163,7 @@ export function MasterStage({ project, stageStatus, onProjectUpdate, prompts, pr
   return (
     <StagePanel
       section="master"
-      title="4. Master Frame"
+      title="2. Master görseli"
       status={masterBadgeStatus}
       statusLabel={masterBadgeLabel}
       stageStatus={stageStatus}
@@ -530,46 +173,17 @@ export function MasterStage({ project, stageStatus, onProjectUpdate, prompts, pr
           kind="image"
           fileName={masterName}
           src={masterUrl}
-          emptyLabel="No master frame yet. Generate with the Faz 1 prompt and save as resimler\MASTER.png."
+          emptyLabel="No master image yet. Upload the image you made, or save it as resimler\MASTER.png."
         />
         <div className="stage-actions">
-          <h3>AI Studio'ya verilecekler</h3>
-          <ul className="field-hint" style={{ margin: 0, paddingLeft: 18 }}>
-            <li>
-              Sahne referansı:{' '}
-              {sceneName && sceneUrl ? (
-                <a href={sceneUrl} target="_blank" rel="noreferrer">{sceneName}</a>
-              ) : (
-                'yok (3. adımda yükle)'
-              )}
-            </li>
-            <li>
-              Stil görseli:{' '}
-              {styleImages.length > 0
-                ? styleImages.map((path, index) => (
-                    <span key={path}>
-                      {index > 0 ? ', ' : ''}
-                      <a href={getProjectReferenceUrl(project.id, path)} target="_blank" rel="noreferrer">{fileName(path)}</a>
-                    </span>
-                  ))
-                : 'projede kayıtlı stil görseli yok — kullandığın stil görselini kendin ekle'}
-            </li>
-          </ul>
-
-          <CopyPrompt
-            label="Master Frame promptu"
-            prompt={prompts?.master ?? masterInfo?.prompt}
-            error={promptsError ?? masterInfo?.promptError}
-          />
-
           <UploadButton
-            label={isMasterReady ? 'Master frame\'i değiştir' : 'Master frame\'i yükle'}
+            label={isMasterReady ? 'Master görselini değiştir' : 'Master görselini yükle'}
             accept={IMAGE_ACCEPT}
             onFiles={async ([file]) => {
               onProjectUpdate?.(await uploadProjectImage(project.id, 'master', file));
             }}
           />
-          {isMasterReady ? <p className="field-hint field-success">✓ Master Frame hazır: {masterName}</p> : null}
+          {isMasterReady ? <p className="field-hint field-success">✓ Master görseli hazır: {masterName}</p> : null}
 
           <div
             style={{
@@ -639,7 +253,7 @@ export function MasterStage({ project, stageStatus, onProjectUpdate, prompts, pr
               disabled={isRefreshing}
               onClick={handleRefresh}
             >
-              {isRefreshing ? 'Checking resimler\\...' : 'Check & Refresh Master Frame'}
+              {isRefreshing ? 'Checking resimler\\...' : 'Check & Refresh Master Image'}
             </button>
           </div>
         </div>
@@ -648,7 +262,7 @@ export function MasterStage({ project, stageStatus, onProjectUpdate, prompts, pr
   );
 }
 
-export function VideoStage({ project, assets, stageStatus, onProjectUpdate, prompts, promptsError }: StageProps) {
+export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: StageProps) {
   // Tek resim modu: clips = MASTER + açı görselleri (sunucu sıralar, MASTER ilk).
   const isStill = project.videoSource === 'image';
   const clips = project.clips ?? [];
@@ -858,7 +472,7 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate, prom
   };
 
   return (
-    <StagePanel section="video" title="6. Video" status={assets.clip} stageStatus={stageStatus}>
+    <StagePanel section="video" title="4. Video" status={assets.clip} stageStatus={stageStatus}>
       <div className="stage-media">
         <AssetPreview
           kind={isStill ? 'image' : 'video'}
@@ -883,7 +497,6 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate, prom
                 Görsel: {fileName(project.master) ?? 'master frame yok'}
                 {(project.angles?.length ?? 0) > 0 ? ` (ya da açı görselleri: ${project.angles?.map((path) => fileName(path)).join(', ')})` : ''}
               </p>
-              <CopyPrompt label="Hailuo promptu" prompt={prompts?.video} error={promptsError} />
               <UploadButton
                 label="Video klibi yükle (.mp4)"
                 accept=".mp4"
@@ -1268,7 +881,7 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
   };
 
   return (
-    <StagePanel section="music" title="7. Müzik" status={assets.music} stageStatus={stageStatus}>
+    <StagePanel section="music" title="5. Müzik" status={assets.music} stageStatus={stageStatus}>
       <UploadButton
         label="Müzik dosyalarını yükle"
         accept=".mp3,.wav,.m4a,.flac,.aac,.opus,.ogg"
@@ -1688,7 +1301,7 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
     : 'Kırpma yok';
 
   return (
-    <StagePanel section="build" title="9. Montaj" status={assets.assembly} stageStatus={stageStatus}>
+    <StagePanel section="build" title="7. Montaj" status={assets.assembly} stageStatus={stageStatus}>
       <dl className="readiness-list">
         {rows.map((row) => (
           <div key={row.label}>
@@ -1894,7 +1507,7 @@ export function OutputStage({ project, assets, stageStatus, onProjectUpdate }: S
   };
 
   return (
-    <StagePanel section="publish" title="10. Yayın" status={assets.output} stageStatus={stageStatus}>
+    <StagePanel section="publish" title="8. Yayın" status={assets.output} stageStatus={stageStatus}>
       {project.output?.exists ? (
         <div className="stage-media">
           <AssetPreview kind="video" fileName={outputName} src={outputUrl} emptyLabel="" />

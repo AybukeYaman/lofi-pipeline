@@ -2,15 +2,14 @@ import { useEffect, useState, type FormEvent } from 'react';
 
 import { assignAlbumToProject, createProject, fetchLibrary, fetchMusicLibrary, fetchProjects, ApiError } from '../api';
 import { PageHeader } from '../components/PageHeader';
-import { sampleStyles } from '../mockData';
 import { showError, showSuccess } from '../toast';
-import type { LoadState, VideoSource } from '../types';
+import type { BackendStyle, LoadState, VideoSource } from '../types';
+import { musicSummary } from '../musicStyle';
 
-type FormErrors = Partial<Record<'name' | 'style' | 'form', string>>;
+type FormErrors = Partial<Record<'name' | 'form', string>>;
 
 const INVALID_NAME_CHARS = /[<>:"/\\|?* - ]/;
 
-type StyleOption = { id: string; name: string; description: string };
 
 const VIDEO_SOURCE_OPTIONS: Array<{ id: VideoSource; name: string; description: string }> = [
   { id: 'clip', name: 'Video loop (.mp4)', description: 'Master frame is animated into a short looping clip.' },
@@ -43,7 +42,7 @@ export function NewProject({
   const [serverProblems, setServerProblems] = useState<string[]>([]);
   const [restoredDraftTime, setRestoredDraftTime] = useState<string | null>(null);
 
-  const [availableStyles, setAvailableStyles] = useState<StyleOption[]>(sampleStyles);
+  const [availableStyles, setAvailableStyles] = useState<BackendStyle[]>([]);
   const [availableAlbums, setAvailableAlbums] = useState<Array<{ id: string; name: string; trackCount: number }>>([]);
   const [selectedAlbumId, setSelectedAlbumId] = useState<string>('');
 
@@ -91,21 +90,10 @@ export function NewProject({
     fetchLibrary()
       .then((lib) => {
         if (!isActive) return;
-        if (Array.isArray(lib.styles) && lib.styles.length > 0) {
-          setAvailableStyles(
-            lib.styles.map((s) => {
-              const sample = sampleStyles.find((item) => item.id === s.name);
-              return {
-                id: s.name,
-                name: sample?.name ?? s.name,
-                description: s.motionHints || s.styleBlock || sample?.description || 'Visual style option.',
-              };
-            }),
-          );
-        }
+        if (Array.isArray(lib.styles)) setAvailableStyles(lib.styles.filter((s) => s.valid));
       })
       .catch(() => {
-        // Fallback to defaults
+        // Liste yüklenemezse yalnızca "varsayılan" seçilebilir.
       });
 
     fetchMusicLibrary()
@@ -161,7 +149,7 @@ export function NewProject({
     event.preventDefault();
     if (isSubmitting) return;
 
-    const nextErrors = validate({ name, style, existingNames });
+    const nextErrors = validate({ name, existingNames });
     setErrors(nextErrors);
     setServerProblems([]);
 
@@ -171,7 +159,7 @@ export function NewProject({
     try {
       const response = await createProject({
         name: name.trim(),
-        style,
+        style: style || undefined,
         videoSource,
         concept: concept.trim() || undefined,
       });
@@ -220,14 +208,14 @@ export function NewProject({
     onCancel();
   };
 
-  const selectedStyle = availableStyles.find((option) => option.id === style);
+  const selectedStyle = availableStyles.find((option) => option.name === style);
 
   return (
     <section className="page narrow">
       <PageHeader
         eyebrow="NEW PROJECT"
         title="New Project"
-        description="Set up the album, image style and visual for a new video."
+        description="Set up the album, music style and visual for a new video."
       />
 
       {restoredDraftTime ? (
@@ -307,24 +295,25 @@ export function NewProject({
         </div>
 
         <div className="field">
-          <label htmlFor="project-style">Image Style</label>
+          <label htmlFor="project-style">Music Style</label>
           <select
             id="project-style"
             value={style}
             onChange={(event) => edit(setStyle)(event.target.value)}
-            aria-invalid={Boolean(errors.style)}
             aria-describedby="project-style-hint"
             disabled={isSubmitting}
           >
-            <option value="">Select an image style</option>
+            <option value="">Default (lofi)</option>
             {availableStyles.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.name}
+              <option key={option.name} value={option.name}>
+                {option.name}{option.hasMusicProfile ? '' : ' — profile empty'}
               </option>
             ))}
           </select>
-          <p id="project-style-hint" className={errors.style ? 'field-error' : 'field-hint'}>
-            {errors.style ?? selectedStyle?.description ?? 'Choose the image style for the video.'}
+          <p id="project-style-hint" className="field-hint">
+            {selectedStyle
+              ? musicSummary(selectedStyle.music) ?? 'This style has no music profile yet — the default lofi profile is used.'
+              : 'Optional. Shapes the album music plan; images are made by you.'}
           </p>
         </div>
 
@@ -401,11 +390,9 @@ export function NewProject({
 
 function validate({
   name,
-  style,
   existingNames,
 }: {
   name: string;
-  style: string;
   existingNames: string[];
 }): FormErrors {
   const errors: FormErrors = {};
@@ -424,10 +411,6 @@ function validate({
     errors.name = 'Use a valid folder name (no < > : " / \\ | ? * and no trailing dot).';
   } else if (existingNames.includes(trimmed.toLowerCase())) {
     errors.name = 'A project with this name already exists.';
-  }
-
-  if (!style) {
-    errors.style = 'Select a style.';
   }
 
   return errors;

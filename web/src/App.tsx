@@ -7,7 +7,7 @@ import { MusicHub } from './pages/MusicHub';
 import { NewProject } from './pages/NewProject';
 import { ProjectWorkspace } from './pages/ProjectWorkspace';
 import { Settings } from './pages/Settings';
-import { StyleLibrary } from './pages/StyleLibrary';
+import { MusicStyles } from './pages/MusicStyles';
 import { parseRoute, paths, projectPath } from './router';
 import { applyTheme, getStoredTheme } from './theme';
 import { ToastContainer } from './toast';
@@ -63,8 +63,8 @@ function renderRoute(route: Route, navigate: Navigate) {
       return <MusicHub />;
     case 'styles':
       return (
-        <StyleLibrary
-          onUseStyle={(styleId) => navigate(`${paths.newProject}?style=${encodeURIComponent(styleId)}`)}
+        <MusicStyles
+          onUseStyle={(styleName) => navigate(`${paths.newProject}?style=${encodeURIComponent(styleName)}`)}
         />
       );
     case 'ambient':

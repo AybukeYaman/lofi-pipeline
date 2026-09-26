@@ -51,39 +51,32 @@ describe('runNewVideo', () => {
     });
     const dir = join(env.videosDir, 'video3-Neo Tokyo & Night');
     assert.equal(result.dir, dir);
-    assert.deepEqual((await readdir(dir)).sort(), ['STYLE_BLOCK.txt', 'audio', 'project.json', 'prompts.md', 'references', 'resimler', 'videolar']);
-    for (const sub of ['audio', 'resimler', 'videolar', 'references']) assert.deepEqual(await readdir(join(dir, sub)), []);
+    assert.deepEqual((await readdir(dir)).sort(), ['audio', 'project.json', 'prompts.md', 'resimler', 'videolar']);
+    for (const sub of ['audio', 'resimler', 'videolar']) assert.deepEqual(await readdir(join(dir, sub)), []);
 
     // PowerShell 5.1 Get-Content BOM'suz UTF-8'i cp1254 okuyor ("â€”") — insan okuduğu dosyalar BOM'lu.
     const bom = Buffer.from([0xef, 0xbb, 0xbf]);
-    for (const [name, withBom] of [['STYLE_BLOCK.txt', true], ['project.json', false], ['prompts.md', true]]) {
+    for (const [name, withBom] of [['project.json', false], ['prompts.md', true]]) {
       const bytes = await readFile(join(dir, name));
       assert.equal(bytes.subarray(0, 3).equals(bom), withBom, `${name}: BOM`);
       if (withBom) assert.notEqual(bytes[3], 0xef, `${name}: çift BOM`);
       assert.ok(!bytes.includes(0x0d), `${name}: CR`);
     }
     const prompts = new TextDecoder('utf-8', { fatal: true }).decode(await readFile(join(dir, 'prompts.md')));
-    assert.ok(prompts.startsWith('# video3-Neo Tokyo & Night — Üretim promptları\n'));
+    assert.ok(prompts.startsWith('# video3-Neo Tokyo & Night — Kamera açısı promptları\n'));
 
     const project = JSON.parse(await readFile(join(dir, 'project.json'), 'utf8'));
     assert.equal(project.ambient, join(env.ambientDir, 'heavyRain.mp3'));
     assert.equal(result.ambient.name, 'heavyRain');
     assert.equal(result.suggestion, null);
-    assert.deepEqual(result.copies, []);
     assert.deepEqual(result.warnings, []);
   });
 
-  test('custom-generated stili ile proje oluşturulur, STYLE_BLOCK.txt başlangıçta yazılmaz, references klasörü açılır', async () => {
-    const result = await runNewVideo({ ...env, videoName: 'multi-ref-proj', styleName: 'custom-generated' });
-    const dir = join(env.videosDir, 'multi-ref-proj');
-    assert.equal(result.dir, dir);
-    const files = await readdir(dir);
-    assert.ok(!files.includes('STYLE_BLOCK.txt'), 'STYLE_BLOCK.txt başlangıçta olmamalı');
-    assert.ok(files.includes('references'), 'references klasörü oluşturulmalı');
-    
-    const project = JSON.parse(await readFile(join(dir, 'project.json'), 'utf8'));
-    assert.equal(project.style, 'custom-generated');
-    assert.equal(project.styleBlock, undefined);
+  test('stil isteğe bağlı: stilsiz proje, style anahtarı yok, öneri yok', async () => {
+    const result = await runNewVideo({ ...env, videoName: 'stilsiz' });
+    const project = JSON.parse(await readFile(join(result.dir, 'project.json'), 'utf8'));
+    assert.ok(!Object.hasOwn(project, 'style'));
+    assert.equal(result.suggestion, null);
   });
 
   test('ambient verilmezse okunamayan ambient klasörü durdurmaz, uyarı olur', async () => {
@@ -134,19 +127,6 @@ describe('runNewVideo', () => {
     );
   });
 
-  test('stilin referans görseli resimler/style-ref olarak bayt bayt kopyalanır', async () => {
-    const stylesDir = join(env.base, 'styles');
-    await mkdir(join(stylesDir, 'refs'), { recursive: true });
-    await copyFile(join(STYLES_DIR, 'watercolor.json'), join(stylesDir, 'watercolor.json'));
-    const image = Buffer.from([0xff, 0xd8, 0xff, 0x00, 0x0d, 0x0a, 0x42]);
-    await writeFile(join(stylesDir, 'refs', 'watercolor.JPG'), image);
-
-    const result = await runNewVideo({ ...env, stylesDir, videoName: 'v', styleName: 'watercolor' });
-    const target = join(result.dir, 'resimler', 'style-ref.jpg');
-    assert.deepEqual(result.copies, [target]);
-    assert.deepEqual(await readFile(target), image);
-  });
-
   test('build.js uyumu: clip boşken tek problem, klip yazılınca uyarısız', async () => {
     const { dir } = await runNewVideo({ ...env, videoName: 'v', styleName: 'cozy-realistic', ambientName: 'campfire' });
     const projectPath = join(dir, 'project.json');
@@ -170,12 +150,11 @@ describe('runNewVideo', () => {
 });
 
 describe('writeProject geri alma', () => {
-  const makePlan = async (name, styleRef = null) => planProject({
+  const makePlan = async (name) => planProject({
     videosDir: env.videosDir,
     videoName: name,
     style: (await loadStyle('anime-cel')).style,
     ambient: null,
-    styleRef,
     templates: await loadTemplates(),
   });
 
@@ -187,12 +166,6 @@ describe('writeProject geri alma', () => {
     assert.deepEqual(await readdir(env.videosDir), []);
   });
 
-  test('kopya hatası → klasör silinir', async () => {
-    const plan = await makePlan('kopya', 'X:\\yok.jpg');
-    await assert.rejects(writeProject(plan, { copy: async () => { throw new Error('kopya (taklit)'); } }), /kopya/);
-    assert.deepEqual(await readdir(env.videosDir), []);
-  });
-
   test('videolar kökü yoksa anlaşılır hata, hiçbir şey oluşmaz', async () => {
     const plan = await makePlan('v');
     plan.dir = join(env.base, 'yok', 'v');
@@ -201,13 +174,10 @@ describe('writeProject geri alma', () => {
 });
 
 describe('main (CLI)', () => {
-  test('--style yoksa stiller ve ambient\'ler listelenir, çıkış 2, klasör yok', async (t) => {
+  test('--style olmadan da proje kurulur (varsayılan müzik profili)', async (t) => {
     const { code, err } = await runMain(t, ['video3', ...flags()]);
-    assert.equal(code, 2);
-    assert.match(err, /anime-cel\s+öneri: --ambient gentleRain · referans görseli yok/);
-    assert.match(err, /cozy-realistic\s+öneri: --ambient campfire/);
-    assert.ok(err.includes("Ambient'ler: campfire, gentleRain, heavyRain, rainStorm"));
-    assert.deepEqual(await readdir(env.videosDir), []);
+    assert.equal(code, 0, err);
+    assert.deepEqual(await readdir(env.videosDir), ['video3']);
   });
 
   test('tırnaksız isim → çıkış 2, tırnak ipucu', async (t) => {
@@ -229,11 +199,6 @@ describe('main (CLI)', () => {
     await mkdir(stylesDir);
     await copyFile(join(STYLES_DIR, 'watercolor.json'), join(stylesDir, 'watercolor.json'));
 
-    const list = await runMain(t, ['v', ...flags(), '--styles-dir', stylesDir]);
-    assert.equal(list.code, 2);
-    assert.match(list.err, /watercolor\s+öneri/);
-    assert.ok(!list.err.includes('anime-cel'));
-
     assert.equal((await runMain(t, ['v', '--style', 'anime-cel', ...flags(), '--styles-dir', stylesDir])).code, 2);
     assert.equal((await runMain(t, ['v', '--style', 'watercolor', ...flags(), '--styles-dir', stylesDir])).code, 0);
   });
@@ -251,7 +216,6 @@ describe('main (CLI)', () => {
     assert.ok(first.out.startsWith(`Proje oluşturuldu: ${join(env.videosDir, 'video3-Test')}`));
     assert.ok(first.out.includes('stilin önerisi: campfire.'));
     assert.ok(first.out.includes(`"ambient": ${JSON.stringify(join(env.ambientDir, 'campfire.mp3'))},`));
-    assert.ok(first.out.includes('Image 2 olarak stil görselini elle ekle'));
     assert.ok(first.out.includes('Sıradaki adımlar:'));
     assert.ok(first.out.includes(`node build.js --project "${join(env.videosDir, 'video3-Test', 'project.json')}"`));
 

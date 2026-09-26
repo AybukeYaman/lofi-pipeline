@@ -147,24 +147,12 @@ describe('readiness — workflow sırasından bağımsız kanıt', () => {
   test('bozuk project.json montaj eksiği olarak raporlanır', () => {
     const readiness = describeReadiness({
       projectJson: { ok: false, data: null, error: 'x' },
-      style: '-', styleBlockExists: false, references: [], master: null,
+      style: null, master: null,
       clip: { value: '', path: null, exists: false }, clips: [], audioCount: 0,
       output: { path: 'X:\\o.mp4', exists: false },
     });
     assert.deepEqual(readiness.build.missing, ['projectJson', 'clip', 'music']);
-    assert.equal(readiness.style.name, null);
-  });
-
-  test('custom-generated stil, STYLE_BLOCK yokken hazır değil', () => {
-    const readiness = describeReadiness({
-      projectJson: { ok: true, data: {}, error: null },
-      style: 'custom-generated', styleBlockExists: false, references: ['a.jpg'], master: null,
-      clip: { value: '', path: null, exists: false }, clips: [], audioCount: 0,
-      output: { path: 'X:\\o.mp4', exists: false },
-    });
-    assert.deepEqual(readiness.style, {
-      ready: false, name: 'custom-generated', styleBlockExists: false, referenceCount: 1,
-    });
+    assert.deepEqual(readiness.style, { name: null });
   });
 
   test('isMusicCompleted: parça planı varsa plan durumu, yoksa ses dosyası', () => {
@@ -190,16 +178,16 @@ describe('readiness — workflow sırasından bağımsız kanıt', () => {
 });
 
 describe('GET /api/library', () => {
-  test('stiller (custom-generated önce) ve ambient adları', async () => {
+  test('müzik stilleri ve ambient adları', async () => {
     const response = await send('GET', '/api/library');
     assert.equal(response.status, 200);
     const library = await response.json();
-    assert.equal(library.styles[0].name, 'custom-generated');
-    assert.equal(library.styles[0].kind, 'custom');
+    assert.ok(!library.styles.some((style) => style.name === 'custom-generated'));
     const watercolor = library.styles.find((style) => style.name === 'watercolor');
     assert.equal(watercolor.valid, true);
     assert.equal(typeof watercolor.suggestedAmbient, 'string');
-    assert.ok(Array.isArray(watercolor.styleBlock.palette));
+    assert.equal(typeof watercolor.hasMusicProfile, 'boolean');
+    assert.ok(!('styleBlock' in watercolor));
     assert.deepEqual(library.ambients, [{ name: 'campfire' }, { name: 'gentleRain' }]);
     assert.equal(library.ambientError, null);
   });
@@ -213,7 +201,7 @@ describe('GET /api/library', () => {
   test('geçersiz stil dosyası listede problemleriyle döner', async () => {
     const stylesDir = join(base, 'styles-invalid');
     await mkdir(stylesDir);
-    await writeFile(join(stylesDir, 'broken.json'), '{ "name": "broken" }');
+    await writeFile(join(stylesDir, 'broken.json'), '{ "name": "baska" }');
     const library = await getLibrary({ stylesDir, ambientDir });
     const broken = library.styles.find((style) => style.name === 'broken');
     assert.equal(broken.valid, false);
@@ -234,7 +222,7 @@ describe('POST /api/projects', () => {
     assert.equal(project.style, 'watercolor');
 
     const dir = join(videosDir, 'new album');
-    for (const sub of ['audio', 'resimler', 'videolar', 'references']) {
+    for (const sub of ['audio', 'resimler', 'videolar']) {
       assert.ok((await stat(join(dir, sub))).isDirectory());
     }
     const json = JSON.parse(await readFile(join(dir, 'project.json'), 'utf8'));
@@ -243,7 +231,13 @@ describe('POST /api/projects', () => {
     assert.equal(json.music.tracks.length, 3);
     assert.equal(json.ambient, join(ambientDir, 'gentleRain.mp3'));
     assert.ok((await stat(join(dir, 'prompts.md'))).isFile());
-    assert.ok((await stat(join(dir, 'STYLE_BLOCK.txt'))).isFile());
+  });
+
+  test('stil isteğe bağlı: stilsiz proje oluşturulur', async () => {
+    const response = await send('POST', '/api/projects', { body: { name: 'stilsiz album' } });
+    assert.equal(response.status, 201);
+    const json = JSON.parse(await readFile(join(videosDir, 'stilsiz album', 'project.json'), 'utf8'));
+    assert.ok(!Object.hasOwn(json, 'style'));
   });
 
   test('aynı isim ikinci kez → 409, klasöre dokunulmaz', async () => {
@@ -727,12 +721,9 @@ describe('asset önizleme — salt okunur', () => {
   before(async () => {
     const dir = await writeProjectFolder('assets', {
       project: { clip: './videolar/clip.mp4' },
-      files: ['references/notes.txt'],
     });
     await writeFile(join(dir, 'resimler', 'MASTER.png'), 'png-bytes');
     await writeFile(join(dir, 'resimler', 'Master1.jpg'), 'variant');
-    await writeFile(join(dir, 'resimler', 'style-ref.webp'), 'webp');
-    await writeFile(join(dir, 'references', 'a.jpg'), 'jpg');
     await writeFile(join(dir, 'videolar', 'clip.mp4'), '0123456789');
     await writeFile(join(dir, 'videolar', 'other.mp4'), 'other');
     await mkdir(join(dir, 'out'));
@@ -744,8 +735,7 @@ describe('asset önizleme — salt okunur', () => {
   test('izinli dosyalar gerçek içerik ve MIME ile döner', async () => {
     const cases = [
       ['master', 'MASTER.png', 'image/png', 'png-bytes'],
-      ['reference', 'a.jpg', 'image/jpeg', 'jpg'],
-      ['reference', 'style-ref.webp', 'image/webp', 'webp'],
+      ['angle', 'Master1.jpg', 'image/jpeg', 'variant'],
       ['clip', 'clip.mp4', 'video/mp4', '0123456789'],
       ['output', 'final_ambient.mp4', 'video/mp4', 'output'],
     ];
@@ -773,10 +763,9 @@ describe('asset önizleme — salt okunur', () => {
   test('türün listesinde olmayan dosya 404', async () => {
     for (const [type, file] of [
       ['master', 'Master1.jpg'],      // açı varyantı master değil
-      ['master', 'a.jpg'],            // başka türün dosyası
+      ['angle', 'MASTER.png'],        // master açı değil
       ['clip', 'other.mp4'],          // seçili olmayan klip
-      ['reference', 'notes.txt'],     // izinsiz uzantı
-      ['reference', 'missing.jpg'],
+      ['angle', 'missing.jpg'],
       ['output', 'final_ambient.mp4'],
     ]) {
       const id = type === 'output' ? 'ready' : 'assets'; // ready'de çıktı yok
@@ -954,7 +943,7 @@ describe('HTTP katmanı', () => {
   });
 });
 
-describe('canonical akış — 10 adım, diskten kaldığı yer', () => {
+describe('canonical akış — 8 adım, diskten kaldığı yer', () => {
   const b64 = (text) => Buffer.from(text).toString('base64');
   const options = () => ({ videosDir });
   const current = async (id) => (await getProject(id, options())).workflow.current;
@@ -963,13 +952,9 @@ describe('canonical akış — 10 adım, diskten kaldığı yer', () => {
     await writeProjectFolder('flow', { project: { video: { aspect: '16:9' } } });
     const fresh = await getProject('flow', options());
     assert.deepEqual(fresh.workflow.steps.map((step) => step.id), [
-      'project', 'style', 'reference', 'master', 'angles', 'video', 'music', 'order', 'build', 'publish',
+      'project', 'master', 'angles', 'video', 'music', 'order', 'build', 'publish',
     ]);
-    // Kütüphane stili kayıtlı → stil adımı atlanır, sahne referansı istenir.
-    assert.equal(fresh.workflow.current, 'reference');
-
-    await uploadProjectImage('flow', { slot: 'scene', name: 'scene.webp', data: b64('s') }, options());
-    assert.equal(await current('flow'), 'master');
+    assert.equal(fresh.workflow.current, 'master');
 
     await uploadProjectImage('flow', { slot: 'master', name: 'm.jpg', data: b64('m1') }, options());
     await uploadProjectImage('flow', { slot: 'master', name: 'm.png', data: b64('m2') }, options());
@@ -1021,7 +1006,7 @@ describe('canonical akış — 10 adım, diskten kaldığı yer', () => {
     await writeFile(join(videosDir, 'flow', 'out', 'final_ambient.mp4'), 'x');
     const published = await getProject('flow', options());
     assert.equal(published.workflow.current, 'publish');
-    assert.ok(published.workflow.steps.slice(0, 9).every((step) => step.status === 'done'));
+    assert.ok(published.workflow.steps.slice(0, 7).every((step) => step.status === 'done'));
   });
 
   test('açı istemeyen proje adımı atlar; eski projede sonraki kanıt önceki adımı tamamlar', async () => {
@@ -1031,7 +1016,7 @@ describe('canonical akış — 10 adım, diskten kaldığı yer', () => {
     assert.equal(skipped.workflow.current, 'video');
     assert.equal(skipped.workflow.steps.find((step) => step.id === 'angles').skipped, true);
 
-    // Eski proje: scene-ref ve workflow kaydı yok, klip + müzik var, sıra yok → Sıralama.
+    // Eski proje: workflow kaydı yok, klip + müzik var, sıra yok → Sıralama.
     await writeProjectFolder('legacy', {
       project: { clip: './videolar/in.mp4' },
       files: ['resimler/MASTER.png', 'videolar/in.mp4', 'audio/01.mp3'],
@@ -1040,35 +1025,31 @@ describe('canonical akış — 10 adım, diskten kaldığı yer', () => {
     assert.equal(legacy.workflow.current, 'order');
     assert.deepEqual(
       legacy.workflow.steps.filter((step) => step.status === 'done').map((step) => step.id),
-      ['project', 'style', 'reference', 'master', 'angles', 'video', 'music'],
+      ['project', 'master', 'angles', 'video', 'music'],
     );
   });
 
-  test('özel stil üretilmeden stil adımında kalınır; geçersiz istekler reddedilir', async () => {
-    await writeProjectFolder('custom-flow', { project: { style: 'custom-generated' } });
-    assert.equal(await current('custom-flow'), 'style');
-    await writeFile(join(videosDir, 'custom-flow', 'STYLE_BLOCK.txt'), 'block');
-    assert.equal(await current('custom-flow'), 'reference');
+  test('geçersiz istekler reddedilir; sahne referansı yuvası yok', async () => {
+    await writeProjectFolder('custom-flow');
 
     const bad = (promise, status) => assert.rejects(promise, (error) => error.status === status);
-    await bad(uploadProjectImage('custom-flow', { slot: 'other', name: 'a.png', data: b64('x') }, options()), 400);
+    await bad(uploadProjectImage('custom-flow', { slot: 'scene', name: 'a.png', data: b64('x') }, options()), 400);
     await bad(uploadProjectImage('custom-flow', { slot: 'angle', index: 9, name: 'a.png', data: b64('x') }, options()), 400);
-    await bad(uploadProjectImage('custom-flow', { slot: 'scene', name: 'a.gif', data: b64('x') }, options()), 400);
-    await bad(uploadProjectImage('custom-flow', { slot: 'scene', name: '../a.png', data: b64('x') }, options()), 400);
+    await bad(uploadProjectImage('custom-flow', { slot: 'master', name: 'a.gif', data: b64('x') }, options()), 400);
+    await bad(uploadProjectImage('custom-flow', { slot: 'master', name: '../a.png', data: b64('x') }, options()), 400);
     await bad(uploadProjectClip('custom-flow', { name: 'a.mov', data: b64('x') }, options()), 400);
     await bad(uploadProjectAudio('custom-flow', { name: 'a.mp3', data: '' }, options()), 400);
     await bad(updateWorkflow('custom-flow', { angles: { wanted: true, count: 0 } }, options()), 400);
     await bad(updateTrackOrder('custom-flow', { mode: 'alphabetical' }, options()), 409);
   });
 
-  test('promptlar yalnızca kopyalanacak kod bloklarını döndürür', async () => {
-    const prompts = await getProjectPrompts('flow', { videosDir, stylesDir: STYLES_DIR });
-    assert.ok(prompts.master.startsWith('Image 1 = environment'));
-    assert.ok(!prompts.master.includes('Faz 1'));
+  test('promptlar: yalnızca kamera açıları, kod bloklarıyla', async () => {
+    const prompts = await getProjectPrompts('flow', { videosDir });
+    assert.deepEqual(Object.keys(prompts), ['angles']);
     assert.equal(prompts.angles.length, 5);
     assert.equal(prompts.angles[0].title, 'Extreme low angle');
     assert.ok(prompts.angles[0].prompt.startsWith('Image 1 = master frame'));
-    assert.ok(prompts.video.startsWith('Subtle looping motion:'));
+    assert.ok(!prompts.angles[0].prompt.includes('Style description'));
   });
 });
 

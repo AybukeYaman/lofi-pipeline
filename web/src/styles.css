@@ -1243,6 +1243,17 @@ h1 {
   border-bottom: 1px solid var(--border-subtle);
 }
 
+/* Müzik stilleri: oynatma sütunu yok — gövde, rozet, butonlar. */
+.library-list.style-list li {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.library-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .library-list li:last-child {
   border-bottom: 0;
 }

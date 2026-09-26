@@ -19,14 +19,11 @@ import {
   uploadAlbumTrack,
 } from './music-library-api.js';
 import {
-  addProjectReference,
   ApiError,
   completeMusic,
   createLibraryStyle,
   createProject,
   deleteProject,
-  deleteProjectReference,
-  generateStyle,
   getAsset,
   getBuild,
   getLibrary,
@@ -48,7 +45,6 @@ import {
   uploadProjectClip,
   uploadProjectImage,
   getStyle,
-  getStyleAsset,
   updateLibraryStyle,
   deleteLibraryStyle,
 } from './project-api.js';
@@ -70,12 +66,8 @@ export function createDefaultProjectApi({ buildJobs = createBuildJobs() } = {}) 
     getLibrary: () => getLibrary(),
     createLibraryStyle: (body) => createLibraryStyle(body),
     getStyle: (id) => getStyle(id),
-    getStyleAsset: (id) => getStyleAsset(id),
     updateLibraryStyle: (id, body) => updateLibraryStyle(id, body),
     deleteLibraryStyle: (id) => deleteLibraryStyle(id),
-    generateStyle: (id, body) => generateStyle(id, body),
-    addProjectReference: (id, body) => addProjectReference(id, body),
-    deleteProjectReference: (id, name) => deleteProjectReference(id, name),
     getMaster: (id) => getMaster(id),
     getProjectPrompts: (id) => getProjectPrompts(id),
     uploadProjectImage: (id, body) => uploadProjectImage(id, body),
@@ -115,7 +107,6 @@ const ROUTES = [
   {
     method: 'POST',
     pattern: /^\/api\/styles$/,
-    maxBodyBytes: MAX_UPLOAD_BODY_BYTES,
     handle: async (api, { body }) => [201, await api.createLibraryStyle(body)],
   },
   {
@@ -124,21 +115,8 @@ const ROUTES = [
     handle: async (api, { id }) => [200, await api.getStyle(id)],
   },
   {
-    method: 'GET',
-    pattern: /^\/api\/styles\/([^/]+)\/image$/,
-    file: true,
-    handle: async (api, { id, query }) => [200, await api.getStyleAsset(id, query)],
-  },
-  {
-    method: 'GET',
-    pattern: /^\/api\/styles\/([^/]+)\/images\/([^/]+)$/,
-    file: true,
-    handle: async (api, { id, params }) => [200, await api.getStyleAsset(id, { file: params[0] })],
-  },
-  {
     method: 'PUT',
     pattern: /^\/api\/styles\/([^/]+)$/,
-    maxBodyBytes: MAX_UPLOAD_BODY_BYTES,
     handle: async (api, { id, body }) => [200, await api.updateLibraryStyle(id, body)],
   },
   {
@@ -199,22 +177,6 @@ const ROUTES = [
     method: 'PUT',
     pattern: /^\/api\/projects\/([^/]*)\/order$/,
     handle: async (api, { id, body }) => [200, await api.updateTrackOrder(id, body)],
-  },
-  {
-    method: 'POST',
-    pattern: /^\/api\/projects\/([^/]*)\/style\/generate$/,
-    handle: async (api, { id, body }) => [200, await api.generateStyle(id, body)],
-  },
-  {
-    method: 'POST',
-    pattern: /^\/api\/projects\/([^/]*)\/references$/,
-    maxBodyBytes: MAX_UPLOAD_BODY_BYTES,
-    handle: async (api, { id, body }) => [200, await api.addProjectReference(id, body)],
-  },
-  {
-    method: 'DELETE',
-    pattern: /^\/api\/projects\/([^/]*)\/references\/([^/]*)$/,
-    handle: async (api, { id, params }) => [200, await api.deleteProjectReference(id, params[0])],
   },
   {
     method: 'GET',

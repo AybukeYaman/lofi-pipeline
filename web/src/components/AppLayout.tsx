@@ -7,7 +7,7 @@ const navItems = [
   { label: 'Projects', path: paths.dashboard, routes: ['dashboard', 'project'] },
   { label: 'New Project', path: paths.newProject, routes: ['newProject'] },
   { label: 'Music Hub', path: paths.music, routes: ['music'] },
-  { label: 'Image Styles', path: paths.styles, routes: ['styles'] },
+  { label: 'Music Styles', path: paths.styles, routes: ['styles'] },
   { label: 'Ambient', path: paths.ambient, routes: ['ambient'] },
   { label: 'Settings', path: paths.settings, routes: ['settings'] },
 ] as const;

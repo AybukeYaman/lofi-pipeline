@@ -1,12 +1,12 @@
 /**
- * Prompt şablonları — prompts/*.txt okuma, doldurma, prompts.md metni.
+ * Prompt şablonları — prompts/*.txt okuma, prompts.md metni.
  *
- * Tek sorumluluk: stilden AI Studio / video aracı promptlarını üretmek.
- * Stili doğrulamaz (prep/styles.js), dosya yazmaz ve klasör kurmaz (7a).
+ * Tek sorumluluk: kamera açısı (Faz 2) promptlarını projeye hazırlamak.
+ * Master görseli ve klip elle üretildiği için onların promptu yok. Dosya
+ * yazmaz ve klasör kurmaz (7a).
  *
- * Yer tutucu sözdizimi `{{AD}}` — açılı parantez değil: model `<...>`'yı
- * doldurulacak yer sanıyor (HANDOFF bölüm 4, Faz 2). Doldurma katıdır:
- * tanınmayan ya da bozuk yer tutucu hata, sessizce metinde kalmaz.
+ * Kopyalanan metinde açılı parantez yasak: model `<...>`'yı doldurulacak
+ * yer sanıyor (HANDOFF bölüm 4, Faz 2).
  */
 
 import { readFile } from 'node:fs/promises';
@@ -14,15 +14,13 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { normalizeText } from '../core/workspace.js';
-import { renderStyleBlock } from './styles.js';
 
 /** Repodaki şablon klasörü. */
 export const PROMPTS_DIR = fileURLToPath(new URL('../prompts/', import.meta.url));
 
 /** prompts.md'deki sıra. */
-export const TEMPLATE_FILES = ['faz1-master.txt', 'faz2-angles.txt', 'faz3-motion.txt'];
+export const TEMPLATE_FILES = ['faz2-angles.txt'];
 
-const TOKEN = /\{\{([A-Z_]+)\}\}/g;
 const FENCE = '```';
 
 export class PromptError extends Error {
@@ -59,75 +57,20 @@ export async function loadTemplates({ dir = PROMPTS_DIR } = {}) {
 }
 
 /**
- * `{{AD}}` yer tutucularını doldurur. Değerler yeniden taranmaz ve `$&` gibi
- * replace kalıpları olduğu gibi yazılır.
+ * prompts.md metni: başlık + şablonlar.
  *
- * @param {string} text
- * @param {Record<string, string>} values
- * @param {string} [source] hata mesajı için şablon adı
- * @returns {string}
- */
-export function fillTemplate(text, values, source = 'şablon') {
-  const problems = [];
-
-  const unknown = new Set();
-  const filled = text.replace(TOKEN, (token, key) => {
-    if (Object.hasOwn(values, key)) return values[key];
-    unknown.add(token);
-    return token;
-  });
-  for (const token of unknown) problems.push(`${source}: tanınmayan yer tutucu ${token}`);
-
-  // Geçerli yer tutucular çıkarıldıktan sonra kalan süslü parantez bozuk yazımdır.
-  if (/\{\{|\}\}/.test(text.replace(TOKEN, ''))) {
-    problems.push(`${source}: bozuk yer tutucu — biçim {{BÜYÜK_HARF}} olmalı`);
-  }
-
-  if (problems.length > 0) throw new PromptError(source, problems);
-  return filled;
-}
-
-/**
- * prompts.md metni: başlık + doldurulmuş şablonlar.
- *
- * @param {{ videoName: string, style: object, templates: { file: string, text: string }[] }} input
- *   style doğrulanmış olmalı (loadStyle)
+ * @param {{ videoName: string, templates: { file: string, text: string }[] }} input
  * @returns {string} LF, sonda tek satır sonu
  */
-export function buildPromptsMd({ videoName, style, templates }) {
-  const values = {
-    STYLE_NAME: style.name,
-    STYLE_BLOCK: renderStyleBlock(style),
-    MOTION_HINTS: Array.isArray(style.motionHints)
-      ? style.motionHints.map((hint) => hint.trim().replace(/\.+$/, '')).join(', ')
-      : '',
-  };
-  const problems = [];
-
-  for (const [key, value] of Object.entries(values)) {
-    if (value.includes(FENCE)) problems.push(`${key}: "${FENCE}" içeremez — kod bloğunu kapatır`);
-  }
-
-  const sections = [];
-  for (const { file, text } of templates) {
-    try {
-      sections.push(fillTemplate(text, values, file).trimEnd());
-    } catch (error) {
-      if (!(error instanceof PromptError)) throw error;
-      problems.push(...error.problems);
-    }
-  }
-  if (problems.length > 0) throw new PromptError('prompts.md', problems);
-
+export function buildPromptsMd({ videoName, templates }) {
   const header = [
-    `# ${videoName} — Üretim promptları`,
+    `# ${videoName} — Kamera açısı promptları`,
     '',
-    `Stil: \`${style.name}\` · stil bloğu ayrıca \`STYLE_BLOCK.txt\` dosyasında.`,
     'Kod bloklarındaki metin olduğu gibi kopyalanır; blok dışındaki notlar prompta girmez.',
   ].join('\n');
-  const md = [header, ...sections].join('\n\n') + '\n';
+  const md = [header, ...templates.map(({ text }) => text.trimEnd())].join('\n\n') + '\n';
 
-  // Kopyalanan metin yalnızca kod blokları — açılı parantez yasağı orada geçerli.
+  const problems = [];
   const { blocks, unclosed } = codeBlocks(md);
   if (unclosed) problems.push('kapanmamış kod bloğu');
   blocks.forEach((block, i) => {
@@ -163,31 +106,12 @@ export function codeBlocks(md) {
 }
 
 /**
- * Proje klasöründeki prompts.md veya şablonlardan Faz 1, 2, 3 metinlerini ayrıştırır.
+ * Faz 2 (kamera açıları) şablon metni.
  *
- * @param {{ videoName?: string, style?: object, templates?: { file: string, text: string }[] }} [input]
- * @returns {Promise<{ faz1: string, faz2: string, faz3: string }>}
+ * @param {{ templates?: { file: string, text: string }[] }} [input]
+ * @returns {Promise<string>} şablon yoksa boş metin
  */
-export async function getPhasePrompts(input = {}) {
-  let templates = input.templates;
-  if (!templates) {
-    templates = await loadTemplates();
-  }
-  const style = input.style ?? { name: 'default', styleBlock: {}, motionHints: ['subtle motion'] };
-  const values = {
-    STYLE_NAME: style.name,
-    STYLE_BLOCK: renderStyleBlock(style),
-    MOTION_HINTS: Array.isArray(style.motionHints) ? style.motionHints.map((hint) => hint.trim().replace(/\.+$/, '')).join(', ') : 'subtle motion',
-  };
-
-  const getFilled = (file) => {
-    const t = templates.find((item) => item.file === file);
-    return t ? fillTemplate(t.text, values, file).trimEnd() : '';
-  };
-
-  return {
-    faz1: getFilled('faz1-master.txt'),
-    faz2: getFilled('faz2-angles.txt'),
-    faz3: getFilled('faz3-motion.txt'),
-  };
+export async function getAnglePrompts(input = {}) {
+  const templates = input.templates ?? await loadTemplates();
+  return templates.find((item) => item.file === 'faz2-angles.txt')?.text.trimEnd() ?? '';
 }

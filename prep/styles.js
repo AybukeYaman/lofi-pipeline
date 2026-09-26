@@ -1,52 +1,35 @@
 /**
- * Stil kütüphanesi — styles/<ad>.json okuma, doğrulama, stil bloğu metni.
+ * Stil kütüphanesi — styles/<ad>.json okuma ve doğrulama.
  *
- * Tek sorumluluk: bir stilin geçerli olduğunu garanti etmek ve AI Studio'ya
- * verilecek metne çevirmek. Proje klasörü kurmaz (7a), prompt doldurmaz (7c),
- * model çağırmaz (7d).
- *
- * Şema alanlara bölünmüş — 7d'deki Gemini responseSchema'sı aynı alanlardan
- * (STYLE_FIELDS) kurulacak. Hatalar config.js'teki gibi TEK seferde raporlanır.
+ * Stil bir müzik profilidir: ad + `music` bloğu (albüm prompt'ları,
+ * prep/album-prompt.js) + isteğe bağlı önerilen ambient. Görseller elle
+ * üretildiği için görsel tanım (style block, referans görseli) yok; eski
+ * dosyalardaki bu alanlar diskte kalır, okunmaz. Hatalar config.js'teki
+ * gibi TEK seferde raporlanır.
  */
 
-import { basename, extname, join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { IMAGE_EXTENSIONS, listFiles } from '../core/files.js';
+import { listFiles } from '../core/files.js';
 import { readJsonFile } from '../core/workspace.js';
 import { findAmbient } from './ambients.js';
 
 /** Repodaki stil klasörü. */
 export const STYLES_DIR = fileURLToPath(new URL('../styles/', import.meta.url));
 
-/** Stil adı = dosya adı: küçük harf kebab-case ("neo-tokyo"). */
-/** Stil adı: küçük harf kebab-case (add-style, panel ve web aynı kuralı kullanır). */
+/** Stil adı = dosya adı: küçük harf kebab-case ("neo-tokyo"). Panel, CLI ve web aynı kuralı kullanır. */
 export const STYLE_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-/** Projeye özel, referans görsellerden üretilen stil; styles/ altında dosyası yok. */
-export const CUSTOM_STYLE_NAME = 'custom-generated';
 
 /**
- * styleBlock alanları — metin çıktısındaki sıra ve başlıklar.
- * `palette` renk listesi, diğerleri düz metin.
+ * Müzik profili alanları — web formu ve albüm prompt'ları (album-prompt.js
+ * DNA_FIELDS + exclude) aynı adları kullanır. Metin ya da metin dizisi.
  */
-export const STYLE_FIELDS = [
-  { key: 'medium', label: 'Medium / technique' },
-  { key: 'lines', label: 'Line quality' },
-  { key: 'palette', label: 'Color palette' },
-  { key: 'light', label: 'Lighting' },
-  { key: 'texture', label: 'Texture / grain' },
-  { key: 'contrast', label: 'Contrast' },
-  { key: 'shading', label: 'Shading' },
-];
+export const MUSIC_FIELDS = ['genre', 'production', 'instruments', 'aesthetic', 'exclude'];
 
-/** `music`: opsiyonel albüm kimliği bloğu — prep/album-prompt.js okur ve doğrular. */
-const ROOT_KEYS = ['name', 'styleBlock', 'suggestedAmbient', 'motionHints', 'music'];
-
-/**
- * Loop'ta kapanmayan yönlü hareketler (HANDOFF bölüm 4, Faz 3). Uyarıdır:
- * kelime bağlam dışı geçebilir, ama 7d'nin ürettiği ipuçlarında yakalanmalı.
- */
-const DIRECTIONAL_MOTION = /\b(pan|pans|panning|zoom|zooms|zooming|dolly|camera (?:moves|moving|move)|walks?|walking|runs?|running)\b/i;
+const ROOT_KEYS = ['name', 'music', 'suggestedAmbient'];
+/** Eski görsel stil alanları: dosyada kalabilir, uyarısız yok sayılır. */
+const LEGACY_KEYS = ['styleBlock', 'motionHints'];
 
 export class StyleError extends Error {
   /**
@@ -73,62 +56,6 @@ export async function listStyles({ dir = STYLES_DIR } = {}) {
 }
 
 /**
- * Stilin tüm referans görsellerini bulur (styles/refs/<ad>.*, styles/refs/<ad>-*.*, styles/refs/<ad>_*.*).
- *
- * @param {string} name doğrulanmış stil adı
- * @param {{ dir?: string }} [options] stil klasörü; görseller `<dir>/refs/`
- * @returns {Promise<{ paths: string[], warnings: string[] }>}
- */
-export async function findStyleRefs(name, { dir = STYLES_DIR } = {}) {
-  let paths;
-  try {
-    paths = await listFiles(join(dir, 'refs'), IMAGE_EXTENSIONS);
-  } catch (cause) {
-    if (cause.code === 'ENOENT') return { paths: [], warnings: [] };
-    throw cause;
-  }
-
-  const exactMatches = paths.filter((path) => basename(path, extname(path)) === name);
-  exactMatches.sort((a, b) => {
-    const extA = extname(a).toLowerCase();
-    const extB = extname(b).toLowerCase();
-    return IMAGE_EXTENSIONS.indexOf(extA) - IMAGE_EXTENSIONS.indexOf(extB);
-  });
-
-  const secondaryMatches = paths.filter((path) => {
-    const base = basename(path, extname(path));
-    return base.startsWith(`${name}-`) || base.startsWith(`${name}_`);
-  });
-  secondaryMatches.sort((a, b) => {
-    const baseA = basename(a, extname(a));
-    const baseB = basename(b, extname(b));
-    return baseA.localeCompare(baseB, undefined, { numeric: true });
-  });
-
-  const warnings = [];
-  if (exactMatches.length > 1) {
-    warnings.push(
-      `"${name}" için birden fazla referans görseli bulundu (${exactMatches.map((p) => basename(p)).join(', ')}), ` +
-      `"${basename(exactMatches[0])}" kullanılacak`,
-    );
-  }
-
-  return { paths: [...exactMatches, ...secondaryMatches], warnings };
-}
-
-/**
- * Stilin birincil referans görseli. Klasör ya da görsel yoksa `path: null`.
- *
- * @param {string} name doğrulanmış stil adı
- * @param {{ dir?: string }} [options] stil klasörü; görseller `<dir>/refs/`
- * @returns {Promise<{ path: string | null, warnings: string[] }>}
- */
-export async function findStyleRef(name, { dir = STYLES_DIR } = {}) {
-  const { paths, warnings } = await findStyleRefs(name, { dir });
-  return { path: paths[0] ?? null, warnings };
-}
-
-/**
  * Stili okur ve doğrular.
  *
  * @param {string} name
@@ -137,14 +64,6 @@ export async function findStyleRef(name, { dir = STYLES_DIR } = {}) {
  * @returns {Promise<{ style: object, path: string, warnings: string[] }>}
  */
 export async function loadStyle(name, { dir = STYLES_DIR, ambients } = {}) {
-  if (name === CUSTOM_STYLE_NAME) {
-    return {
-      style: { name: CUSTOM_STYLE_NAME, suggestedAmbient: 'none' },
-      path: join(dir, `${CUSTOM_STYLE_NAME}.json`),
-      warnings: [],
-    };
-  }
-
   if (typeof name !== 'string' || !STYLE_NAME_PATTERN.test(name)) {
     throw new StyleError(String(name), [`stil adı küçük harf kebab-case olmalı (ör. "neo-tokyo"), verilen: ${JSON.stringify(name)}`]);
   }
@@ -173,8 +92,7 @@ export async function loadStyle(name, { dir = STYLES_DIR, ambients } = {}) {
 }
 
 /**
- * Saf doğrulama — dosyaya dokunmaz. 7d modelin çıktısını kaydetmeden önce
- * aynı fonksiyondan geçirecek.
+ * Saf doğrulama — dosyaya dokunmaz.
  *
  * @param {unknown} json
  * @param {{ expectedName?: string, ambients?: { name: string, path: string }[] }} [context]
@@ -185,10 +103,14 @@ export function validateStyle(json, { expectedName, ambients } = {}) {
   const warnings = [];
 
   if (json === null || typeof json !== 'object' || Array.isArray(json)) {
-    return { problems: ['kök bir nesne olmalı: { "name": ..., "styleBlock": {...}, ... }'], warnings };
+    return { problems: ['kök bir nesne olmalı: { "name": ..., "music": {...} }'], warnings };
   }
 
-  unknownKeys(json, ROOT_KEYS, '', warnings);
+  for (const key of Object.keys(json)) {
+    if (!ROOT_KEYS.includes(key) && !LEGACY_KEYS.includes(key)) {
+      warnings.push(`Bilinmeyen anahtar yok sayıldı: "${key}" (yazım hatası olabilir)`);
+    }
+  }
 
   // --- name
   if (requireText(json.name, 'name', problems)) {
@@ -199,20 +121,26 @@ export function validateStyle(json, { expectedName, ambients } = {}) {
     }
   }
 
-  // --- styleBlock
-  const block = json.styleBlock;
-  if (block === null || typeof block !== 'object' || Array.isArray(block)) {
-    problems.push('styleBlock: nesne olmalı' + (block === undefined ? ' (eksik)' : ''));
-  } else {
-    unknownKeys(block, STYLE_FIELDS.map((f) => f.key), 'styleBlock.', warnings);
-    for (const { key } of STYLE_FIELDS) {
-      if (key === 'palette') validatePalette(block.palette, problems);
-      else requireText(block[key], `styleBlock.${key}`, problems);
+  // --- music (isteğe bağlı; boşken albüm üretimi album-prompt.js'te durur)
+  if (json.music !== undefined) {
+    const music = json.music;
+    if (music === null || typeof music !== 'object' || Array.isArray(music)) {
+      problems.push('music: nesne olmalı: { "genre", "production", "instruments", "aesthetic", "exclude" }');
+    } else {
+      for (const key of Object.keys(music)) {
+        if (!MUSIC_FIELDS.includes(key)) warnings.push(`Bilinmeyen anahtar yok sayıldı: "music.${key}" (yazım hatası olabilir)`);
+      }
+      for (const key of MUSIC_FIELDS) {
+        const value = music[key];
+        if (value === undefined) continue;
+        const ok = typeof value === 'string' || (Array.isArray(value) && value.every((item) => typeof item === 'string'));
+        if (!ok) problems.push(`music.${key}: metin ya da metin dizisi olmalı`);
+      }
     }
   }
 
-  // --- suggestedAmbient
-  if (requireText(json.suggestedAmbient, 'suggestedAmbient', problems) && ambients) {
+  // --- suggestedAmbient (isteğe bağlı)
+  if (json.suggestedAmbient !== undefined && requireText(json.suggestedAmbient, 'suggestedAmbient', problems) && ambients) {
     if (!findAmbient(ambients, json.suggestedAmbient)) {
       warnings.push(
         `suggestedAmbient: "${json.suggestedAmbient}" ambient klasöründe yok — mevcut: ` +
@@ -221,65 +149,39 @@ export function validateStyle(json, { expectedName, ambients } = {}) {
     }
   }
 
-  // --- motionHints
-  if (!Array.isArray(json.motionHints) || json.motionHints.length === 0) {
-    problems.push('motionHints: boş olmayan bir dizi olmalı');
-  } else {
-    json.motionHints.forEach((hint, i) => {
-      if (requireText(hint, `motionHints[${i}]`, problems) && DIRECTIONAL_MOTION.test(hint)) {
-        warnings.push(`motionHints[${i}]: yönlü hareket loop'ta kapanmaz (bölüm 4, Faz 3): "${hint}"`);
-      }
-    });
-  }
-
-  // --- promptu bozan karakterler (her metin alanında)
-  for (const [where, text] of strings(json)) {
-    if (/[<>]/.test(text)) {
-      problems.push(`${where}: "<" ya da ">" içeremez — model açılı parantezi doldurulacak yer sanıyor (bölüm 4, Faz 2)`);
-    }
-    if (/\{\{|\}\}/.test(text)) {
-      problems.push(`${where}: "{{" ya da "}}" içeremez — prompt şablonlarının yer tutucu sözdizimi`);
-    }
-  }
-
   return { problems, warnings };
 }
 
 /**
- * styleBlock → AI Studio'ya yapıştırılacak düz metin. Markdown yok: metin
- * promptun içine gömülüyor, `**` modele gürültü olur.
+ * Stilin müzik profili dolu mu (en az bir alan boş olmayan metin içeriyor)?
  *
- * @param {{ styleBlock: object }} style doğrulanmış stil
- * @returns {string} sonunda satır sonu yok
+ * @param {object} style doğrulanmış stil
+ * @returns {boolean}
  */
-export function renderStyleBlock(style) {
-  if (!style || !style.styleBlock) return '';
-  return STYLE_FIELDS.map(({ key, label }) => {
-    if (key !== 'palette') return `${label}: ${style.styleBlock[key]}`;
-    const colors = style.styleBlock.palette.map((c) => `- ${c.hex.toUpperCase()} ${c.role}`);
-    return [`${label}:`, ...colors].join('\n');
-  }).join('\n');
+export function hasMusicProfile(style) {
+  const music = style?.music;
+  if (music === null || typeof music !== 'object') return false;
+  return MUSIC_FIELDS.some((key) => [].concat(music[key] ?? []).some((item) => typeof item === 'string' && item.trim() !== ''));
+}
+
+/**
+ * Müzik planlayıcısına verilecek stil metni: hariç tutulanlar dışındaki profil
+ * alanları. Profil boşsa undefined (planlayıcı varsayılan lofi tanımını kullanır).
+ *
+ * @param {object|null|undefined} style doğrulanmış stil
+ * @returns {string|undefined}
+ */
+export function musicStyleText(style) {
+  if (!hasMusicProfile(style)) return undefined;
+  const parts = MUSIC_FIELDS
+    .filter((key) => key !== 'exclude')
+    .flatMap((key) => [].concat(style.music[key] ?? []))
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return parts.length > 0 ? parts.join(', ') : undefined;
 }
 
 // ---------------------------------------------------------------- yardımcılar
-
-function validatePalette(palette, problems) {
-  if (!Array.isArray(palette) || palette.length === 0) {
-    problems.push('styleBlock.palette: boş olmayan bir dizi olmalı: [{ "hex": "#RRGGBB", "role": "..." }]');
-    return;
-  }
-  palette.forEach((color, i) => {
-    const at = `styleBlock.palette[${i}]`;
-    if (color === null || typeof color !== 'object' || Array.isArray(color)) {
-      problems.push(`${at}: { "hex": "#RRGGBB", "role": "..." } biçiminde olmalı`);
-      return;
-    }
-    if (typeof color.hex !== 'string' || !/^#[0-9a-f]{6}$/i.test(color.hex)) {
-      problems.push(`${at}.hex: #RRGGBB biçiminde olmalı (verilen: ${JSON.stringify(color.hex)})`);
-    }
-    requireText(color.role, `${at}.role`, problems);
-  });
-}
 
 /** @returns {boolean} geçerliyse true */
 function requireText(value, key, problems) {
@@ -288,26 +190,4 @@ function requireText(value, key, problems) {
     return false;
   }
   return true;
-}
-
-function unknownKeys(object, known, prefix, warnings) {
-  for (const key of Object.keys(object)) {
-    if (!known.includes(key)) {
-      warnings.push(`Bilinmeyen anahtar yok sayıldı: "${prefix}${key}" (yazım hatası olabilir)`);
-    }
-  }
-}
-
-/**
- * Nesnedeki bütün metinler, konumlarıyla.
- * @returns {Generator<[string, string]>}
- */
-function* strings(value, where = '') {
-  if (typeof value === 'string') {
-    yield [where || '(kök)', value];
-  } else if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++) yield* strings(value[i], `${where}[${i}]`);
-  } else if (value !== null && typeof value === 'object') {
-    for (const [key, child] of Object.entries(value)) yield* strings(child, where ? `${where}.${key}` : key);
-  }
 }

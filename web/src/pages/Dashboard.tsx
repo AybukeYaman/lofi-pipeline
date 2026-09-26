@@ -126,7 +126,7 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
                     <p>
                       Adım:{' '}
                       {project.workflow
-                        ? `${project.workflow.steps.find((step) => step.id === project.workflow?.current)?.number ?? '?'}/10 · ${project.workflow.currentTitle}`
+                        ? `${project.workflow.steps.find((step) => step.id === project.workflow?.current)?.number ?? '?'}/${project.workflow.steps.length} · ${project.workflow.currentTitle}`
                         : project.step?.title ?? project.step?.id ?? 'Unknown'}
                     </p>
                   </div>
