@@ -542,6 +542,28 @@ h1 {
   text-align: left;
 }
 
+.project-card-main {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.project-card-text {
+  min-width: 0;
+}
+
+/* Video 16:9 olduğu için küçük resim de 16:9 kırpılır. */
+.project-thumb {
+  flex: none;
+  width: 112px;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--bg-surface-subtle);
+  object-fit: cover;
+}
+
 .project-card-button {
   width: 100%;
   color: inherit;

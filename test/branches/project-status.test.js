@@ -10,7 +10,8 @@ import { after, before, describe, test } from 'node:test';
 
 import { runNewVideo } from '../../new-video.js';
 import { setProjectClip } from '../../prep/project-file.js';
-import { inspectProject, listProjects, nextStep } from '../../prep/project-status.js';
+import { loadProject } from '../../core/config.js';
+import { canonicalWorkflow, inspectProject, listProjects, nextStep } from '../../prep/project-status.js';
 import { tempDir } from '../helpers/fixtures.js';
 
 describe('inspectProject — taze projeden montaja', () => {
@@ -158,5 +159,54 @@ describe('inspectProject — kenar durumlar', () => {
     assert.deepEqual(s.clip, { value: './yok.mp4', path: join(dir, 'yok.mp4'), exists: false });
     assert.equal(nextStep(s).id, 'faz1');
     assert.ok(nextStep(s).detail.startsWith("clip'teki dosya bulunamadı"));
+  });
+});
+
+describe('tek resim modu — new-video\'dan montaj konfigine', () => {
+  let root;
+  let dir;
+
+  before(async () => {
+    root = await tempDir('project-status-still');
+    await mkdir(root.path('videolar'));
+    await mkdir(root.path('ambient'));
+    ({ dir } = await runNewVideo({
+      videoName: 'still',
+      styleName: 'cozy-realistic',
+      videoSource: 'image',
+      videosDir: root.path('videolar'),
+      ambientDir: root.path('ambient'),
+    }));
+  });
+  after(() => root?.cleanup());
+
+  test('project.json: source image, kırpma 0; küçük resim stil referansına düşer', async () => {
+    const s = await inspectProject(dir);
+    assert.deepEqual(s.projectJson.data.video, { source: 'image', cropBottom: 0, aspect: '16:9' });
+    assert.equal(s.videoSource, 'image');
+    assert.equal(s.thumbnail, s.styleRef);
+  });
+
+  test('adaylar MASTER + açılar (videolar\ yok sayılır); seçilen görsel küçük resim olur', async () => {
+    await writeFile(join(dir, 'videolar', 'in.mp4'), '');
+    await writeFile(join(dir, 'resimler', 'Master2.jpg'), '');
+    await writeFile(join(dir, 'resimler', 'MASTER.png'), '');
+    let s = await inspectProject(dir);
+    assert.deepEqual(s.clips, [join(dir, 'resimler', 'MASTER.png'), join(dir, 'resimler', 'Master2.jpg')]);
+    assert.equal(s.thumbnail, s.master);
+    assert.equal(nextStep(s).id, 'clip');
+
+    await setProjectClip(s.projectPath, s.clips[1]);
+    s = await inspectProject(dir);
+    assert.equal(s.thumbnail, join(dir, 'resimler', 'Master2.jpg'));
+    assert.equal(nextStep(s).id, 'audio');
+    assert.equal(canonicalWorkflow(s).current, 'music');
+
+    const config = await loadProject(s.projectPath);
+    assert.equal(config.video.source, 'image');
+    assert.equal(config.clip, join(dir, 'resimler', 'Master2.jpg'));
+
+    const [listed] = await listProjects(root.path('videolar'));
+    assert.equal(listed.thumbnail, s.thumbnail);
   });
 });

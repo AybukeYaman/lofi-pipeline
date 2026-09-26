@@ -131,6 +131,7 @@ export async function runBuild(config, options = {}) {
     // --- 1: video hazırlığı (onay burada — ucuz, pahalı adımlardan önce)
     const video = await step('01', 'Video hazırlığı', (logger) => prepareVideo({
       clipPath: config.clip,
+      source: config.video.source,
       outputPath: workspace.path('base.mp4'),
       workspace,
       cropBottom: config.video.cropBottom,
@@ -245,6 +246,7 @@ export async function runBuild(config, options = {}) {
       configLine,
       disk,
       settings: {
+        source: config.video.source,
         cropBottom: config.video.cropBottom,
         cropFromConfig: config.video.cropFromConfig,
         verifyCrop: config.video.verifyCrop,

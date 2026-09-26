@@ -2,7 +2,7 @@
 /**
  * Aşama 7a — yeni video projesi.
  *
- *   node new-video.js "<isim>" --style <ad> [--ambient <ad>]
+ *   node new-video.js "<isim>" --style <ad> [--ambient <ad>] [--video-source clip|image]
  *                     [--videos-dir <yol>] [--ambient-dir <yol>]
  *
  * videolar/<isim>/ altına audio/, resimler/, videolar/ + STYLE_BLOCK.txt,
@@ -15,6 +15,7 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
+import { VIDEO_SOURCES } from './core/config.js';
 import { AmbientError, DEFAULT_AMBIENT_DIR, findAmbient, listAmbients } from './prep/ambients.js';
 import { PromptError, loadTemplates } from './prep/prompts.js';
 import {
@@ -38,6 +39,7 @@ export class NewVideoError extends Error {
  *   videoName: string,
  *   styleName: string,
  *   ambientName?: string,
+ *   videoSource?: 'clip'|'image',
  *   videosDir?: string,
  *   ambientDir?: string,
  *   stylesDir?: string,
@@ -56,6 +58,7 @@ export async function runNewVideo({
   videoName,
   styleName,
   ambientName,
+  videoSource = 'clip',
   videosDir = DEFAULT_VIDEOS_DIR,
   ambientDir = DEFAULT_AMBIENT_DIR,
   stylesDir = STYLES_DIR,
@@ -65,6 +68,9 @@ export async function runNewVideo({
 }) {
   const problems = validateVideoName(videoName);
   const warnings = [];
+  if (!VIDEO_SOURCES.includes(videoSource)) {
+    problems.push(`bilinmeyen görsel kaynağı "${videoSource}" — ${VIDEO_SOURCES.join(' ya da ')}`);
+  }
 
   let ambients = null;
   try {
@@ -117,7 +123,7 @@ export async function runNewVideo({
 
   let plan;
   try {
-    plan = await planProjectAsync({ videosDir, videoName, style, ambient, styleRef: ref.path, templates, concept, totalTracks });
+    plan = await planProjectAsync({ videosDir, videoName, style, ambient, styleRef: ref.path, templates, concept, totalTracks, videoSource });
   } catch (error) {
     if (!(error instanceof PromptError)) throw error;
     throw new NewVideoError(error.problems);
@@ -140,11 +146,13 @@ export async function runNewVideo({
 // ---------------------------------------------------------------- CLI
 
 const USAGE = `Kullanım:
-  node new-video.js "<isim>" --style <ad> [--ambient <ad>] [--concept <metin>] [--total-tracks <sayı>]
+  node new-video.js "<isim>" --style <ad> [--ambient <ad>] [--video-source clip|image]
+                    [--concept <metin>] [--total-tracks <sayı>]
 
   <isim>               videolar klasöründe açılacak proje (boşluk varsa tırnak içinde)
   --style <ad>         styles/ içindeki stil — verilmezse mevcut stiller listelenir
   --ambient <ad>       ortak ses efekti (ör. heavyRain) — verilmezse project.json'da ambient olmaz
+  --video-source <tür> clip: döngü video (.mp4, varsayılan) · image: tüm video boyunca tek resim
   --concept <metin>    albüm konsepti (ör. "2:17 AM — Everyone Is Asleep")
   --total-tracks <n>   üretilecek müzik parça sayısı (varsayılan: 17)
   --videos-dir <yol>   videolar kökü (varsayılan: ${DEFAULT_VIDEOS_DIR})
@@ -161,6 +169,7 @@ export function parseCli(argv) {
     options: {
       style: { type: 'string' },
       ambient: { type: 'string' },
+      'video-source': { type: 'string' },
       concept: { type: 'string' },
       'total-tracks': { type: 'string' },
       'videos-dir': { type: 'string' },
@@ -182,6 +191,7 @@ export function parseCli(argv) {
     videoName: positionals[0],
     styleName: values.style,
     ambientName: values.ambient,
+    videoSource: values['video-source'],
     concept: values.concept,
     totalTracks: values['total-tracks'] ? parseInt(values['total-tracks'], 10) : undefined,
     videosDir: values['videos-dir'],
@@ -289,6 +299,7 @@ export async function main(argv) {
       videoName: cli.videoName,
       styleName: cli.styleName,
       ambientName: cli.ambientName,
+      videoSource: cli.videoSource,
       videosDir: cli.videosDir,
       ambientDir: cli.ambientDir,
       stylesDir: cli.stylesDir,

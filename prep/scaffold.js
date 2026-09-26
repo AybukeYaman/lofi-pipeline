@@ -9,6 +9,7 @@
 import { copyFile, mkdir, rm } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 
+import { VIDEO_SOURCES } from '../core/config.js';
 import { writeTextFile } from '../core/workspace.js';
 import { DEFAULT_CROP_BOTTOM } from './project-file.js';
 import { generateMusicPlan, generateMusicPlanAsync } from './music-planner.js';
@@ -63,7 +64,8 @@ export function validateVideoName(name) {
  *   concept?: string,
  *   totalTracks?: number,
  *   musicPlan?: object,
- * }} input style doğrulanmış (loadStyle), isim doğrulanmış (validateVideoName)
+ *   videoSource?: 'clip'|'image',
+ * }} input videoSource: 'image' → tüm video boyunca tek resim (watermark yok, kırpma 0) style doğrulanmış (loadStyle), isim doğrulanmış (validateVideoName)
  * @returns {{
  *   dir: string,
  *   subdirs: string[],
@@ -71,7 +73,10 @@ export function validateVideoName(name) {
  *   copies: { from: string, path: string }[],
  * }}
  */
-export function planProject({ videosDir, videoName, style, ambient, styleRef, templates, concept, totalTracks, musicPlan }) {
+export function planProject({ videosDir, videoName, style, ambient, styleRef, templates, concept, totalTracks, musicPlan, videoSource = 'clip' }) {
+  if (!VIDEO_SOURCES.includes(videoSource)) {
+    throw new Error(`videoSource: ${VIDEO_SOURCES.join(' | ')} olmalı (verilen: ${JSON.stringify(videoSource)})`);
+  }
   const dir = join(videosDir, videoName);
 
   const ambientVal = Array.isArray(ambient)
@@ -88,7 +93,10 @@ export function planProject({ videosDir, videoName, style, ambient, styleRef, te
     clip: '',
     audioDir: './audio',
     ...(ambientVal ? { ambient: ambientVal } : {}),
-    video: { cropBottom: DEFAULT_CROP_BOTTOM, aspect: '16:9' },
+    // Tek resim AI görseli: kırpılacak watermark yok. Klip modu varsayılan olduğu için alan yazılmaz.
+    video: videoSource === 'image'
+      ? { source: 'image', cropBottom: 0, aspect: '16:9' }
+      : { cropBottom: DEFAULT_CROP_BOTTOM, aspect: '16:9' },
     output: { dir: './out' },
     music: plan,
     style: style.name,

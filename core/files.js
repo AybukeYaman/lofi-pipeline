@@ -15,6 +15,14 @@ import { basename, extname, join, sep } from 'node:path';
 /** gerçek codec kararı her zaman probe() ölçümüne dayanır (gizli Opus tuzağı). */
 export const AUDIO_EXTENSIONS = ['.m4a', '.mp3', '.wav', '.flac', '.aac', '.opus', '.ogg'];
 
+/** Tek resim video kaynağı olarak kabul edilen görsel uzantıları (video.source = "image"). */
+export const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
+
+/** @param {string} path */
+export function isImagePath(path) {
+  return IMAGE_EXTENSIONS.includes(extname(path).toLowerCase());
+}
+
 /**
  * concat demuxer liste satırı: `file '<yol>'`
  *

@@ -24,9 +24,28 @@ describe('project.json', () => {
   before(async () => {
     dir = await tempDir('config');
     await writeFile(dir.path('in.mp4'), '');
+    await writeFile(dir.path('MASTER.png'), '');
     await mkdir(dir.path('audio'));
   });
   after(() => dir?.cleanup());
+
+  test('video.source varsayılan clip; image + görsel kabul edilir', async () => {
+    assert.equal((await loadProject(await write('src-default'))).video.source, 'clip');
+    const c = await loadProject(await write('src-image', { clip: './MASTER.png', video: { source: 'image', cropBottom: 0 } }));
+    assert.equal(c.video.source, 'image');
+    assert.deepEqual(c.warnings, []);
+  });
+
+  test('video.source ile klip türü uyuşmazsa ve bilinmeyen değerde ConfigError', async () => {
+    const problemOf = async (name, patch) => {
+      const error = await loadProject(await write(name, patch)).then(() => null, (e) => e);
+      assert.ok(error instanceof ConfigError, name);
+      return error.problems.join(' | ');
+    };
+    assert.match(await problemOf('src-image-mp4', { video: { source: 'image' } }), /görsel olmalı/);
+    assert.match(await problemOf('src-clip-png', { clip: './MASTER.png' }), /video.source: "image" yaz/);
+    assert.match(await problemOf('src-bad', { video: { source: 'gif' } }), /video.source: "clip" ya da "image"/);
+  });
 
   test('crossfadeSeconds varsayılan 0, bilinen anahtar', async () => {
     const c = await loadProject(await write('default'));

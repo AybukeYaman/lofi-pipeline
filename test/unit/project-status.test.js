@@ -141,6 +141,29 @@ describe('nextStep — karar tablosu (sondan başa)', () => {
   });
 });
 
+describe('nextStep — tek resim modu (video.source = image)', () => {
+  const master = 'X:\\videolar\\v\\resimler\\MASTER.png';
+  const still = { videoSource: 'image' };
+  const readyImage = { value: './resimler/MASTER.png', path: master, exists: true };
+
+  test('görsel seçilmemiş + aday var → görsel seçimi (otomatik), Faz 3 sorulmaz', () => {
+    const step = nextStep(makeStatus({ ...still, master, clips: [master] }));
+    assert.deepEqual([step.id, step.kind, step.title], ['clip', 'auto', 'Görseli seç']);
+  });
+
+  test('aday yok ve faz1 atlanmış → görsel bekleniyor (faz3 değil)', () => {
+    const step = nextStep(makeStatus(still), { skipped: new Set(['faz1', 'faz3']) });
+    assert.deepEqual([step.id, step.kind], ['clip', 'manual']);
+    assert.match(step.detail, /MASTER\.png/);
+    assert.equal(id(still, { skipped: new Set(['faz1']) }), 'clip');
+  });
+
+  test('görsel hazır → müzik, sonra montaj', () => {
+    assert.equal(id({ ...still, master, clip: readyImage }), 'audio');
+    assert.equal(id({ ...still, master, clip: readyImage, audioCount: 3 }), 'build');
+  });
+});
+
 describe('nextStep — bu oturumda atlananlar', () => {
   test('faz1 atlanınca faz3, faz1 ve faz3 atlanınca "klip bekleniyor" (atlanamaz)', () => {
     assert.equal(id({}, { skipped: new Set(['faz1']) }), 'faz3');
@@ -193,6 +216,16 @@ describe('canonicalWorkflow — 10 adımlı akış', () => {
     assert.equal(flow({ master, clip: readyClip, ...withData({ video }) }).current, 'music');
     assert.equal(flow({ master, clip: readyClip, audioCount: 2, ...withData({ video }) }).current, 'order');
     assert.equal(flow({ master, clip: readyClip, audioCount: 2, ...withData({ video, order: ['a'] }) }).current, 'build');
+  });
+
+  test('tek resim: açı adımı atlanır, video adımı seçili görsel + kırpma kaydıyla tamam', () => {
+    const image = { value: './resimler/MASTER.png', path: master, exists: true };
+    const data = withData({ video: { source: 'image', cropBottom: 0 } });
+    const wf = flow({ master, videoSource: 'image', ...data });
+    assert.equal(wf.current, 'video');
+    assert.equal(wf.steps[4].status, 'done');
+    assert.equal(wf.steps[4].skipped, true);
+    assert.equal(flow({ master, videoSource: 'image', clip: image, ...data }).current, 'music');
   });
 
   test('çıktı varsa yayın; tüm adımlar tamam, açı adımı atlandı görünür', () => {

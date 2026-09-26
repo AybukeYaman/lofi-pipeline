@@ -15,6 +15,7 @@ import {
 } from '../prep/describe-style.js';
 
 import { AddStyleError, runAddStyle } from '../add-style.js';
+import { VIDEO_SOURCES } from '../core/config.js';
 import { AUDIO_EXTENSIONS, listFiles } from '../core/files.js';
 import { probe } from '../core/probe.js';
 import { readJsonFile, writeTextFile } from '../core/workspace.js';
@@ -53,9 +54,12 @@ const ASSET_TYPES = {
     kind: 'image/',
     files: (status) => [...status.references, ...(status.styleRef ? [status.styleRef] : [])],
   },
-  clip: { kind: 'video/', files: (status) => (status.clip.exists ? [status.clip.path] : []) },
-  /** Seçim ekranı: selectClip'in kabul ettiği videolar/*.mp4 */
-  video: { kind: 'video/', files: (status) => status.clips },
+  /** Seçili klip; tek resim modunda (video.source = "image") bir görsel. */
+  clip: { kind: ['video/', 'image/'], files: (status) => (status.clip.exists ? [status.clip.path] : []) },
+  /** Seçim ekranı: selectClip'in kabul ettiği adaylar — videolar/*.mp4 ya da tek resimde MASTER + açılar */
+  video: { kind: ['video/', 'image/'], files: (status) => status.clips },
+  /** Proje listesindeki küçük resim (inspectProject seçer). */
+  thumbnail: { kind: 'image/', files: (status) => (status.thumbnail ? [status.thumbnail] : []) },
   /** Müzik: audioDir'deki ses dosyaları (inspectProject'in audioCount'u ile aynı liste). */
   audio: { kind: 'audio/', files: (status) => audioFilesOf(status) },
   output: { kind: 'video/', files: (status) => (status.output.exists ? [status.output.path] : []) },
@@ -114,10 +118,11 @@ export class ApiError extends Error {
 /** Mevcut proje klasorlerini UI'nin liste gorunumune uyarlar. */
 export async function getProjects({ videosDir = DEFAULT_VIDEOS_DIR } = {}) {
   const projects = await listProjects(videosDir);
-  return projects.map(({ name, mtimeMs, step, workflow }) => ({
+  return projects.map(({ name, mtimeMs, thumbnail, step, workflow }) => ({
     id: name,
     name,
     mtimeMs,
+    thumbnailUrl: thumbnail ? assetUrl(name, 'thumbnail', basename(thumbnail)) : null,
     step,
     workflow,
   }));
@@ -141,7 +146,7 @@ export async function getProject(id, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
 /**
  * Yeni proje — panelin kullandigi runNewVideo (new-video.js) ile.
  *
- * @param {unknown} body `{ name, style, ambient?, concept?, totalTracks? }`
+ * @param {unknown} body `{ name, style, ambient?, videoSource?, concept?, totalTracks? }`
  * @returns {Promise<{ project: object, warnings: string[] }>}
  */
 export async function createProject(body, {
@@ -163,6 +168,7 @@ export async function createProject(body, {
       videoName: input.name,
       styleName: input.style,
       ambientName: input.ambient.length > 0 ? input.ambient : undefined,
+      videoSource: input.videoSource,
       concept: input.concept,
       totalTracks: input.totalTracks,
       videosDir,
@@ -1101,7 +1107,8 @@ function isCropBottom(value) {
 /** Uzantidan MIME; tur o aileyi sunmuyorsa null. */
 function assetContentType(assetType, filename) {
   const contentType = ASSET_MIME_TYPES[extname(filename).toLowerCase()];
-  return contentType?.startsWith(ASSET_TYPES[assetType].kind) ? contentType : null;
+  const kinds = [].concat(ASSET_TYPES[assetType].kind);
+  return contentType && kinds.some((kind) => contentType.startsWith(kind)) ? contentType : null;
 }
 
 /**
@@ -1273,13 +1280,16 @@ async function exists(path) {
 function parseCreateBody(body) {
   const input = parseBody(
     body,
-    { name: 'string', style: 'string', ambient: 'array', concept: 'string', totalTracks: 'number' },
+    { name: 'string', style: 'string', ambient: 'array', videoSource: 'string', concept: 'string', totalTracks: 'number' },
     ['name', 'style'],
   );
 
   const ambient = input.ambient ?? [];
   if (!ambient.every((name) => typeof name === 'string' && name.trim() !== '')) {
     throw new ApiError(400, 'ambient must be an array of names');
+  }
+  if (input.videoSource !== undefined && !VIDEO_SOURCES.includes(input.videoSource)) {
+    throw new ApiError(400, `videoSource must be one of: ${VIDEO_SOURCES.join(', ')}`);
   }
   if (input.concept !== undefined && input.concept.length > MAX_CONCEPT_LENGTH) {
     throw new ApiError(400, `concept must be at most ${MAX_CONCEPT_LENGTH} characters`);
@@ -1294,6 +1304,7 @@ function parseCreateBody(body) {
     name: input.name,
     style: input.style,
     ambient,
+    videoSource: input.videoSource,
     concept: concept || undefined,
     totalTracks: input.totalTracks,
   };

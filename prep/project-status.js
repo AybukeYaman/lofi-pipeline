@@ -13,7 +13,7 @@ import { readdir, stat } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 
 import { CONFIG_DEFAULTS } from '../core/config.js';
-import { AUDIO_EXTENSIONS, listFiles } from '../core/files.js';
+import { AUDIO_EXTENSIONS, isImagePath, listFiles } from '../core/files.js';
 import { readJsonFile } from '../core/workspace.js';
 import { CUSTOM_STYLE_NAME, STYLE_REF_EXTENSIONS } from './styles.js';
 
@@ -49,6 +49,19 @@ export async function inspectProject(dir) {
 
   const clipValue = typeof data.clip === 'string' ? data.clip.trim() : '';
   const clipPath = clipValue ? at(clipValue) : null;
+  const clipExists = clipPath ? await isFile(clipPath) : false;
+
+  // Görsel kaynağı (core/config.js VIDEO_SOURCES). Tek resim modunda klip
+  // adayları resimler\ altındaki MASTER + açı varyantları: seçim, otomatik
+  // bağlama ve web listesi iki modda da aynı `clips` listesiyle çalışır.
+  const videoSource = data.video?.source === 'image' ? 'image' : 'clip';
+  const masterPath = master ? join(dir, 'resimler', master) : null;
+  const sceneRefPath = sceneRef ? join(dir, 'resimler', sceneRef) : null;
+  const styleRefPath = styleRef ? join(dir, 'resimler', styleRef) : null;
+  const anglePaths = angles.map((n) => join(dir, 'resimler', n));
+  const clips = videoSource === 'image'
+    ? [...(masterPath ? [masterPath] : []), ...anglePaths]
+    : await filesOrEmpty(join(dir, 'videolar'), ['.mp4']);
 
   const audioDir = at(nonEmpty(data.audioDir) ?? './audio');
   const output = data.output !== null && typeof data.output === 'object' ? data.output : {};
@@ -69,12 +82,17 @@ export async function inspectProject(dir) {
     references,
     projectJson,
     style: data.style || data.music?.style || '-',
-    master: master ? join(dir, 'resimler', master) : null,
-    styleRef: styleRef ? join(dir, 'resimler', styleRef) : null,
-    sceneRef: sceneRef ? join(dir, 'resimler', sceneRef) : null,
-    angles: angles.map((n) => join(dir, 'resimler', n)),
-    clips: await filesOrEmpty(join(dir, 'videolar'), ['.mp4']),
-    clip: { value: clipValue, path: clipPath, exists: clipPath ? await isFile(clipPath) : false },
+    master: masterPath,
+    styleRef: styleRefPath,
+    sceneRef: sceneRefPath,
+    angles: anglePaths,
+    videoSource,
+    clips,
+    clip: { value: clipValue, path: clipPath, exists: clipExists },
+    // Proje listesindeki küçük resim — kullanıcı seçmez: videoda görünen
+    // görsel, yoksa master, yoksa sahne/stil referansı.
+    thumbnail: (clipExists && isImagePath(clipPath) ? clipPath : null)
+      ?? masterPath ?? sceneRefPath ?? styleRefPath,
     audioDir,
     audioCount: (await filesOrEmpty(audioDir, AUDIO_EXTENSIONS)).length,
     output: {
@@ -120,9 +138,18 @@ export function nextStep(s, { skipped = new Set() } = {}) {
       `Promptlar: ${s.promptsPath}`);
   }
 
+  const isStill = s.videoSource === 'image';
+
   // 10 Adımlı Akış: 6. Adım Video (Klip), 7. Adım Müzik'ten önce gelir!
   if (s.clips.length > 0 && !s.clip.exists) {
-    return step('clip', 'auto', 'Klibi seç', `${missingClip}videolar\\ altında ${s.clips.length} klip var — kullanılacak olanı seç.`);
+    return isStill
+      ? step('clip', 'auto', 'Görseli seç', `${missingClip}resimler\\ altında ${s.clips.length} görsel var — video boyunca gösterilecek olanı seç.`)
+      : step('clip', 'auto', 'Klibi seç', `${missingClip}videolar\\ altında ${s.clips.length} klip var — kullanılacak olanı seç.`);
+  }
+
+  // Tek resim: image-to-video (Faz 3) yok, video master görselinden üretilir.
+  if (isStill && !s.clip.exists) {
+    return step('clip', 'manual', 'Görsel bekleniyor', `${missingClip}Tek resim modu: resimler\\ altına MASTER.png koy: ${join(s.dir, 'resimler')}`);
   }
 
   if (!s.clip.exists && !skipped.has('faz3')) {
@@ -184,14 +211,18 @@ export function canonicalWorkflow(s) {
   const cropBottom = data.video?.cropBottom;
   const cropReady = Number.isSafeInteger(cropBottom) && cropBottom >= 0;
   const hasOrder = Array.isArray(data.order) && data.order.length > 0;
-  const anglesSkipped = angles?.wanted === false || (!angles && (s.clip.exists || built) && s.angles.length === 0);
+  // Tek resimde açı adımı sorulmaz (seçilen görsel yine bir açı varyantı olabilir).
+  const isStill = s.videoSource === 'image';
+  const anglesSkipped = isStill
+    || angles?.wanted === false || (!angles && (s.clip.exists || built) && s.angles.length === 0);
 
   const done = {
     project: s.projectJson.ok,
     style: s.projectJson.ok && !(s.style === CUSTOM_STYLE_NAME && !s.styleBlockExists),
     reference: Boolean(s.sceneRef || s.master) || built,
     master: Boolean(s.master) || built,
-    angles: angles?.wanted === false
+    angles: isStill
+      || angles?.wanted === false
       || (angles?.wanted === true && s.angles.length >= Math.max(1, Number(angles.count) || 1))
       || s.clip.exists || built,
     video: (s.clip.exists && cropReady) || built,
@@ -241,7 +272,7 @@ export function isMusicCompleted(s) {
  * yeniyse (dosya eklemek klasörü, clip yazmak project.json'u günceller).
  *
  * @param {string} videosDir
- * @returns {Promise<{ name: string, dir: string, mtimeMs: number, step: ReturnType<typeof nextStep> }[]>}
+ * @returns {Promise<{ name: string, dir: string, mtimeMs: number, thumbnail: string|null, step: ReturnType<typeof nextStep> }[]>}
  */
 export async function listProjects(videosDir) {
   let entries;
@@ -264,6 +295,7 @@ export async function listProjects(videosDir) {
       name: entry.name,
       dir,
       mtimeMs: Math.max(dirInfo.mtimeMs, projectInfo.mtimeMs),
+      thumbnail: status.thumbnail,
       step: nextStep(status),
       workflow: canonicalWorkflow(status),
     });

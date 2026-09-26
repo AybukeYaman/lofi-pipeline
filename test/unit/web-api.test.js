@@ -1063,3 +1063,43 @@ describe('canonical akış — 10 adım, diskten kaldığı yer', () => {
     assert.ok(prompts.video.startsWith('Subtle looping motion:'));
   });
 });
+
+describe('tek resim modu ve proje küçük resmi', () => {
+  test('POST videoSource=image → project.json video.source image, kırpma 0; geçersiz değer 400', async () => {
+    const created = await send('POST', '/api/projects', { body: { name: 'still album', style: 'watercolor', videoSource: 'image' } });
+    assert.equal(created.status, 201);
+    const json = JSON.parse(await readFile(join(videosDir, 'still album', 'project.json'), 'utf8'));
+    assert.deepEqual(json.video, { source: 'image', cropBottom: 0, aspect: '16:9' });
+
+    const bad = await send('POST', '/api/projects', { body: { name: 'bad source', style: 'watercolor', videoSource: 'gif' } });
+    assert.equal(bad.status, 400);
+    assert.match((await bad.json()).error, /videoSource must be one of: clip, image/);
+  });
+
+  test('görsel seçilir, klip önizlemesi görseli sunar; listede küçük resim adresi', async () => {
+    const dir = await writeProjectFolder('still-pick', { project: { video: { source: 'image', cropBottom: 0 } } });
+    await writeFile(join(dir, 'resimler', 'MASTER.png'), 'master');
+    await writeFile(join(dir, 'resimler', 'Master1.jpg'), 'angle');
+
+    const picked = await send('PUT', '/api/projects/still-pick/clip', { body: { file: 'Master1.jpg' } });
+    assert.equal(picked.status, 200);
+    assert.equal((await picked.json()).clip.value, './resimler/Master1.jpg');
+
+    const clip = await send('GET', '/api/projects/still-pick/assets/clip/Master1.jpg');
+    assert.equal(clip.status, 200);
+    assert.equal(clip.headers.get('content-type'), 'image/jpeg');
+
+    const list = await (await send('GET', '/api/projects')).json();
+    const entry = list.find((p) => p.id === 'still-pick');
+    assert.equal(entry.thumbnailUrl, '/api/projects/still-pick/assets/thumbnail/Master1.jpg');
+    const thumb = await send('GET', entry.thumbnailUrl);
+    assert.equal(thumb.status, 200);
+    assert.equal(await thumb.text(), 'angle');
+  });
+
+  test('görseli olmayan projede thumbnailUrl null', async () => {
+    await writeProjectFolder('no-image');
+    const list = await (await send('GET', '/api/projects')).json();
+    assert.equal(list.find((p) => p.id === 'no-image').thumbnailUrl, null);
+  });
+});

@@ -94,14 +94,21 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
               type="button"
               onClick={() => onOpenProject(project.id)}
             >
-              <div>
-                <h2>{project.name}</h2>
-                <p>
-                  Adım:{' '}
-                  {project.workflow
-                    ? `${project.workflow.steps.find((step) => step.id === project.workflow?.current)?.number ?? '?'}/10 · ${project.workflow.currentTitle}`
-                    : project.step?.title ?? project.step?.id ?? 'Unknown'}
-                </p>
+              <div className="project-card-main">
+                {project.thumbnailUrl ? (
+                  <img className="project-thumb" src={project.thumbnailUrl} alt="" loading="lazy" />
+                ) : (
+                  <span className="project-thumb" aria-hidden="true" />
+                )}
+                <div className="project-card-text">
+                  <h2>{project.name}</h2>
+                  <p>
+                    Adım:{' '}
+                    {project.workflow
+                      ? `${project.workflow.steps.find((step) => step.id === project.workflow?.current)?.number ?? '?'}/10 · ${project.workflow.currentTitle}`
+                      : project.step?.title ?? project.step?.id ?? 'Unknown'}
+                  </p>
+                </div>
               </div>
               <time dateTime={new Date(project.mtimeMs).toISOString()}>
                 Updated: {formatUpdatedAt(project.mtimeMs)}

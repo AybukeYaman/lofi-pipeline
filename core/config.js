@@ -13,6 +13,7 @@ import { stat } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve } from 'node:path';
 
 import { AspectError, parseAspect } from './aspect.js';
+import { IMAGE_EXTENSIONS, isImagePath } from './files.js';
 import { readJsonFile } from './workspace.js';
 
 export class ConfigError extends Error {
@@ -30,15 +31,21 @@ export class ConfigError extends Error {
 
 /** Varsayılanlar — prep/project-status.js çıktı yolunu aynı değerlerle bulur. */
 export const CONFIG_DEFAULTS = {
-  video: { aspect: '16:9', crf: 16, preset: 'slow', fadeOut: 5, crossfadeSeconds: 0 },
+  video: { source: 'clip', aspect: '16:9', crf: 16, preset: 'slow', fadeOut: 5, crossfadeSeconds: 0 },
   audio: { bitrate: '192k', ambientOffsetDb: -18.8 },
   output: { dir: './out', name: 'final_ambient.mp4', tracklist: 'tracklist.txt' },
 };
 
+/**
+ * Görsel kaynağı: `clip` = döngü video (.mp4), `image` = tüm video boyunca tek resim.
+ * `image` modunda `clip` alanı bir görseli gösterir.
+ */
+export const VIDEO_SOURCES = ['clip', 'image'];
+
 /** Bilinen anahtarlar — yazım hatası ("cropbottom") sessizce yok sayılmasın. */
 const KNOWN_KEYS = {
   root: ['clip', 'audioDir', 'ambient', 'order', 'names', 'video', 'audio', 'output', 'music', 'style', 'styleBlock', 'motionHints', 'workflow'],
-  video: ['cropBottom', 'cropTop', 'cropLeft', 'cropRight', 'watermark', 'aspect', 'crf', 'preset', 'fadeOut', 'scaleWidth', 'crossfadeSeconds'],
+  video: ['source', 'cropBottom', 'cropTop', 'cropLeft', 'cropRight', 'watermark', 'aspect', 'crf', 'preset', 'fadeOut', 'scaleWidth', 'crossfadeSeconds'],
   audio: ['bitrate', 'ambientOffsetDb'],
   output: ['dir', 'name', 'tracklist'],
 };
@@ -121,6 +128,16 @@ async function resolveProject(json, { projectPath, overrides = {} }) {
   }
 
   if (clip) await expectKind(clip, 'file', 'clip', problems);
+
+  // --- görsel kaynağı: klip ile tür uyuşmazlığı build'den önce yakalanır
+  const source = video.source ?? CONFIG_DEFAULTS.video.source;
+  if (!VIDEO_SOURCES.includes(source)) {
+    problems.push(`video.source: ${VIDEO_SOURCES.map((v) => `"${v}"`).join(' ya da ')} olmalı (verilen: ${JSON.stringify(source)})`);
+  } else if (clip && source === 'image' && !isImagePath(clip)) {
+    problems.push(`clip: video.source "image" iken görsel olmalı (${IMAGE_EXTENSIONS.join(', ')}): ${clip}`);
+  } else if (clip && source === 'clip' && isImagePath(clip)) {
+    problems.push(`clip: görsel verilmiş ama video.source "clip" — tek resim için video.source: "image" yaz: ${clip}`);
+  }
   if (audioDir) await expectKind(audioDir, 'directory', 'audioDir', problems);
 
   // --- sıra ve adlar
@@ -214,6 +231,7 @@ async function resolveProject(json, { projectPath, overrides = {} }) {
     order: json.order ?? null,
     names: json.names ?? {},
     video: {
+      source,
       cropBottom,
       cropTop: video.cropTop ?? 0,
       cropLeft: video.cropLeft ?? 0,

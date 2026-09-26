@@ -4,13 +4,18 @@ import { assignAlbumToProject, createProject, fetchLibrary, fetchMusicLibrary, f
 import { PageHeader } from '../components/PageHeader';
 import { sampleStyles } from '../mockData';
 import { showError, showSuccess } from '../toast';
-import type { LoadState } from '../types';
+import type { LoadState, VideoSource } from '../types';
 
 type FormErrors = Partial<Record<'name' | 'style' | 'form', string>>;
 
 const INVALID_NAME_CHARS = /[<>:"/\\|?* - ]/;
 
 type StyleOption = { id: string; name: string; description: string };
+
+const VIDEO_SOURCE_OPTIONS: Array<{ id: VideoSource; name: string; description: string }> = [
+  { id: 'clip', name: 'Video loop (.mp4)', description: 'Master frame is animated into a short looping clip.' },
+  { id: 'image', name: 'Single image', description: 'One still image stays on screen for the whole video — no clip needed.' },
+];
 
 const PROJECT_DRAFT_KEY = 'lofi_new_project_draft';
 
@@ -30,6 +35,7 @@ export function NewProject({
     const params = new URLSearchParams(window.location.search);
     return params.get('style') || '';
   });
+  const [videoSource, setVideoSource] = useState<VideoSource>('clip');
   const [errors, setErrors] = useState<FormErrors>({});
   const [existingNames, setExistingNames] = useState<string[]>([]);
   const [namesState, setNamesState] = useState<LoadState>('loading');
@@ -50,6 +56,7 @@ export function NewProject({
           if (draft.name) setName(draft.name);
           if (draft.concept) setConcept(draft.concept);
           if (draft.style && !initialStyle) setStyle(draft.style);
+          if (draft.videoSource === 'clip' || draft.videoSource === 'image') setVideoSource(draft.videoSource);
           if (draft.selectedAlbumId) setSelectedAlbumId(draft.selectedAlbumId);
           setRestoredDraftTime(draft.savedAt || 'Önceki oturum');
         }
@@ -130,6 +137,7 @@ export function NewProject({
             name,
             concept,
             style,
+            videoSource,
             selectedAlbumId,
             savedAt: new Date().toLocaleTimeString(),
           }),
@@ -145,6 +153,7 @@ export function NewProject({
     setRestoredDraftTime(null);
     setName('');
     setConcept('');
+    setVideoSource('clip');
     setSelectedAlbumId('');
   };
 
@@ -163,6 +172,7 @@ export function NewProject({
       const response = await createProject({
         name: name.trim(),
         style,
+        videoSource,
         concept: concept.trim() || undefined,
       });
 
@@ -217,7 +227,7 @@ export function NewProject({
       <PageHeader
         eyebrow="NEW PROJECT"
         title="New Project"
-        description="Set up the album and image style for a new video."
+        description="Set up the album, image style and visual for a new video."
       />
 
       {restoredDraftTime ? (
@@ -317,6 +327,29 @@ export function NewProject({
             {errors.style ?? selectedStyle?.description ?? 'Choose the image style for the video.'}
           </p>
         </div>
+
+        <fieldset className="field">
+          <legend>Video visual</legend>
+          <div className="option-list option-grid" role="radiogroup">
+            {VIDEO_SOURCE_OPTIONS.map((option) => {
+              const isSelected = videoSource === option.id;
+              return (
+                <label key={option.id} className={isSelected ? 'option selected' : 'option'}>
+                  <input
+                    type="radio"
+                    name="video-source"
+                    value={option.id}
+                    checked={isSelected}
+                    onChange={() => edit(setVideoSource)(option.id)}
+                    disabled={isSubmitting}
+                  />
+                  <span>{option.name}</span>
+                  <span className="muted">{option.description}</span>
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
 
         {availableAlbums.length > 0 ? (
           <div className="field">

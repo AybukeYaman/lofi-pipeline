@@ -39,6 +39,8 @@ export type ProjectSummary = {
   id: string;
   name: string;
   mtimeMs: number;
+  /** Sunucunun seçtiği küçük resim: videodaki görsel, yoksa master, yoksa referans. */
+  thumbnailUrl?: string | null;
   step?: ProjectStep;
   workflow?: ProjectWorkflow;
 };
@@ -162,6 +164,8 @@ export type ProjectDetail = {
   styleRef?: string | null;
   sceneRef?: string | null;
   angles?: string[];
+  /** 'image': tüm video boyunca tek resim; clips o zaman MASTER + açı görselleri. */
+  videoSource?: VideoSource;
   clips?: string[];
   clip?: ProjectFileEvidence;
   audioDir?: string;
@@ -255,10 +259,13 @@ export type LibraryResponse = {
   ambientError?: string | null;
 };
 
+export type VideoSource = 'clip' | 'image';
+
 export type CreateProjectPayload = {
   name: string;
   style: string;
   ambient?: string[];
+  videoSource?: VideoSource;
   concept?: string;
   totalTracks?: number;
 };

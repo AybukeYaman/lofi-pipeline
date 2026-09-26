@@ -648,10 +648,14 @@ export function MasterStage({ project, stageStatus, onProjectUpdate, prompts, pr
 }
 
 export function VideoStage({ project, assets, stageStatus, onProjectUpdate, prompts, promptsError }: StageProps) {
+  // Tek resim modu: clips = MASTER + açı görselleri (sunucu sıralar, MASTER ilk).
+  const isStill = project.videoSource === 'image';
   const clips = project.clips ?? [];
   const currentClip = project.clip?.exists ? project.clip.path : null;
   // Tek klip varsa ve seçim yoksa onu öner; birden fazlaysa kullanıcı seçer.
-  const suggestedClip = currentClip ?? (clips.length === 1 ? clips[0] : null);
+  // Tek resimde varsayılan her zaman MASTER.
+  const suggestedClip = currentClip ?? (isStill || clips.length === 1 ? clips[0] ?? null : null);
+  const mediaFolder = isStill ? 'resimler' : 'videolar';
   // build.js kırpma kaydı olmadan başlamaz; kayıt yoksa ilk kaydetmede yazılır.
   const cropStored = project.readiness?.video?.ready ?? project.projectJson?.data?.video?.cropBottom !== undefined;
   const currentClipName = fileName(currentClip);
@@ -795,7 +799,7 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate, prom
       if (onProjectUpdate) {
         onProjectUpdate(updatedProject);
       }
-      setSuccess('Klip seçildi, kırpma ve 16:9 ayarı proje ayarlarına kaydedildi.');
+      setSuccess(`${isStill ? 'Görsel' : 'Klip'} seçildi, kırpma ve 16:9 ayarı proje ayarlarına kaydedildi.`);
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -809,8 +813,8 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate, prom
 
   const handleOpenFolder = async () => {
     try {
-      await openProjectFolder(project.id, 'videolar');
-      setSuccess('Opened videolar/ folder in Explorer.');
+      await openProjectFolder(project.id, mediaFolder);
+      setSuccess(`Opened ${mediaFolder}/ folder in Explorer.`);
     } catch {
       setError('Could not open folder in Explorer.');
     }
@@ -822,7 +826,7 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate, prom
       if (onProjectUpdate) {
         onProjectUpdate(updated);
       }
-      setSuccess('Refreshed clips from videolar/ folder.');
+      setSuccess(`Refreshed ${isStill ? 'images' : 'clips'} from ${mediaFolder}/ folder.`);
     } catch {
       setError('Could not refresh clips.');
     }
@@ -856,34 +860,44 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate, prom
     <StagePanel section="video" title="6. Video" status={assets.clip} stageStatus={stageStatus}>
       <div className="stage-media">
         <AssetPreview
-          kind="video"
+          kind={isStill ? 'image' : 'video'}
           fileName={previewName}
           src={previewUrl}
           emptyLabel={
             clipMissing
               ? `Configured clip not found: ${project.clip?.value}`
-              : 'No clip selected. Put the loop clip (.mp4) under videolar\\.'
+              : isStill
+                ? 'No image yet. Save the master frame as resimler\\MASTER.png.'
+                : 'No clip selected. Put the loop clip (.mp4) under videolar\\.'
           }
         />
         <div className="stage-actions">
-          <p className="field-hint">
-            Görsel: {fileName(project.master) ?? 'master frame yok'}
-            {(project.angles?.length ?? 0) > 0 ? ` (ya da açı görselleri: ${project.angles?.map((path) => fileName(path)).join(', ')})` : ''}
-          </p>
-          <CopyPrompt label="Hailuo promptu" prompt={prompts?.video} error={promptsError} />
-          <UploadButton
-            label="Video klibi yükle (.mp4)"
-            accept=".mp4"
-            multiple
-            onFiles={async (files) => {
-              let latest = project;
-              for (const file of files) latest = await uploadProjectClip(project.id, file);
-              onProjectUpdate?.(latest);
-            }}
-          />
+          {isStill ? (
+            <p className="field-hint">
+              Tek resim modu: seçilen görsel videonun tamamı boyunca ekranda kalır. Klip üretmeye gerek yok.
+            </p>
+          ) : (
+            <>
+              <p className="field-hint">
+                Görsel: {fileName(project.master) ?? 'master frame yok'}
+                {(project.angles?.length ?? 0) > 0 ? ` (ya da açı görselleri: ${project.angles?.map((path) => fileName(path)).join(', ')})` : ''}
+              </p>
+              <CopyPrompt label="Hailuo promptu" prompt={prompts?.video} error={promptsError} />
+              <UploadButton
+                label="Video klibi yükle (.mp4)"
+                accept=".mp4"
+                multiple
+                onFiles={async (files) => {
+                  let latest = project;
+                  for (const file of files) latest = await uploadProjectClip(project.id, file);
+                  onProjectUpdate?.(latest);
+                }}
+              />
+            </>
+          )}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6, margin: '12px 0 8px' }}>
             <h3 style={{ margin: 0 }}>
-              Clips in folder <span className="count">({clips.length})</span>
+              {isStill ? 'Images' : 'Clips in folder'} <span className="count">({clips.length})</span>
             </h3>
             <div style={{ display: 'flex', gap: 6 }}>
               <button
@@ -905,17 +919,19 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate, prom
             </div>
           </div>
           <p className="field-hint" style={{ margin: '0 0 10px' }}>
-            Put loop video files (<code>.mp4</code>) into{' '}
+            {isStill
+              ? <>MASTER and angle images (<code>Master1.jpg</code> …) from</>
+              : <>Put loop video files (<code>.mp4</code>) into</>}{' '}
             <code
               onClick={handleOpenFolder}
-              title="Click to open videolar\ folder in Windows Explorer"
+              title={`Click to open ${mediaFolder}\ folder in Windows Explorer`}
               style={{ cursor: 'pointer', color: 'var(--primary)', textDecoration: 'underline' }}
             >
-              {project.dir || project.name}\videolar\
+              {project.dir || project.name}\{mediaFolder}\
             </code>.
           </p>
           {clips.length > 0 ? (
-            <div className="option-list" role="radiogroup" aria-label="Video clips">
+            <div className="option-list" role="radiogroup" aria-label={isStill ? 'Images' : 'Video clips'}>
               {clips.map((path) => {
                 const name = fileName(path);
                 const isCurrent = path === currentClip || name === currentClipName;
@@ -939,7 +955,7 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate, prom
               })}
             </div>
           ) : (
-            <EmptyState compact title="No .mp4 clips in videolar\." />
+            <EmptyState compact title={isStill ? 'No MASTER image in resimler\\ yet.' : 'No .mp4 clips in videolar\\.'} />
           )}
 
           <div style={{ marginTop: 14, width: '100%', borderTop: '1px solid var(--border-subtle)', paddingTop: 14 }}>
@@ -1104,8 +1120,8 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate, prom
                 ? 'Saving...'
                 : hasClipChange
                   ? currentClip
-                    ? 'Klibi değiştir ve kaydet'
-                    : 'Seçilen klibi kullan ve kaydet'
+                    ? (isStill ? 'Görseli değiştir ve kaydet' : 'Klibi değiştir ve kaydet')
+                    : (isStill ? 'Seçilen görseli kullan ve kaydet' : 'Seçilen klibi kullan ve kaydet')
                   : 'Video ayarlarını kaydet'}
             </button>
           </div>

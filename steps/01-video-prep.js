@@ -5,6 +5,10 @@
  * kırpılır, ses atılır, loop kontrol edilir. İki kırpma tek filtre zincirinde,
  * tek encode'da uygulanır.
  *
+ * Kaynak tek resim de olabilir (video.source = "image"): aynı kırpma zinciriyle
+ * 5 sn'lik sabit bir base.mp4 üretilir; montaj onu klip gibi çoğaltır. Resimde
+ * watermark ve loop dikişi olmadığı için onay ve loop kontrolü atlanır.
+ *
  * Girdi 5 saniyelik bir klip; buradaki her işlem saniyeler sürer. Pahalı olan
  * kısım 04-assemble.js'teki 48 dakikalık encode — bu yüzden kırpma değeri
  * ORADAN ÖNCE doğrulanır.
@@ -33,6 +37,12 @@ const DEFAULTS = {
    * klipte project.json → video.crossfadeSeconds ile açılır.
    */
   crossfadeSeconds: 0,
+  /**
+   * Tek resimden üretilen base.mp4'ün süresi ve kare hızı. Montaj bunu müzik
+   * boyunca kopyalar; sabit kare olduğu için süre görüntüyü değiştirmez.
+   */
+  stillSeconds: 5,
+  stillFps: 30,
 };
 
 const NOOP_LOGGER = { info() {}, warn() {} };
@@ -182,7 +192,8 @@ export function planAspectCrop({ width, height, aspect }) {
  * Ham klipten base.mp4 üretir.
  *
  * @param {object} options
- * @param {string} options.clipPath ham klip (watermark'lı, sesli)
+ * @param {string} options.clipPath ham klip (watermark'lı, sesli) ya da tek resim
+ * @param {'clip'|'image'} [options.source] `image`: clipPath bir görsel, sabit base.mp4 üretilir
  * @param {string} options.outputPath üretilecek base.mp4
  * @param {object} options.workspace core/workspace.js örneği
  * @param {number} [options.cropBottom] alttan kırpılacak piksel
@@ -208,6 +219,7 @@ export function planAspectCrop({ width, height, aspect }) {
 export async function prepareVideo(options) {
   const {
     clipPath,
+    source: sourceKind = 'clip',
     outputPath,
     workspace,
     cropBottom = 0,
@@ -235,15 +247,16 @@ export async function prepareVideo(options) {
     logger.warn(message);
   };
 
+  const isStill = sourceKind === 'image';
   const source = await probe(clipPath);
   if (!source.hasVideo) {
-    throw new Error(`Video akışı yok: ${clipPath}`);
+    throw new Error(`${isStill ? 'Görsel okunamadı' : 'Video akışı yok'}: ${clipPath}`);
   }
   // Süresiz girdi = tek kare (uzantısı .mp4 yapılmış JPEG/PNG gibi). ffprobe
   // buna hasVideo=true der, prep de sorunsuz kodlar — hata ancak montajda
   // görülür: tek keyframe müzik boyunca on binlerce kez kopyalanır ve disk
   // kontrolü 40 dakikalık video için ~50 GB ister. Girişte kes.
-  if (!(source.duration > 0)) {
+  if (!isStill && !(source.duration > 0)) {
     throw new ClipNotVideoError(
       `Klibin süresi yok (${source.formatName}/${source.videoCodec}, tek kare): ${clipPath}\n` +
       'Bu bir video değil — uzantısı .mp4 yapılmış bir görsel olabilir. ' +
@@ -310,16 +323,21 @@ export async function prepareVideo(options) {
   }
 
   // Crossfade planı da onaydan önce: klibe sığmayan değer kimseye kare göstermeden dursun.
-  const crossfade = crossfadeSeconds > 0
+  if (isStill && crossfadeSeconds > 0) {
+    logger.info('Tek resim: loop dikişi yok, crossfade atlandı.');
+  }
+  const crossfade = !isStill && crossfadeSeconds > 0
     ? planCrossfade({ duration: source.duration, fps: source.fps, crossfadeSeconds })
     : null;
 
   // 2 — Kırpma onayı (koşullu, HANDOFF bölüm 14/1)
   // Kontrol karesi nihai kadrajı gösterir: watermark + en-boy kırpması birlikte.
-  const approval = await resolveCropApproval({
-    clipPath, cropBottom, cropFilter: filters.join(','), before: source, after: expected,
-    workspace, cropFromConfig, verifyCrop, assumeApproved, confirm, logger,
-  });
+  const approval = isStill
+    ? { required: false, granted: true, reason: 'image', framePath: null }
+    : await resolveCropApproval({
+      clipPath, cropBottom, cropFilter: filters.join(','), before: source, after: expected,
+      workspace, cropFromConfig, verifyCrop, assumeApproved, confirm, logger,
+    });
 
   // 3 — Kırp, sesi at, gerekirse ölçekle
   await mkdir(dirname(outputPath), { recursive: true });
@@ -341,6 +359,9 @@ export async function prepareVideo(options) {
   );
 
   await ffmpeg([
+    ...(isStill
+      ? ['-loop', '1', '-framerate', String(DEFAULTS.stillFps), '-t', String(DEFAULTS.stillSeconds)]
+      : []),
     '-i', clipPath,
     // Kırpma yoksa, en-boy adımı atlandıysa ve ölçek verilmediyse zincir boş kalır:
     // ffmpeg boş -vf'i "No filters specified in the graph description" ile reddeder.
@@ -379,12 +400,13 @@ export async function prepareVideo(options) {
     );
   }
 
-  // 4 — Loop kontrolü
-  const loop = await inspectLoop({ path: outputPath, workspace, loopTest, logger });
+  // 4 — Loop kontrolü (tek resimde her kare aynı, ölçülecek dikiş yok)
+  const loop = isStill ? null : await inspectLoop({ path: outputPath, workspace, loopTest, logger });
 
   return {
     output: outputPath,
     source: {
+      kind: sourceKind,
       path: clipPath,
       width: source.width,
       height: source.height,
