@@ -59,8 +59,8 @@ describe('web server project API', () => {
       assert.equal(projects[0].id, fixture.projectName);
       assert.equal(projects[0].name, fixture.projectName);
       assert.equal(typeof projects[0].mtimeMs, 'number');
-      assert.equal(projects[0].step.id, 'faz1');
-      assert.match(projects[0].step.detail, /MASTER\.png/);
+      assert.equal(projects[0].step.id, 'faz3');
+      assert.match(projects[0].step.detail, /videolar/);
     } finally {
       await server.close();
       await fixture.cleanup();
@@ -80,7 +80,7 @@ describe('web server project API', () => {
       assert.equal(project.id, fixture.projectName);
       assert.equal(project.name, fixture.projectName);
       assert.equal(project.style, 'cozy-realistic');
-      assert.equal(project.step.id, 'faz1');
+      assert.equal(project.step.id, 'faz3');
       assert.equal(project.projectJson.ok, true);
     } finally {
       await server.close();
@@ -119,11 +119,9 @@ describe('web server project API', () => {
       return { ok: name };
     };
     const server = await startServer({
-      getProjectPrompts: async (id) => ({ id }),
       uploadProjectImage: record('image'),
       uploadProjectClip: record('clip'),
       uploadProjectAudio: record('audio'),
-      updateWorkflow: record('workflow'),
       updateTrackOrder: record('order'),
     });
     const send = (method, path, body) => fetch(`${server.url}${path}`, {
@@ -132,17 +130,14 @@ describe('web server project API', () => {
       body: JSON.stringify(body),
     });
     try {
-      assert.deepEqual(await (await fetch(`${server.url}/api/projects/p/prompts`)).json(), { id: 'p' });
       assert.equal((await send('POST', '/api/projects/p/images', { slot: 'scene' })).status, 200);
       assert.equal((await send('POST', '/api/projects/p/clips', { name: 'a.mp4' })).status, 200);
       assert.equal((await send('POST', '/api/projects/p/audio', { name: 'a.mp3' })).status, 200);
-      assert.equal((await send('PUT', '/api/projects/p/workflow', { angles: { wanted: false } })).status, 200);
       assert.equal((await send('PUT', '/api/projects/p/order', { mode: 'alphabetical' })).status, 200);
       assert.deepEqual(calls, [
         ['image', 'p', { slot: 'scene' }],
         ['clip', 'p', { name: 'a.mp4' }],
         ['audio', 'p', { name: 'a.mp3' }],
-        ['workflow', 'p', { angles: { wanted: false } }],
         ['order', 'p', { mode: 'alphabetical' }],
       ]);
       assert.equal((await send('GET', '/api/projects/p/order')).status, 405);

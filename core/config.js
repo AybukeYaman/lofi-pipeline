@@ -10,9 +10,11 @@
  */
 
 import { stat } from 'node:fs/promises';
-import { dirname, isAbsolute, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, resolve } from 'node:path';
 
+import { normalizeAmbientSelection } from './ambient-plan.js';
 import { AspectError, parseAspect } from './aspect.js';
+import { normalizePomodoroSelection } from './pomodoro-plan.js';
 import { IMAGE_EXTENSIONS, isImagePath } from './files.js';
 import { readJsonFile } from './workspace.js';
 
@@ -31,7 +33,7 @@ export class ConfigError extends Error {
 
 /** Varsayılanlar — prep/project-status.js çıktı yolunu aynı değerlerle bulur. */
 export const CONFIG_DEFAULTS = {
-  video: { source: 'clip', aspect: '16:9', crf: 16, preset: 'slow', fadeOut: 5, crossfadeSeconds: 0 },
+  video: { source: 'clip', aspect: '16:9', crf: 21, preset: 'slow', fadeOut: 5, crossfadeSeconds: 0 },
   audio: { bitrate: '192k', ambientOffsetDb: -18.8 },
   output: { dir: './out', name: 'final_ambient.mp4', tracklist: 'tracklist.txt' },
 };
@@ -42,12 +44,22 @@ export const CONFIG_DEFAULTS = {
  */
 export const VIDEO_SOURCES = ['clip', 'image'];
 
+/**
+ * 24/7 yayın sisteminin albüm kökü. Yayın paketi buraya yazılır — yayın
+ * tarafının BAŞKA hiçbir dosyasına dokunulmaz (`prep/ambients.js`
+ * DEFAULT_AMBIENT_DIR ile aynı mantık: makineye özel ortak klasör).
+ *
+ * `stream.dir: null` verilirse paket yalnızca projenin `out/` klasörüne yazılır.
+ */
+export const DEFAULT_STREAM_DIR = 'C:\\Users\\Aybuke Yeni\\Desktop\\Youtube\\YT Stream System\\music-source';
+
 /** Bilinen anahtarlar — yazım hatası ("cropbottom") sessizce yok sayılmasın. */
 const KNOWN_KEYS = {
-  root: ['clip', 'audioDir', 'ambient', 'order', 'names', 'video', 'audio', 'output', 'music', 'style', 'styleBlock', 'motionHints', 'workflow'],
+  root: ['clip', 'audioDir', 'ambient', 'pomodoro', 'stream', 'order', 'names', 'video', 'audio', 'output', 'music', 'style', 'styleBlock', 'motionHints', 'workflow'],
   video: ['source', 'cropBottom', 'cropTop', 'cropLeft', 'cropRight', 'watermark', 'aspect', 'crf', 'preset', 'fadeOut', 'scaleWidth', 'crossfadeSeconds'],
   audio: ['bitrate', 'ambientOffsetDb'],
   output: ['dir', 'name', 'tracklist'],
+  stream: ['enabled', 'dir', 'album'],
 };
 
 /**
@@ -106,25 +118,55 @@ async function resolveProject(json, { projectPath, overrides = {} }) {
   // "dosya değil" hatası üretiyordu (new-video.js clip'i boş yazar).
   const clip = requireString(json.clip, 'clip', problems) ? at(json.clip) : null;
   const audioDir = requireString(json.audioDir, 'audioDir', problems) ? at(json.audioDir) : null;
+  // Ambiance: şekil çözümlemesi core/ambient-plan.js'te (tek metin, metin
+  // dizisi ve { mode, tracks } nesnesi aynı plana çıkar). Burada yalnızca
+  // yollar mutlaklaştırılıp dosyaların varlığı doğrulanır.
+  const { plan: ambientPlan, problems: ambientProblems } = normalizeAmbientSelection(json.ambient);
+  problems.push(...ambientProblems);
   let ambient = null;
-  if (json.ambient !== undefined) {
-    if (Array.isArray(json.ambient)) {
-      ambient = [];
-      for (let i = 0; i < json.ambient.length; i++) {
-        const item = json.ambient[i];
-        if (typeof item === 'string' && item.trim()) {
-          const resolved = at(item);
-          ambient.push(resolved);
-          await expectKind(resolved, 'file', `ambient[${i}]`, problems);
-        } else {
-          problems.push(`ambient[${i}]: boş olmayan bir metin olmalı`);
-        }
-      }
-      if (ambient.length === 0) ambient = null;
-    } else if (requireString(json.ambient, 'ambient', problems)) {
-      ambient = at(json.ambient);
-      await expectKind(ambient, 'file', 'ambient', problems);
+  if (ambientPlan) {
+    const tracks = [];
+    for (let i = 0; i < ambientPlan.tracks.length; i++) {
+      const track = ambientPlan.tracks[i];
+      const resolved = at(track.path);
+      await expectKind(resolved, 'file', `ambient[${i}]`, problems);
+      tracks.push({ ...track, path: resolved });
     }
+    ambient = { ...ambientPlan, tracks };
+  }
+
+  // Pomodoro: şekil çözümlemesi core/pomodoro-plan.js'te (preset, tur sayısı,
+  // cue ayarları). Burada yalnızca verilmiş cue dosyalarının yolu mutlaklaştırılıp
+  // varlığı doğrulanır — yol verilmemiş cue'lar ffmpeg'in sine kaynağıyla üretilir.
+  const { plan: pomodoroPlan, problems: pomodoroProblems } = normalizePomodoroSelection(json.pomodoro);
+  problems.push(...pomodoroProblems);
+  let pomodoro = null;
+  if (pomodoroPlan) {
+    const cue = { ...pomodoroPlan.cue };
+    for (const key of ['beepFile', 'workStartFile', 'breakStartFile']) {
+      if (cue[key] === null) continue;
+      cue[key] = at(cue[key]);
+      await expectKind(cue[key], 'file', `pomodoro.cue.${key}`, problems);
+    }
+    pomodoro = { ...pomodoroPlan, cue };
+  }
+
+  // --- yayın paketi: 24/7 yayının albümü (render'dan bağımsız, varsayılan açık)
+  const streamBlock = objectOrEmpty(json.stream, 'stream', problems);
+  unknownKeys(streamBlock, KNOWN_KEYS.stream, 'stream.', warnings);
+  const streamEnabled = streamBlock.enabled ?? true;
+  if (typeof streamEnabled !== 'boolean') {
+    problems.push(`stream.enabled: true ya da false olmalı (verilen: ${JSON.stringify(streamBlock.enabled)})`);
+  }
+  // null → paket yalnızca out/ altına yazılır (yayın tarafına kopyalanmaz).
+  const streamDir = streamBlock.dir === undefined ? DEFAULT_STREAM_DIR : streamBlock.dir;
+  if (streamDir !== null && typeof streamDir !== 'string') {
+    problems.push(`stream.dir: klasör yolu ya da null olmalı (verilen: ${JSON.stringify(streamDir)})`);
+  }
+  // Albüm adı yayında görünür; verilmezse proje klasörünün adı kullanılır.
+  const streamAlbum = streamBlock.album ?? basename(baseDir);
+  if (typeof streamAlbum !== 'string' || streamAlbum.trim() === '') {
+    problems.push(`stream.album: boş olmayan bir ad olmalı (verilen: ${JSON.stringify(streamBlock.album)})`);
   }
 
   if (clip) await expectKind(clip, 'file', 'clip', problems);
@@ -228,6 +270,12 @@ async function resolveProject(json, { projectPath, overrides = {} }) {
     clip,
     audioDir,
     ambient,
+    pomodoro,
+    stream: {
+      enabled: streamEnabled,
+      dir: streamDir === null ? null : at(streamDir),
+      album: streamAlbum,
+    },
     order: json.order ?? null,
     names: json.names ?? {},
     video: {
@@ -251,6 +299,10 @@ async function resolveProject(json, { projectPath, overrides = {} }) {
       video: resolve(outputDir, outName),
       tracklist: resolve(outputDir, tracklistName),
       report: resolve(outputDir, `${outName.replace(/\.[^.]+$/, '')}.report.json`),
+      // Pomodoro açıkken WORK/BREAK dökümü buraya yazılır (kapalıyken üretilmez).
+      pomodoroTimeline: resolve(outputDir, 'pomodoro-timeline.txt'),
+      // Yayın paketinin projedeki kopyası (yayın tarafına ayrıca yazılır).
+      streamPackage: resolve(outputDir, 'stream-package'),
     },
     warnings,
   };

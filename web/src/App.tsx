@@ -2,12 +2,11 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { AppLayout } from './components/AppLayout';
 import { AmbientLibrary } from './pages/AmbientLibrary';
+import { PromptLibrary } from './pages/PromptLibrary';
 import { Dashboard } from './pages/Dashboard';
-import { MusicHub } from './pages/MusicHub';
 import { NewProject } from './pages/NewProject';
 import { ProjectWorkspace } from './pages/ProjectWorkspace';
 import { Settings } from './pages/Settings';
-import { MusicStyles } from './pages/MusicStyles';
 import { parseRoute, paths, projectPath } from './router';
 import { applyTheme, getStoredTheme } from './theme';
 import { ToastContainer } from './toast';
@@ -50,21 +49,21 @@ function renderRoute(route: Route, navigate: Navigate) {
   switch (route.name) {
     case 'project':
       return (
-        <ProjectWorkspace key={route.id} id={route.id} onBack={() => navigate(paths.dashboard)} />
+        <ProjectWorkspace
+          key={route.id}
+          id={route.id}
+          onBack={() => navigate(paths.dashboard)}
+          onOpenProject={(id) => navigate(projectPath(id))}
+          onNewProject={(parentId) =>
+            navigate(parentId ? `${paths.newProject}?parent=${encodeURIComponent(parentId)}` : paths.newProject)
+          }
+        />
       );
     case 'newProject':
       return (
         <NewProject
           onCancel={() => navigate(paths.dashboard)}
           onCreated={(id) => navigate(projectPath(id))}
-        />
-      );
-    case 'music':
-      return <MusicHub />;
-    case 'styles':
-      return (
-        <MusicStyles
-          onUseStyle={(styleName) => navigate(`${paths.newProject}?style=${encodeURIComponent(styleName)}`)}
         />
       );
     case 'ambient':
@@ -75,9 +74,10 @@ function renderRoute(route: Route, navigate: Navigate) {
       return (
         <Dashboard
           onOpenProject={(id) => navigate(projectPath(id))}
-          onNewProject={() => navigate(paths.newProject)}
+          onNewProject={(parentId) =>
+            navigate(parentId ? `${paths.newProject}?parent=${encodeURIComponent(parentId)}` : paths.newProject)
+          }
         />
       );
   }
 }
-

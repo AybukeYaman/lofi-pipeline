@@ -1,0 +1,291 @@
+/**
+ * GET/PUT /api/projects/:id/pomodoro — Pomodoro ayarı ve MONTAJ ÖNCESİ doğrulama.
+ *
+ * Neden var: spec'in en önemli maddesi "montaja geçmeden önce uyar". Burada
+ * doğrulanan şey, kullanıcı Başlat'a basmadan ekranda doğru sayıların çıkması
+ * ve doğrulama geçmediğinde montajın HİÇ başlamaması. ffprobe sahte: parça
+ * süreleri dosya adından okunuyor, gerçek ses üretmeye gerek yok.
+ */
+
+import assert from 'node:assert/strict';
+import { once } from 'node:events';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { after, before, describe, test } from 'node:test';
+
+import { ApiError, getPomodoro, startBuild, updatePomodoro } from '../../server/project-api.js';
+import { createWebServer } from '../../server/web-server.js';
+
+let base;
+let videosDir;
+let server;
+let url;
+
+/** Sahte ffprobe: süre dosya adındaki saniyeden ("t-600.m4a" → 600 sn). */
+async function fakeProbe(path) {
+  const match = /t-(\d+(?:\.\d+)?)/.exec(path);
+  if (!match) throw new Error(`ölçülemeyen dosya: ${path}`);
+  return { duration: Number(match[1]), hasAudio: true };
+}
+
+const options = () => ({ videosDir, probeFn: fakeProbe });
+
+/** Toplamı `totalSeconds` olan `count` parçalık bir müzik seçimi. */
+function tracksFor(totalSeconds, count = 4) {
+  const each = totalSeconds / count;
+  return Array.from({ length: count }, (_, i) => `${String(i + 1).padStart(2, '0')}-t-${each}.m4a`);
+}
+
+async function writeProject(name, { project = {}, audio = [] } = {}) {
+  const dir = join(videosDir, name);
+  await mkdir(join(dir, 'audio'), { recursive: true });
+  await writeFile(join(dir, 'project.json'), JSON.stringify({
+    clip: './videolar/in.mp4', audioDir: './audio', video: { cropBottom: 150 }, ...project,
+  }, null, 2));
+  for (const file of audio) await writeFile(join(dir, 'audio', file), `audio:${file}`);
+  return dir;
+}
+
+const readProjectJson = async (name) =>
+  JSON.parse(await readFile(join(videosDir, name, 'project.json'), 'utf8'));
+
+before(async () => {
+  base = await mkdtemp(join(tmpdir(), 'lofi-web-pomodoro-'));
+  videosDir = join(base, 'videolar');
+  await mkdir(videosDir);
+
+  server = createWebServer({
+    projectApi: {
+      getPomodoro: (id) => getPomodoro(id, options()),
+      updatePomodoro: (id, body) => updatePomodoro(id, body, options()),
+    },
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  url = `http://127.0.0.1:${server.address().port}`;
+});
+
+after(async () => {
+  server?.close();
+  await rm(base, { recursive: true, force: true });
+});
+
+describe('GET /api/projects/:id/pomodoro', () => {
+  test('Pomodoro kapalıyken ayar yok, doğrulama engel çıkarmaz', async () => {
+    await writeProject('off', { audio: tracksFor(1000) });
+    const res = await getPomodoro('off', options());
+
+    assert.equal(res.enabled, false);
+    assert.equal(res.settings, null);
+    assert.equal(res.validation.ok, true);
+    // Presetler ve varsayılanlar kapalıyken de dönüyor: ekran seçenekleri
+    // göstermek için ikinci bir istek atmak zorunda kalmasın.
+    assert.deepEqual(res.presets.map((p) => p.id), ['50/10', '30/10']);
+  });
+
+  test('Test 1 — müzik tam oturuyorsa doğrulama geçer', async () => {
+    await writeProject('exact', {
+      project: { pomodoro: { enabled: true, preset: '50/10', rounds: 4 } },
+      audio: tracksFor(240 * 60),
+    });
+    const res = await getPomodoro('exact', options());
+
+    assert.equal(res.enabled, true);
+    assert.equal(res.validation.ok, true);
+    assert.equal(res.validation.comparison.status, 'exact');
+    assert.equal(res.validation.timeline.totalMinutes, 240);
+    assert.equal(res.music.totalSeconds, 240 * 60);
+  });
+
+  test('Test 2 — fazla müzik sayılarla ve kırpma planıyla raporlanır', async () => {
+    await writeProject('excess', {
+      project: { pomodoro: { enabled: true, preset: '50/10', rounds: 4 } },
+      audio: tracksFor(253 * 60),
+    });
+    const res = await getPomodoro('excess', options());
+
+    assert.equal(res.validation.ok, false);
+    assert.equal(res.validation.needsTrimConfirmation, true);
+    assert.equal(res.validation.comparison.excessSeconds, 13 * 60);
+    assert.ok(res.validation.message.includes('Pomodoro timeline: 240:00'));
+    assert.ok(res.validation.message.includes('Müzik toplamı: 253:00'));
+    assert.ok(res.validation.message.includes('Fazla: 13:00'));
+    // Kırpmanın ne yapacağı onay ÖNCESİNDE görünür.
+    assert.equal(res.validation.trim.trimmedSeconds, 13 * 60);
+  });
+
+  test('Test 3 — eksik müzik doğrulamayı düşürür', async () => {
+    await writeProject('short', {
+      project: { pomodoro: { enabled: true, preset: '50/10', rounds: 4 } },
+      audio: tracksFor(227.5 * 60),
+    });
+    const res = await getPomodoro('short', options());
+
+    assert.equal(res.validation.ok, false);
+    assert.equal(res.validation.comparison.shortSeconds, 12.5 * 60);
+    assert.ok(res.validation.message.includes('Eksik: 12:30'));
+  });
+
+  test('Test 4 — 30/10 × 6 de 240 dakika timeline üretir', async () => {
+    await writeProject('thirty', {
+      project: { pomodoro: { enabled: true, preset: '30/10', rounds: 6 } },
+      audio: tracksFor(240 * 60),
+    });
+    const res = await getPomodoro('thirty', options());
+
+    assert.equal(res.validation.timeline.totalMinutes, 240);
+    assert.equal(res.validation.timeline.sessions.length, 12);
+    assert.equal(res.validation.ok, true);
+  });
+
+  test('parça sırası project.json "order" alanından gelir', async () => {
+    await writeProject('ordered', {
+      project: {
+        order: ['uzun-t-1200.m4a', 'kisa-t-300.m4a'],
+        pomodoro: { enabled: true, workMinutes: 10, breakMinutes: 5, rounds: 1, trimExcess: true },
+      },
+      audio: ['kisa-t-300.m4a', 'uzun-t-1200.m4a'],
+    });
+    const res = await getPomodoro('ordered', options());
+
+    // 15 dk timeline: önce 20 dk'lık "uzun" geliyor, 15 dk'ya kırpılıyor,
+    // "kisa" hiç kullanılmıyor. Sıra yanlış okunsaydı kırpma da yanlış olurdu.
+    assert.deepEqual(res.validation.trim.tracks.map((t) => t.usedDuration), [900, 0]);
+    assert.equal(res.validation.trim.droppedCount, 1);
+  });
+
+  test('bozuk pomodoro bloğu sessizce yok sayılmaz', async () => {
+    await writeProject('broken', {
+      project: { pomodoro: { enabled: true, preset: '25/5' } },
+      audio: tracksFor(600),
+    });
+    const res = await getPomodoro('broken', options());
+    assert.ok(res.problems.some((p) => p.includes('pomodoro.preset')));
+  });
+});
+
+describe('PUT /api/projects/:id/pomodoro', () => {
+  test('ayarı project.json\'a yazar ve güncel doğrulamayı döner', async () => {
+    await writeProject('write', { audio: tracksFor(240 * 60) });
+    const res = await updatePomodoro('write', { enabled: true, preset: '50/10', rounds: 4 }, options());
+
+    assert.equal(res.enabled, true);
+    assert.equal(res.validation.ok, true);
+    assert.deepEqual((await readProjectJson('write')).pomodoro, {
+      enabled: true, preset: '50/10', workMinutes: 50, breakMinutes: 10, rounds: 4,
+    });
+  });
+
+  test('kırpma onayı ayarı yazar ve doğrulamayı geçirir', async () => {
+    await writeProject('confirm', {
+      project: { pomodoro: { enabled: true, preset: '50/10', rounds: 4 } },
+      audio: tracksFor(253 * 60),
+    });
+    assert.equal((await getPomodoro('confirm', options())).validation.ok, false);
+
+    const res = await updatePomodoro(
+      'confirm', { enabled: true, preset: '50/10', rounds: 4, trimExcess: true }, options(),
+    );
+    assert.equal(res.validation.ok, true);
+    assert.ok(res.validation.warnings.some((w) => w.includes('13:00')));
+  });
+
+  test('kapatmak anahtarı siler — kapalı Pomodoro dosyada artık bırakmaz', async () => {
+    await writeProject('disable', {
+      project: { pomodoro: { enabled: true, preset: '30/10', rounds: 6 } },
+      audio: tracksFor(600),
+    });
+    const res = await updatePomodoro('disable', { enabled: false }, options());
+
+    assert.equal(res.enabled, false);
+    assert.equal(Object.hasOwn(await readProjectJson('disable'), 'pomodoro'), false);
+  });
+
+  test('geçersiz değer 422, dosya değişmez', async () => {
+    await writeProject('invalid', { audio: tracksFor(600) });
+    await assert.rejects(
+      updatePomodoro('invalid', { enabled: true, rounds: 0 }, options()),
+      (error) => error instanceof ApiError && error.status === 422,
+    );
+    assert.equal(Object.hasOwn(await readProjectJson('invalid'), 'pomodoro'), false);
+  });
+
+  test('enabled alanı zorunlu', async () => {
+    await writeProject('noflag', { audio: tracksFor(600) });
+    await assert.rejects(
+      updatePomodoro('noflag', { rounds: 4 }, options()),
+      (error) => error instanceof ApiError && error.status === 400,
+    );
+  });
+
+  test('HTTP üzerinden de aynı yoldan geçer', async () => {
+    await writeProject('http', { audio: tracksFor(240 * 60) });
+    const put = await fetch(`${url}/api/projects/http/pomodoro`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ enabled: true, preset: '50/10', rounds: 4 }),
+    });
+    assert.equal(put.status, 200);
+    assert.equal((await put.json()).validation.ok, true);
+
+    const get = await fetch(`${url}/api/projects/http/pomodoro`);
+    assert.equal(get.status, 200);
+    assert.equal((await get.json()).validation.timeline.totalMinutes, 240);
+  });
+});
+
+describe('montaj başlatma engeli', () => {
+  /** startBuild'in buraya kadar gelmesi için gereken en küçük proje. */
+  async function buildableProject(name, { pomodoro, totalSeconds }) {
+    const dir = await writeProject(name, {
+      project: { clip: './videolar/in.mp4', pomodoro },
+      audio: tracksFor(totalSeconds),
+    });
+    await mkdir(join(dir, 'videolar'), { recursive: true });
+    await writeFile(join(dir, 'videolar', 'in.mp4'), 'fake');
+    await mkdir(join(dir, 'resimler'), { recursive: true });
+    await writeFile(join(dir, 'resimler', 'MASTER.png'), 'fake');
+    return dir;
+  }
+
+  const buildJobs = {
+    started: [],
+    start(id, input) { this.started.push(id); return { projectId: id, state: 'running', ...input }; },
+  };
+
+  test('doğrulama geçmezse montaj HİÇ başlamaz (409)', async () => {
+    await buildableProject('no-build', {
+      pomodoro: { enabled: true, preset: '50/10', rounds: 4 },
+      totalSeconds: 227.5 * 60,
+    });
+
+    await assert.rejects(
+      startBuild('no-build', {}, { videosDir, buildJobs, probeFn: fakeProbe }),
+      (error) => {
+        assert.ok(error instanceof ApiError);
+        assert.equal(error.status, 409);
+        assert.ok(error.message.includes('Pomodoro') || error.details?.message?.includes('Eksik'));
+        return true;
+      },
+    );
+    assert.deepEqual(buildJobs.started, []);
+  });
+
+  test('doğrulama geçerse montaj başlar', async () => {
+    await buildableProject('go-build', {
+      pomodoro: { enabled: true, preset: '50/10', rounds: 4 },
+      totalSeconds: 240 * 60,
+    });
+
+    const job = await startBuild('go-build', {}, { videosDir, buildJobs, probeFn: fakeProbe });
+    assert.equal(job.state, 'running');
+    assert.deepEqual(buildJobs.started, ['go-build']);
+  });
+
+  test('Test 6 — Pomodoro kapalı projede montaj hiçbir ek şart görmeden başlar', async () => {
+    await buildableProject('plain', { pomodoro: undefined, totalSeconds: 123 });
+    const job = await startBuild('plain', {}, { videosDir, buildJobs, probeFn: fakeProbe });
+    assert.equal(job.state, 'running');
+  });
+});

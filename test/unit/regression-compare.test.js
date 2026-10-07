@@ -24,6 +24,19 @@ const CHECK = {
   frames: 'görüntü: kare Y/U/V ortalamaları',
 };
 
+/**
+ * assert'in mesajına gömdüğü renk kaçış dizilerini atar.
+ *
+ * FORCE_COLOR ayarlı bir ortamda (bazı terminaller, CI) Node string farkını
+ * harf harf renklendiriyor: aranan `crop=` metni `c⟨esc⟩r⟨esc⟩o⟨esc⟩p⟨esc⟩=`
+ * haline geliyor ve aşağıdaki `assert.match` boşa düşüyor. Mesajın İÇERİĞİ
+ * doğru, yalnızca araya renk giriyor — bu yüzden karşılaştırmadan önce
+ * temizleniyor, yoksa test ortamın renk ayarına göre sonuç değiştiriyor.
+ */
+const ANSI = /\u001B\[[0-9;]*m/g;
+/** @param {string} message */
+const plain = (message) => message.replace(ANSI, '');
+
 /** Pristine ölçüm + `mutate(expect)` uygulanmış baseline kopyası → düşen kontrollerin adları ve mesajları. */
 function failuresAfter(mutate) {
   const measured = structuredClone(BASELINE.expect);
@@ -35,7 +48,7 @@ function failuresAfter(mutate) {
       check.run(measured, baseline);
     } catch (err) {
       assert.ok(err instanceof assert.AssertionError, `${check.name}: beklenmeyen hata ${err}`);
-      failed[check.name] = err.message;
+      failed[check.name] = plain(err.message);
     }
   }
   return failed;

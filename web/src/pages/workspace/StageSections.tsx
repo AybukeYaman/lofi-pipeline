@@ -3,18 +3,18 @@ import { useEffect, useState, type ReactNode } from 'react';
 import {
   assignAlbumToProject,
   completeProjectMusic,
+  copyProjectTracks,
   fetchBuildStatus,
   fetchMusicLibrary,
   fetchProject,
-  fetchProjectMaster,
   getProjectClipUrl,
-  getProjectMasterUrl,
   getProjectOutputUrl,
   ingestSunoToProject,
   openProjectFolder,
   selectProjectClip,
   startBuild,
   updateProjectCrop,
+  updateProjectVideoSource,
   uploadProjectAudio,
   uploadProjectClip,
   uploadProjectImage,
@@ -23,10 +23,14 @@ import {
 } from '../../api';
 import { AssetPreview } from '../../components/AssetPreview';
 import { EmptyState } from '../../components/Feedback';
+import { AmbientPicker } from '../../components/AmbientPicker';
+import { PomodoroPicker } from '../../components/PomodoroPicker';
+import { PromptPicker } from '../../components/PromptPicker';
+import { paths } from '../../router';
 import { StatusBadge, type AssetStatus } from '../../components/StatusBadge';
 import { TrackList } from '../../components/TrackList';
 import { IMAGE_ACCEPT, IMAGE_FORMATS_LABEL } from '../../imageTypes';
-import type { BuildJob, MasterFrameInfo, ProjectDetail, ProjectMusicInfo, ProjectPrompts, WorkflowStepId } from '../../types';
+import type { BuildJob, ProjectDetail, ProjectMusicInfo, ProjectPomodoro, VideoSource, WorkflowStepId } from '../../types';
 import { fileName, musicTracks, type ProjectAssets } from './assetState';
 import { CopyPrompt, UploadButton } from './StepWidgets';
 
@@ -39,8 +43,6 @@ export type StageProps = {
   stageStatus: StageStatus;
   onProjectUpdate?: (updatedProject: ProjectDetail) => void;
   onGoToStep?: (step: WorkflowStepId) => void;
-  prompts?: ProjectPrompts | null;
-  promptsError?: string | null;
 };
 
 function sectionAnchor(section: string) {
@@ -96,174 +98,8 @@ export function StagePanel({ section, title, status, statusLabel, stageStatus, c
   );
 }
 
-export function MasterStage({ project, stageStatus, onProjectUpdate }: StageProps) {
-  const masterName = fileName(project.master);
-  const masterUrl = masterName ? getProjectMasterUrl(project.id, masterName) : null;
-  const isMasterReady = project.readiness?.master?.ready ?? Boolean(project.master);
-  const masterBadgeStatus: AssetStatus = isMasterReady ? 'ready' : 'waiting';
-  const masterBadgeLabel = isMasterReady ? 'Hazır' : 'Master bekleniyor';
-
-  const [masterInfo, setMasterInfo] = useState<MasterFrameInfo | null>(null);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-
-  useEffect(() => {
-    let isActive = true;
-    fetchProjectMaster(project.id)
-      .then((info) => {
-        if (!isActive) return;
-        setMasterInfo(info);
-      })
-      .catch(() => {
-        // ignore
-      });
-    return () => {
-      isActive = false;
-    };
-  }, [project.id, project.master]);
-
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
-    setError(null);
-    setSuccess(null);
-
-    try {
-      const [updated, info] = await Promise.all([
-        fetchProject(project.id),
-        fetchProjectMaster(project.id).catch(() => null),
-      ]);
-      if (onProjectUpdate) {
-        onProjectUpdate(updated);
-      }
-      if (info) {
-        setMasterInfo(info);
-      }
-      setSuccess(
-        updated.master || updated.readiness?.master?.ready
-          ? 'Master image detected and loaded.'
-          : 'Project refreshed. Save image as resimler\\MASTER.png when ready.',
-      );
-    } catch {
-      setError('Could not refresh project state.');
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
-
-  const handleOpenFolder = async () => {
-    try {
-      await openProjectFolder(project.id, 'resimler');
-      setSuccess('Opened resimler/ folder in Explorer.');
-    } catch {
-      setError('Could not open folder in Explorer.');
-    }
-  };
-
-  return (
-    <StagePanel
-      section="master"
-      title="2. Master görseli"
-      status={masterBadgeStatus}
-      statusLabel={masterBadgeLabel}
-      stageStatus={stageStatus}
-    >
-      <div className="stage-media">
-        <AssetPreview
-          kind="image"
-          fileName={masterName}
-          src={masterUrl}
-          emptyLabel="No master image yet. Upload the image you made, or save it as resimler\MASTER.png."
-        />
-        <div className="stage-actions">
-          <UploadButton
-            label={isMasterReady ? 'Master görselini değiştir' : 'Master görselini yükle'}
-            accept={IMAGE_ACCEPT}
-            onFiles={async ([file]) => {
-              onProjectUpdate?.(await uploadProjectImage(project.id, 'master', file));
-            }}
-          />
-          {isMasterReady ? <p className="field-hint field-success">✓ Master görseli hazır: {masterName}</p> : null}
-
-          <div
-            style={{
-              marginTop: 10,
-              width: '100%',
-              padding: '10px 14px',
-              borderRadius: 8,
-              background: 'var(--bg-surface-subtle)',
-              border: '1px solid var(--border-subtle)',
-              boxSizing: 'border-box',
-            }}
-          >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
-                <strong style={{ color: 'var(--text-main)', flexShrink: 0 }}>Target location:</strong>
-                <button
-                  type="button"
-                  className="button"
-                  style={{ fontSize: 12, minHeight: 26, padding: '2px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                  onClick={handleOpenFolder}
-                >
-                  📂 Open Folder
-                </button>
-              </div>
-              <code
-                onClick={handleOpenFolder}
-                title="Click to open resimler\ folder in Windows Explorer"
-                style={{
-                  cursor: 'pointer',
-                  wordBreak: 'break-all',
-                  background: 'var(--bg-surface)',
-                  padding: '6px 10px',
-                  borderRadius: 6,
-                  border: '1px solid var(--border-subtle)',
-                  color: 'var(--primary)',
-                  fontSize: 12,
-                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                  textDecoration: 'underline',
-                  textUnderlineOffset: '2px',
-                }}
-              >
-                {masterInfo?.folder ?? `${project.dir || project.name}\\resimler`}\MASTER.png
-              </code>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)', fontSize: 12 }}>
-                <span>Supported formats:</span>
-                <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>{IMAGE_FORMATS_LABEL}</span>
-              </div>
-            </div>
-          </div>
-
-          {error ? (
-            <p className="field-hint field-error" role="alert">
-              {error}
-            </p>
-          ) : null}
-
-          {success ? (
-            <p className="field-hint" style={{ color: '#34603f' }}>
-              ✓ {success}
-            </p>
-          ) : null}
-
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
-            <button
-              className="button button-primary"
-              type="button"
-              disabled={isRefreshing}
-              onClick={handleRefresh}
-            >
-              {isRefreshing ? 'Checking resimler\\...' : 'Check & Refresh Master Image'}
-            </button>
-          </div>
-        </div>
-      </div>
-    </StagePanel>
-  );
-}
-
 export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: StageProps) {
-  // Tek resim modu: clips = MASTER + açı görselleri (sunucu sıralar, MASTER ilk).
+  // Tek resim modu: clips = resimler\ altındaki bütün görseller (sunucu ada göre sıralar).
   const isStill = project.videoSource === 'image';
   const clips = project.clips ?? [];
   const currentClip = project.clip?.exists ? project.clip.path : null;
@@ -294,9 +130,13 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
   const [cropLeftInput, setCropLeftInput] = useState<string>(String(backendCropLeft));
   const [cropRightInput, setCropRightInput] = useState<string>(String(backendCropRight));
 
+  const backendAspect = project.projectJson?.data?.video?.aspect || '16:9';
+  const [aspect, setAspect] = useState<string>(backendAspect);
+
   const [watermark, setWatermark] = useState<boolean>(backendWatermark);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSwitchingSource, setIsSwitchingSource] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -307,11 +147,13 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
     const freshLeft = project.projectJson?.data?.video?.cropLeft ?? 0;
     const freshRight = project.projectJson?.data?.video?.cropRight ?? 0;
     const freshWatermark = project.projectJson?.data?.video?.watermark ?? (freshBottom > 0 || freshTop > 0 || freshLeft > 0 || freshRight > 0);
+    const freshAspect = project.projectJson?.data?.video?.aspect || '16:9';
 
     setCropBottom(freshBottom);
     setCropTop(freshTop);
     setCropLeft(freshLeft);
     setCropRight(freshRight);
+    setAspect(freshAspect);
 
     setCropBottomInput(String(freshBottom));
     setCropTopInput(String(freshTop));
@@ -325,12 +167,14 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
   const chosenPath = selected || currentClip;
   const chosenName = fileName(chosenPath);
   const hasClipChange = selected !== currentClip;
+  const hasAspectChange = aspect !== backendAspect;
   const hasSettingsChange =
     cropBottom !== backendCropBottom ||
     cropTop !== backendCropTop ||
     cropLeft !== backendCropLeft ||
     cropRight !== backendCropRight ||
     watermark !== backendWatermark ||
+    hasAspectChange ||
     !cropStored;
   const canSave = Boolean(chosenName) && (hasClipChange || hasSettingsChange) && !validationError && !isSaving;
 
@@ -385,6 +229,7 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
             cropTop: effectiveTop,
             cropLeft: effectiveLeft,
             cropRight: effectiveRight,
+            aspect,
           });
         } catch (cropErr: unknown) {
           if (cropErr instanceof ApiError && cropErr.status === 404) {
@@ -401,6 +246,7 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
                     cropLeft: effectiveLeft,
                     cropRight: effectiveRight,
                     watermark: effectiveWatermark,
+                    aspect,
                   },
                 },
               },
@@ -414,7 +260,7 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
       if (onProjectUpdate) {
         onProjectUpdate(updatedProject);
       }
-      setSuccess(`${isStill ? 'Görsel' : 'Klip'} seçildi, kırpma ve 16:9 ayarı proje ayarlarına kaydedildi.`);
+      setSuccess(`${isStill ? 'Görsel' : 'Klip'} seçildi, kırpma ve ${aspect} format ayarı proje ayarlarına kaydedildi.`);
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -432,6 +278,34 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
       setSuccess(`Opened ${mediaFolder}/ folder in Explorer.`);
     } catch {
       setError('Could not open folder in Explorer.');
+    }
+  };
+
+  /**
+   * Kaynağı değiştir: tek resim ↔ döngü videosu. Seçim yeni moda uymuyorsa
+   * sunucu onu boşaltır ve uyarı döner — sessizce kaybolmasın diye basılır.
+   */
+  const handleSwitchSource = async (next: VideoSource) => {
+    if (next === project.videoSource) return;
+    setError(null);
+    setSuccess(null);
+    setIsSwitchingSource(true);
+    try {
+      const updated = await updateProjectVideoSource(project.id, next);
+      onProjectUpdate?.(updated);
+      const change = updated.videoSourceChange;
+      setSuccess(
+        [
+          next === 'image'
+            ? 'Kaynak tek resme çevrildi: seçilen görsel video boyunca ekranda kalır.'
+            : 'Kaynak döngü videosuna çevrildi: videolar\\ altındaki klip döngüyle tekrarlanır.',
+          ...change.warnings,
+        ].join(' '),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Video source could not be changed.');
+    } finally {
+      setIsSwitchingSource(false);
     }
   };
 
@@ -472,7 +346,7 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
   };
 
   return (
-    <StagePanel section="video" title="4. Video" status={assets.clip} stageStatus={stageStatus}>
+    <StagePanel section="video" title="2. Video" status={assets.clip} stageStatus={stageStatus}>
       <div className="stage-media">
         <AssetPreview
           kind={isStill ? 'image' : 'video'}
@@ -482,32 +356,67 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
             clipMissing
               ? `Configured clip not found: ${project.clip?.value}`
               : isStill
-                ? 'No image yet. Save the master frame as resimler\\MASTER.png.'
+                ? 'Henüz görsel yok. resimler\\ klasörüne bir görsel yükleyin veya ekleyin.'
                 : 'No clip selected. Put the loop clip (.mp4) under videolar\\.'
           }
         />
         <div className="stage-actions">
-          {isStill ? (
-            <p className="field-hint">
-              Tek resim modu: seçilen görsel videonun tamamı boyunca ekranda kalır. Klip üretmeye gerek yok.
+          <fieldset
+            style={{
+              border: '1px solid var(--border, #333)', borderRadius: 6, padding: '8px 12px 10px', margin: '0 0 12px',
+            }}
+          >
+            <legend style={{ fontSize: 12, padding: '0 6px' }}>Görsel kaynağı</legend>
+            <div role="radiogroup" aria-label="Görsel kaynağı" style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
+              {(['clip', 'image'] as VideoSource[]).map((source) => (
+                <label key={source} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                  <input
+                    type="radio"
+                    name={`video-source-${project.id}`}
+                    value={source}
+                    checked={(project.videoSource ?? 'clip') === source}
+                    disabled={isSwitchingSource}
+                    onChange={() => void handleSwitchSource(source)}
+                  />
+                  {source === 'clip' ? 'Döngü videosu (.mp4)' : 'Tek resim'}
+                  <span className="count">
+                    ({project.videoSourceCandidates?.[source]?.count ?? 0} aday)
+                  </span>
+                </label>
+              ))}
+            </div>
+            <p className="field-hint" style={{ marginBottom: 0 }}>
+              Fikrini sonradan değiştirebilirsin. Kaynağı değiştirince yeni moda uymayan seçim boşaltılır,
+              kırpma değerleri korunur; montaj bir sonraki çalışmada baştan üretilir.
             </p>
-          ) : (
+          </fieldset>
+          {isStill ? (
             <>
               <p className="field-hint">
-                Görsel: {fileName(project.master) ?? 'master frame yok'}
-                {(project.angles?.length ?? 0) > 0 ? ` (ya da açı görselleri: ${project.angles?.map((path) => fileName(path)).join(', ')})` : ''}
+                Tek resim modu: seçilen görsel videonun tamamı boyunca ekranda kalır. Klip üretmeye gerek yok.
               </p>
               <UploadButton
-                label="Video klibi yükle (.mp4)"
-                accept=".mp4"
+                label="Görsel yükle (.png, .jpg, .webp)"
+                accept=".png,.jpg,.jpeg,.webp"
                 multiple
                 onFiles={async (files) => {
                   let latest = project;
-                  for (const file of files) latest = await uploadProjectClip(project.id, file);
+                  for (const file of files) latest = await uploadProjectImage(project.id, file);
                   onProjectUpdate?.(latest);
                 }}
               />
             </>
+          ) : (
+            <UploadButton
+              label="Video klibi yükle (.mp4)"
+              accept=".mp4"
+              multiple
+              onFiles={async (files) => {
+                let latest = project;
+                for (const file of files) latest = await uploadProjectClip(project.id, file);
+                onProjectUpdate?.(latest);
+              }}
+            />
           )}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6, margin: '12px 0 8px' }}>
             <h3 style={{ margin: 0 }}>
@@ -680,27 +589,75 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
               </div>
             </div>
 
-            {/* 16:9 Guarantee Banner */}
-            <div
-              style={{
-                marginTop: 10,
-                padding: '8px 12px',
-                borderRadius: 6,
-                background: 'var(--bg-surface)',
-                border: '1px solid var(--border-subtle)',
-                fontSize: 12,
-                color: 'var(--text-muted)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-              }}
-            >
-              <span style={{ fontSize: 16 }}>📐</span>
-              <div>
-                <strong style={{ color: 'var(--text-main)', display: 'block' }}>
-                  Otomatik 16:9 Format Garantisi
-                </strong>
-                Kenarlardan istediğiniz kadar piksel kırpın; pipeline videoyu merkezden otomatik olarak tam 16:9 oranına tamamlayacaktır.
+            {/* En-Boy Oranı Seçimi: 16:9 mu yoksa 9:16 mı? */}
+            <div style={{ marginTop: 12 }}>
+              <label style={{ fontSize: 13, fontWeight: 700, display: 'block', marginBottom: 8, color: 'var(--text-main)' }}>
+                📐 Video Formatı (Otomatik Kadraj Garantisi)
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+                {/* 16:9 Parçası */}
+                <div
+                  onClick={() => !isSaving && setAspect('16:9')}
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: 8,
+                    cursor: isSaving ? 'not-allowed' : 'pointer',
+                    background: aspect === '16:9' ? '#f5f0e4' : 'var(--bg-surface)',
+                    border: `2px solid ${aspect === '16:9' ? '#a5916f' : 'var(--border-subtle)'}`,
+                    transition: 'all 0.15s ease',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 4,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <strong style={{ fontSize: 13.5, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span>🖥️</span> 16:9 (Yatay / Landscape)
+                    </strong>
+                    <input
+                      type="radio"
+                      name="video-aspect-choice"
+                      checked={aspect === '16:9'}
+                      onChange={() => setAspect('16:9')}
+                      disabled={isSaving}
+                    />
+                  </div>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    YouTube standart video formatı. Videoyu merkezden otomatik 16:9 oranına tamamlar.
+                  </span>
+                </div>
+
+                {/* 9:16 Parçası */}
+                <div
+                  onClick={() => !isSaving && setAspect('9:16')}
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: 8,
+                    cursor: isSaving ? 'not-allowed' : 'pointer',
+                    background: aspect === '9:16' ? '#f5f0e4' : 'var(--bg-surface)',
+                    border: `2px solid ${aspect === '9:16' ? '#a5916f' : 'var(--border-subtle)'}`,
+                    transition: 'all 0.15s ease',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 4,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <strong style={{ fontSize: 13.5, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span>📱</span> 9:16 (Dikey / Portrait)
+                    </strong>
+                    <input
+                      type="radio"
+                      name="video-aspect-choice"
+                      checked={aspect === '9:16'}
+                      onChange={() => setAspect('9:16')}
+                      disabled={isSaving}
+                    />
+                  </div>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    YouTube Shorts, TikTok ve Reels formatı. Videoyu merkezden otomatik 9:16 dikey kadraja tamamlar.
+                  </span>
+                </div>
               </div>
             </div>
           </div>
@@ -812,6 +769,53 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
     }
   };
 
+  // Parent project music picker state
+  const [showParentPicker, setShowParentPicker] = useState(false);
+  const [parentAudioFiles, setParentAudioFiles] = useState<Array<{ file: string; duration: number | null; previewUrl: string | null }>>([]);
+  const [selectedParentTracks, setSelectedParentTracks] = useState<string[]>([]);
+  const [isLoadingParentTracks, setIsLoadingParentTracks] = useState(false);
+  const [isCopyingFromParent, setIsCopyingFromParent] = useState(false);
+
+  useEffect(() => {
+    if (project.parentId && showParentPicker) {
+      setIsLoadingParentTracks(true);
+      fetchProjectMusic(project.parentId)
+        .then((info) => {
+          const files = info.audioFiles || [];
+          setParentAudioFiles(files);
+          const currentFileNames = new Set(musicInfo?.audioFiles.map((a) => a.file) || []);
+          setSelectedParentTracks(files.filter((f) => !currentFileNames.has(f.file)).map((f) => f.file));
+          setIsLoadingParentTracks(false);
+        })
+        .catch(() => {
+          setIsLoadingParentTracks(false);
+        });
+    }
+  }, [project.parentId, showParentPicker, musicInfo]);
+
+  const handleCopyFromParent = async () => {
+    if (!project.parentId || selectedParentTracks.length === 0 || isCopyingFromParent) return;
+    setIsCopyingFromParent(true);
+    setCompleteError(null);
+    setCompleteSuccess(null);
+    try {
+      const res = await copyProjectTracks(project.id, {
+        sourceProjectId: project.parentId,
+        trackFiles: selectedParentTracks,
+      });
+      const updated = await fetchProject(project.id);
+      if (onProjectUpdate) {
+        onProjectUpdate(updated);
+      }
+      setCompleteSuccess(`✓ Ana proje "${project.parentId}"den ${res.copiedCount} parça bu projeye aktarıldı.`);
+      setShowParentPicker(false);
+    } catch (err: unknown) {
+      setCompleteError(err instanceof Error ? err.message : 'Ana projeden müzik aktarılamadı.');
+    } finally {
+      setIsCopyingFromParent(false);
+    }
+  };
+
   const isMusicReady = readinessMusic?.ready ?? (assets.music === 'ready');
   const missingTracksCount = Math.max(0, trackCount - audioCount);
 
@@ -881,7 +885,23 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
   };
 
   return (
-    <StagePanel section="music" title="5. Müzik" status={assets.music} stageStatus={stageStatus}>
+    <StagePanel section="music" title="3. Müzik" status={assets.music} stageStatus={stageStatus}>
+      {/* Kendi promptlarım — müzik üretmeye başlamadan önce kopyalanır. */}
+      <PromptPicker
+        tag="music"
+        label="Kayıtlı promptlarım"
+        onManage={() => { window.location.href = paths.prompts; }}
+      />
+      {/* Pomodoro burada: videonun kaç dakika olacağına karar veren ayar,
+          müzik seçilirken bilinmeli — kullanıcı ne kadar parça gerektiğini
+          parçaları eklemeden önce görsün. */}
+      <PomodoroPicker projectId={project.id} />
+      {/* Arka plan sesi — videonun tamamı boyunca döner. Montaja kadar
+          değiştirilebilir; seçim project.json'daki `ambient` alanına yazılır. */}
+      <AmbientPicker
+        projectId={project.id}
+        onManage={() => { window.location.href = paths.ambient; }}
+      />
       <UploadButton
         label="Müzik dosyalarını yükle"
         accept=".mp3,.wav,.m4a,.flac,.aac,.opus,.ogg"
@@ -1040,6 +1060,129 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
         </div>
       ) : null}
 
+      {/* Parent Project Music Picker Box */}
+      {project.parentId && showParentPicker ? (
+        <div
+          style={{
+            margin: '12px 0 16px',
+            padding: '14px 16px',
+            borderRadius: 8,
+            background: 'var(--bg-surface-subtle)',
+            border: '1px solid var(--border)',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <strong style={{ fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span>📁</span> Ana Projeden Müzik Seç & Bu Projeye Aktar ({project.parentId})
+            </strong>
+            <button
+              type="button"
+              className="button"
+              style={{ fontSize: 11, minHeight: 22, padding: '0 6px' }}
+              onClick={() => setShowParentPicker(false)}
+            >
+              Kapat
+            </button>
+          </div>
+
+          {isLoadingParentTracks ? (
+            <p className="field-hint" style={{ margin: 0 }}>
+              Ana projenin müzikleri yükleniyor...
+            </p>
+          ) : parentAudioFiles.length === 0 ? (
+            <p className="field-hint" style={{ margin: 0 }}>
+              Ana proje "{project.parentId}" içinde henüz ses dosyası bulunamadı.
+            </p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  {selectedParentTracks.length} / {parentAudioFiles.length} parça seçildi
+                </span>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button
+                    type="button"
+                    className="button"
+                    style={{ fontSize: 11, padding: '2px 8px' }}
+                    onClick={() => setSelectedParentTracks(parentAudioFiles.map((a) => a.file))}
+                  >
+                    Tümünü Seç
+                  </button>
+                  <button
+                    type="button"
+                    className="button"
+                    style={{ fontSize: 11, padding: '2px 8px' }}
+                    onClick={() => setSelectedParentTracks([])}
+                  >
+                    Temizle
+                  </button>
+                </div>
+              </div>
+              <div style={{ maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {parentAudioFiles.map((item) => {
+                  const isChecked = selectedParentTracks.includes(item.file);
+                  const isAlreadyInProject = musicInfo?.audioFiles.some((a) => a.file === item.file);
+                  return (
+                    <label
+                      key={item.file}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '6px 10px',
+                        borderRadius: 6,
+                        background: 'var(--bg-surface)',
+                        border: '1px solid var(--border-subtle)',
+                        fontSize: 13,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedParentTracks((prev) => [...prev, item.file]);
+                            } else {
+                              setSelectedParentTracks((prev) => prev.filter((f) => f !== item.file));
+                            }
+                          }}
+                        />
+                        <span>{item.file}</span>
+                        {isAlreadyInProject ? (
+                          <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: '#efece4', color: '#685d4d' }}>
+                            Mevcut
+                          </span>
+                        ) : null}
+                      </div>
+                      {item.previewUrl ? (
+                        <audio
+                          controls
+                          src={item.previewUrl}
+                          preload="none"
+                          style={{ height: 24, width: 140 }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      ) : null}
+                    </label>
+                  );
+                })}
+              </div>
+              <button
+                type="button"
+                className="button button-primary"
+                disabled={isCopyingFromParent || selectedParentTracks.length === 0}
+                style={{ alignSelf: 'flex-start', marginTop: 4 }}
+                onClick={handleCopyFromParent}
+              >
+                {isCopyingFromParent ? 'Aktarılıyor...' : `Seçilen ${selectedParentTracks.length} Parçayı Aktar`}
+              </button>
+            </div>
+          )}
+        </div>
+      ) : null}
+
       {tracks.length > 0 ? (
         <TrackList tracks={tracks} />
       ) : musicInfo && musicInfo.audioFiles.length > 0 ? (
@@ -1096,6 +1239,16 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
         >
           📚 {showAlbumPicker ? 'Albümleri Gizle' : 'Kütüphaneden Albüm Seç'}
         </button>
+        {project.parentId ? (
+          <button
+            className="button"
+            type="button"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#faf6ee', borderColor: '#d3c5ae' }}
+            onClick={() => setShowParentPicker((prev) => !prev)}
+          >
+            📁 {showParentPicker ? 'Ana Proje Müziklerini Gizle' : `Ana Projeden Müzik Aktar (${project.parentId})`}
+          </button>
+        ) : null}
         <button
           className="button"
           type="button"
@@ -1151,9 +1304,9 @@ type BuildOpState = 'pending' | 'running' | 'done' | 'failed';
  */
 const BUILD_OPERATIONS = [
   { label: "Watermark'ı kırp", tag: '01' },
-  { label: 'Video oranını düzelt (16:9)', tag: '01' },
+  { label: 'Video formatını düzelt (16:9 / 9:16)', tag: '01' },
   { label: 'Sesleri birleştir', tag: '02' },
-  { label: 'Ambient sesi ekle', tag: '03' },
+  { label: 'Arka plan sesi (Ambiance) ekle', tag: '03' },
   { label: 'Videoyu ses süresine uzat', tag: '04' },
   { label: 'Fade işlemlerini uygula', tag: '04' },
   { label: 'Tracklist üret', tag: '05' },
@@ -1163,7 +1316,10 @@ const OP_ICON: Record<BuildOpState, string> = { pending: '○', running: '⏳', 
 
 function buildChecklist(log: string[] = [], state?: string) {
   const has = (tag: string, word: string) => log.some((line) => line.startsWith(`[${tag}]`) && line.includes(word));
-  const ambientSkipped = log.some((line) => line.includes('Ambient tanımlı değil'));
+  // build.js'in 03 adımını atladığında bastığı satır. Metin oradan geliyor —
+  // iki yazım da aranıyor ki eski build loglarının çetelesi de doğru çıksın.
+  const ambientSkipped = log.some((line) =>
+    line.includes('Ambiance tanımlı değil') || line.includes('Ambient tanımlı değil'));
   const tagState = (tag: string): BuildOpState => {
     if (state === 'succeeded') return 'done';
     // Ambient birden fazla karışım olabilir: tracklist başladıysa bitmiştir.
@@ -1186,15 +1342,21 @@ function buildChecklist(log: string[] = [], state?: string) {
 export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGoToStep }: StageProps) {
   const readiness = project.readiness;
   const isBuildReady = readiness?.build?.ready ?? (assets.assembly === 'ready');
-  const canBuild = isBuildReady;
   const missingRequirements = readiness?.build?.missing ?? [];
+
+  // Pomodoro doğrulaması montajın ön koşulu: sunucu da reddediyor (409), ama
+  // düğmeyi burada kapatmak kullanıcıyı bir hata turuna sokmadan uyarıyor.
+  // Kutu yüklenene kadar (null) montaj engellenmez — Pomodoro kapalı
+  // projelerde ekstra bir bekleme olmasın.
+  const [pomodoro, setPomodoro] = useState<ProjectPomodoro | null>(null);
+  const pomodoroBlocks = pomodoro?.enabled === true && !pomodoro.validation.ok;
+  const canBuild = isBuildReady && !pomodoroBlocks;
 
   const [buildJob, setBuildJob] = useState<BuildJob | null>(null);
   const [isStarting, setIsStarting] = useState(false);
   const [buildError, setBuildError] = useState<string | null>(null);
 
   const rows = [
-    { label: 'Master Frame', status: assets.master },
     { label: 'Video Clip', status: assets.clip },
     { label: 'Music', status: assets.music },
   ];
@@ -1284,6 +1446,18 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
   const isSucceeded = buildJob?.state === 'succeeded' || (project.output?.exists && !isRunning);
   const progress = buildChecklist(buildJob?.log, buildJob?.state);
 
+  // Ambiance seçili mi — project.json'daki `ambient` üç şekilde yazılabiliyor
+  // (tek metin / dizi / { tracks }), üçünü de boş saymadan kontrol et.
+  const ambientConfig = project.projectJson?.data?.ambient;
+  const ambientMissing =
+    ambientConfig === undefined || ambientConfig === null
+      ? true
+      : typeof ambientConfig === 'string'
+        ? ambientConfig.trim() === ''
+        : Array.isArray(ambientConfig)
+          ? ambientConfig.length === 0
+          : (ambientConfig.tracks?.length ?? 0) === 0;
+
   const videoConfig = project.projectJson?.data?.video;
   const configuredCropBottom = videoConfig?.cropBottom ?? 150;
   const configuredCropTop = videoConfig?.cropTop ?? 0;
@@ -1301,7 +1475,7 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
     : 'Kırpma yok';
 
   return (
-    <StagePanel section="build" title="7. Montaj" status={assets.assembly} stageStatus={stageStatus}>
+    <StagePanel section="build" title="5. Montaj" status={assets.assembly} stageStatus={stageStatus}>
       <dl className="readiness-list">
         {rows.map((row) => (
           <div key={row.label}>
@@ -1314,7 +1488,7 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
         <div>
           <dt>Video Crop & Format</dt>
           <dd>
-            {cropDescription} → 16:9
+            {cropDescription} → {project.projectJson?.data?.video?.aspect || '16:9'}
           </dd>
         </div>
       </dl>
@@ -1324,6 +1498,29 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
           ℹ Build will be available when all required stages (Master Frame, Video Clip, Music) are ready.
         </p>
       ) : null}
+
+      {/* Arka plan sesi burada da duruyor: "Ambiance eklemeyi unuttum" asıl
+          montaj anında fark ediliyor ve o an 5. adıma dönmek akla gelmiyor.
+          Aynı bileşen, aynı uç — iki yerden de aynı seçimi yazar. */}
+      {ambientMissing ? (
+        <p className="field-hint" style={{ marginTop: 12 }}>
+          ⚠ Arka plan sesi (Ambiance) seçilmemiş — montajda videonun arkasında
+          ortam sesi olmayacak. Aşağıdan şimdi ekleyebilirsin.
+        </p>
+      ) : null}
+      {/* Pomodoro doğrulaması montajın ÖN KOŞULU: fazla/eksik müzik burada,
+          Başlat'a basılmadan görünür. Aynı bileşen, aynı uç — iki yerden de
+          aynı ayarı yazar. Montaj adımında açık başlıyor: asıl soru burada
+          "başlatabilir miyim". */}
+      <PomodoroPicker
+        projectId={project.id}
+        defaultOpen
+        onChange={setPomodoro}
+      />
+      <AmbientPicker
+        projectId={project.id}
+        onManage={() => { window.location.href = paths.ambient; }}
+      />
 
       {buildError ? (
         <p className="field-hint field-error" role="alert" style={{ marginTop: 12 }}>
@@ -1476,9 +1673,11 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
 
         {!canBuild && !project.output?.exists && !isRunning ? (
           <p className="field-hint">
-            {missingRequirements.length > 0
-              ? `Required assets missing: ${missingRequirements.join(', ')}`
-              : 'Available when audio and video are ready.'}
+            {pomodoroBlocks
+              ? 'Pomodoro doğrulaması geçmeden montaj başlatılamaz — yukarıdaki kutuya bak.'
+              : missingRequirements.length > 0
+                ? `Required assets missing: ${missingRequirements.join(', ')}`
+                : 'Available when audio and video are ready.'}
           </p>
         ) : null}
       </div>
@@ -1507,7 +1706,7 @@ export function OutputStage({ project, assets, stageStatus, onProjectUpdate }: S
   };
 
   return (
-    <StagePanel section="publish" title="8. Yayın" status={assets.output} stageStatus={stageStatus}>
+    <StagePanel section="publish" title="6. Yayın" status={assets.output} stageStatus={stageStatus}>
       {project.output?.exists ? (
         <div className="stage-media">
           <AssetPreview kind="video" fileName={outputName} src={outputUrl} emptyLabel="" />

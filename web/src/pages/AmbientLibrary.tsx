@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 
-import { fetchLibrary } from '../api';
+import { deleteAmbient, fetchLibrary, getAmbientAudioUrl, uploadAmbient } from '../api';
 import { EmptyState, SampleDataNotice } from '../components/Feedback';
 import { PageHeader } from '../components/PageHeader';
-import { StatusBadge } from '../components/StatusBadge';
 import { sampleAmbients, type LibraryAmbient } from '../mockData';
-import type { LoadState } from '../types';
+import type { LibraryResponse, LoadState } from '../types';
 import { matchesQuery } from './libraryFilter';
 
 const AUDIO_ACCEPT = '.mp3,.wav,.m4a,.flac,.ogg';
@@ -18,28 +17,48 @@ export function AmbientLibrary() {
   const [query, setQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [previewId, setPreviewId] = useState<string | null>(null);
+  // Tek bir <audio> paylaşılıyor: iki ses birden çalmasın.
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  /** Aynı sese tekrar basmak durdurur; başka sese basmak ona geçer. */
+  const togglePreview = (name: string) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (previewId === name) {
+      audio.pause();
+      setPreviewId(null);
+      return;
+    }
+    audio.src = getAmbientAudioUrl(name);
+    setPreviewId(name);
+    void audio.play().catch(() => setPreviewId(null));
+  };
   const [isAdding, setIsAdding] = useState(false);
   const [draftName, setDraftName] = useState('');
-  const [draftFile, setDraftFile] = useState<string | null>(null);
+  const [draftFile, setDraftFile] = useState<File | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
   const [draftError, setDraftError] = useState<string | null>(null);
+
+  // Sunucu yanıtını ekran listesine çeviren tek yer — ilk yükleme, ses ekleme
+  // ve silme hep buradan geçiyor, üç ayrı eşleme kodu olmasın.
+  const applyLibrary = useCallback((res: LibraryResponse) => {
+    setAmbientErrorNotice(res.ambientError ?? null);
+    const loaded: LibraryAmbient[] = (res.ambients ?? []).map((a) => {
+      const sample = sampleAmbients.find((item) => item.id === a.name);
+      return { id: a.name, name: a.name, category: sample?.category ?? 'Ambient sound' };
+    });
+    setAmbients(loaded);
+  }, []);
 
   useEffect(() => {
     let isActive = true;
     fetchLibrary()
       .then((res) => {
         if (!isActive) return;
-        setAmbientErrorNotice(res.ambientError ?? null);
-        if (Array.isArray(res.ambients) && res.ambients.length > 0) {
-          const loadedAmbients: LibraryAmbient[] = res.ambients.map((a) => {
-            const sample = sampleAmbients.find((item) => item.id === a.name);
-            return {
-              id: a.name,
-              name: a.name,
-              category: sample?.category ?? 'Ambient sound',
-            };
-          });
-          setAmbients(loadedAmbients);
-        }
+        // Boş liste de geçerli bir cevap: klasördeki son ses silindiğinde
+        // ekranda hayalet satır kalmasın (eskiden boşsa örnek veri kalıyordu).
+        applyLibrary(res);
         setIsBackendConnected(true);
         setLoadState('loaded');
       })
@@ -52,7 +71,7 @@ export function AmbientLibrary() {
     return () => {
       isActive = false;
     };
-  }, []);
+  }, [applyLibrary]);
 
   const visibleAmbients = useMemo(
     () => ambients.filter((ambient) => matchesQuery(query, ambient.name, ambient.category)),
@@ -70,26 +89,53 @@ export function AmbientLibrary() {
     setDraftError(null);
   };
 
-  const handleAdd = (event: FormEvent<HTMLFormElement>) => {
+  /**
+   * Sesi ortak klasöre YAZAR (eskiden yalnızca ekrana bir satır ekliyordu;
+   * dosya hiçbir yere kopyalanmadığı için montaj adımındaki seçici onu
+   * göremiyordu). Yanıt kütüphanenin diskten okunmuş güncel hali.
+   */
+  const handleAdd = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (isSaving) return;
     const name = draftName.trim();
     if (!/^[A-Za-z0-9_-]+$/.test(name)) {
-      setDraftError('Use letters, numbers, - or _ (e.g. softRain).');
+      setDraftError('Harf, rakam, - ve _ kullan (ör. softRain).');
       return;
     }
     if (ambients.some((ambient) => ambient.id === name)) {
-      setDraftError('An ambient with this name already exists.');
+      setDraftError('Bu adda bir Ambiance zaten var.');
       return;
     }
     if (!draftFile) {
-      setDraftError('Choose an audio file.');
+      setDraftError('Bir ses dosyası seç.');
       return;
     }
-    setAmbients([
-      ...ambients,
-      { id: name, name, category: 'Custom', isLocalDraft: true, fileName: draftFile },
-    ]);
-    closeForm();
+
+    setIsSaving(true);
+    setDraftError(null);
+    try {
+      applyLibrary(await uploadAmbient(name, draftFile));
+      closeForm();
+    } catch (error: unknown) {
+      setDraftError(error instanceof Error ? error.message : 'Ambiance yüklenemedi.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  /** Ortak klasörden kaldırır — kalıcı silme değil, Geri Dönüşüm Kutusu'na. */
+  const handleDelete = async (name: string) => {
+    if (isSaving) return;
+    setIsSaving(true);
+    setListError(null);
+    try {
+      applyLibrary(await deleteAmbient(name));
+      setSelectedIds((ids) => ids.filter((id) => id !== name));
+    } catch (error: unknown) {
+      setListError(error instanceof Error ? error.message : 'Ambiance silinemedi.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -142,23 +188,27 @@ export function AmbientLibrary() {
               type="file"
               accept={AUDIO_ACCEPT}
               onChange={(event) => {
-                setDraftFile(event.target.files?.[0]?.name ?? null);
+                setDraftFile(event.target.files?.[0] ?? null);
                 setDraftError(null);
               }}
             />
           </div>
           <p id="ambient-form-hint" className={draftError ? 'field-error' : 'field-hint'}>
-            {draftError ?? 'Added to this screen only. The file is not copied.'}
+            {draftError ?? 'Dosya ortak Ambiance klasörüne kopyalanır ve bütün projelerden seçilebilir.'}
           </p>
           <div className="form-actions">
             <button className="button" type="button" onClick={closeForm}>
               Cancel
             </button>
-            <button className="button button-primary" type="submit">
-              Add
+            <button className="button button-primary" type="submit" disabled={isSaving}>
+              {isSaving ? 'Yükleniyor...' : 'Add'}
             </button>
           </div>
         </form>
+      ) : null}
+
+      {listError ? (
+        <p className="field-hint field-error" role="alert">{listError}</p>
       ) : null}
 
       <div className="toolbar">
@@ -200,19 +250,16 @@ export function AmbientLibrary() {
                   type="button"
                   aria-pressed={isPreviewing}
                   aria-label={`${isPreviewing ? 'Stop' : 'Play'} ${ambient.name}`}
-                  onClick={() => setPreviewId(isPreviewing ? null : ambient.id)}
+                  onClick={() => togglePreview(ambient.name)}
                 >
                   {isPreviewing ? '■' : '▶'}
                 </button>
                 <div className="library-list-body">
                   <strong>{ambient.name}</strong>
                   <span className="muted">
-                    {isPreviewing
-                      ? 'Audio preview not connected yet'
-                      : [ambient.category, ambient.fileName].filter(Boolean).join(' · ')}
+                    {isPreviewing ? 'Çalıyor...' : ambient.category}
                   </span>
                 </div>
-                {ambient.isLocalDraft ? <StatusBadge status="optional" label="Local draft" /> : null}
                 <button
                   className={isSelected ? 'button button-selected' : 'button'}
                   type="button"
@@ -221,11 +268,29 @@ export function AmbientLibrary() {
                 >
                   {isSelected ? 'Selected' : 'Select'}
                 </button>
+                <button
+                  className="button"
+                  type="button"
+                  disabled={isSaving || !isBackendConnected}
+                  title="Ortak klasörden kaldır (Geri Dönüşüm Kutusu'na gider)"
+                  onClick={() => void handleDelete(ambient.name)}
+                >
+                  Sil
+                </button>
               </li>
             );
           })}
         </ul>
       )}
+
+      {/* Görünmez: oynatmayı listedeki ▶ düğmeleri yönetiyor. */}
+      <audio
+        ref={audioRef}
+        preload="none"
+        onEnded={() => setPreviewId(null)}
+        onPause={() => setPreviewId(null)}
+        style={{ display: 'none' }}
+      />
     </section>
   );
 }

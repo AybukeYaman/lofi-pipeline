@@ -1,15 +1,20 @@
 import type {
-  BackendStyle,
   BuildJob,
-  ImageSlot,
   ProjectMusicInfo,
-  ProjectPrompts,
   CreateProjectPayload,
   CreateProjectResponse,
   LibraryResponse,
+  ProjectAmbient,
+  ProjectPomodoro,
   ProjectDetail,
+  LibraryPrompt,
+  UpdateAmbientPayload,
+  UpdatePomodoroPayload,
   ProjectSummary,
-  StylePayload,
+  PromptLibraryResponse,
+  PromptPayload,
+  VideoSource,
+  VideoSourceResponse,
 } from './types';
 
 export class ApiError extends Error {
@@ -89,36 +94,6 @@ export async function fetchProject(id: string): Promise<ProjectDetail> {
 export async function fetchLibrary(): Promise<LibraryResponse> {
   const response = await fetch('/api/library');
   return handleResponse<LibraryResponse>(response, 'Library could not be loaded.');
-}
-
-export async function getStyleDetail(name: string): Promise<BackendStyle> {
-  const response = await fetch(`/api/styles/${encodeURIComponent(name)}`);
-  return handleResponse<BackendStyle>(response, 'Style could not be loaded.');
-}
-
-export async function createLibraryStyleApi(payload: StylePayload): Promise<{ style: BackendStyle }> {
-  const response = await fetch('/api/styles', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  return handleResponse<{ style: BackendStyle }>(response, 'Style could not be created.');
-}
-
-export async function updateStyleDetail(name: string, payload: StylePayload): Promise<{ style: BackendStyle }> {
-  const response = await fetch(`/api/styles/${encodeURIComponent(name)}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  return handleResponse<{ style: BackendStyle }>(response, 'Style could not be updated.');
-}
-
-export async function deleteStyleDetail(name: string): Promise<{ ok: boolean; deleted: string }> {
-  const response = await fetch(`/api/styles/${encodeURIComponent(name)}`, {
-    method: 'DELETE',
-  });
-  return handleResponse<{ ok: boolean; deleted: string }>(response, 'Style could not be deleted.');
 }
 
 export async function createProject(payload: CreateProjectPayload): Promise<CreateProjectResponse> {
@@ -201,6 +176,7 @@ export type UpdateCropPayload = {
   cropTop?: number;
   cropLeft?: number;
   cropRight?: number;
+  aspect?: string;
 };
 
 export async function updateProjectCrop(
@@ -215,15 +191,120 @@ export async function updateProjectCrop(
   return handleResponse<ProjectDetail>(response, 'Crop settings could not be updated.');
 }
 
-export async function fetchProjectMaster(id: string): Promise<import('./types').MasterFrameInfo> {
-  const response = await fetch(`/api/projects/${encodeURIComponent(id)}/master`);
-  return handleResponse<import('./types').MasterFrameInfo>(response, 'Master frame info could not be loaded.');
+// ------------------------------------------------- prompt kütüphanesi (projeden bağımsız)
+
+const promptUrl = (id: string) => `/api/prompts/${encodeURIComponent(id)}`;
+
+/** Kütüphanedeki tüm promptlar, etiket listesi ve alan sınırları. */
+export async function fetchPromptLibrary(): Promise<PromptLibraryResponse> {
+  const response = await fetch('/api/prompts');
+  return handleResponse<PromptLibraryResponse>(response, 'Prompts could not be loaded.');
 }
 
-export function getProjectMasterUrl(projectId: string, fileName?: string | null): string {
-  if (!fileName) return '';
-  const name = fileName.split(/[\\/]/).pop() || fileName;
-  return `/api/projects/${encodeURIComponent(projectId)}/assets/master/${encodeURIComponent(name)}`;
+/** Yeni prompt ekler; kimlik başlıktan türetilir. */
+export async function createLibraryPrompt(payload: PromptPayload): Promise<{ prompt: LibraryPrompt }> {
+  return sendJson('POST', '/api/prompts', payload, 'Prompt could not be saved.');
+}
+
+/** Var olan promptu günceller; verilmeyen alanlar korunur. */
+export async function updateLibraryPrompt(
+  id: string,
+  payload: PromptPayload,
+): Promise<{ prompt: LibraryPrompt }> {
+  return sendJson('PUT', promptUrl(id), payload, 'Prompt could not be updated.');
+}
+
+export async function deleteLibraryPrompt(id: string): Promise<{ ok: boolean; deleted: string }> {
+  const response = await fetch(promptUrl(id), { method: 'DELETE' });
+  return handleResponse(response, 'Prompt could not be deleted.');
+}
+
+/**
+ * Metni panoya kopyalar. Pano API'si yalnızca güvenli bağlamda ve izinle
+ * çalışır; reddedilirse gizli bir textarea + execCommand ile denenir, o da
+ * olmazsa false döner ve arayüz metni seçtirir.
+ */
+export async function copyTextToClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const area = document.createElement('textarea');
+      area.value = text;
+      area.setAttribute('readonly', '');
+      area.style.position = 'fixed';
+      area.style.opacity = '0';
+      document.body.appendChild(area);
+      area.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(area);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
+
+/**
+ * Görsel kaynağını değiştirir: tek resim ↔ döngü videosu. Yeni moda uymayan
+ * seçim sunucuda boşaltılır; ne olduğu `videoSourceChange` altında döner.
+ */
+export async function updateProjectVideoSource(
+  id: string,
+  source: VideoSource,
+): Promise<VideoSourceResponse> {
+  return sendJson<VideoSourceResponse>(
+    'PUT',
+    projectUrl(id, 'video-source'),
+    { source },
+    'Video source could not be changed.',
+  );
+}
+
+/** Projenin Ambiance seçimi + ortak klasördeki bütün sesler. */
+export async function fetchProjectAmbient(id: string): Promise<ProjectAmbient> {
+  const response = await fetch(projectUrl(id, 'ambient'));
+  return handleResponse<ProjectAmbient>(response, 'Ambiance selection could not be loaded.');
+}
+
+/**
+ * Ambiance seçimini yazar. Parçalar kütüphanedeki ADLARIYLA gönderilir;
+ * dosya yolunu sunucu çözer. Boş `tracks` seçimi kaldırır.
+ */
+export async function updateProjectAmbient(
+  id: string,
+  payload: UpdateAmbientPayload,
+): Promise<ProjectAmbient> {
+  return sendJson<ProjectAmbient>(
+    'PUT',
+    projectUrl(id, 'ambient'),
+    payload,
+    'Ambiance selection could not be saved.',
+  );
+}
+
+/** Projenin Pomodoro ayarı + montaj öncesi doğrulama sonucu. */
+export async function fetchProjectPomodoro(id: string): Promise<ProjectPomodoro> {
+  const response = await fetch(projectUrl(id, 'pomodoro'));
+  return handleResponse<ProjectPomodoro>(response, 'Pomodoro settings could not be loaded.');
+}
+
+/**
+ * Pomodoro ayarını yazar ve GÜNCEL doğrulamayı geri alır: ayar değişince
+ * "müzik yetiyor mu" cevabı da değişir, ekran ikinci bir istek atmak zorunda
+ * kalmasın. `enabled: false` Pomodoro'yu kapatır.
+ */
+export async function updateProjectPomodoro(
+  id: string,
+  payload: UpdatePomodoroPayload,
+): Promise<ProjectPomodoro> {
+  return sendJson<ProjectPomodoro>(
+    'PUT',
+    projectUrl(id, 'pomodoro'),
+    payload,
+    'Pomodoro settings could not be saved.',
+  );
 }
 
 export function getProjectClipUrl(projectId: string, clipPathOrName?: string | null): string {
@@ -368,28 +449,18 @@ export function getMusicAssetUrl(albumId: string, filename: string): string {
 
 // ---------------------------------------------------------------- Canonical workflow steps
 
-export async function fetchProjectPrompts(id: string): Promise<ProjectPrompts> {
-  const response = await fetch(projectUrl(id, 'prompts'));
-  return handleResponse<ProjectPrompts>(response, 'Prompts could not be loaded.');
-}
-
 export async function fetchProjectMusic(id: string): Promise<ProjectMusicInfo> {
   const response = await fetch(projectUrl(id, 'music'));
   return handleResponse<ProjectMusicInfo>(response, 'Music could not be loaded.');
 }
 
-/** Adım 3/4/5: sahne referansı, master frame ya da kamera açısı görseli. */
-export async function uploadProjectImage(
-  id: string,
-  slot: ImageSlot,
-  file: File,
-  index?: number,
-): Promise<ProjectDetail> {
+/** Tek resim modunun görselleri → resimler/. Yuva yok: klasördeki her görsel aday. */
+export async function uploadProjectImage(id: string, file: File): Promise<ProjectDetail> {
   const data = await readAsDataUrl(file);
   return sendJson<ProjectDetail>(
     'POST',
     projectUrl(id, 'images'),
-    { slot, name: file.name, data, ...(index === undefined ? {} : { index }) },
+    { name: file.name, data },
     'Image could not be uploaded.',
   );
 }
@@ -404,11 +475,43 @@ export async function uploadProjectAudio(id: string, file: File): Promise<Projec
   return sendJson<ProjectDetail>('POST', projectUrl(id, 'audio'), { name: file.name, data }, 'Audio could not be uploaded.');
 }
 
-export async function updateProjectAngles(
-  id: string,
-  angles: { wanted: boolean; count?: number },
-): Promise<ProjectDetail> {
-  return sendJson<ProjectDetail>('PUT', projectUrl(id, 'workflow'), { angles }, 'Camera angle choice could not be saved.');
+/**
+ * Ortak Ambiance klasörüne ses yükler.
+ *
+ * Kütüphanedeki ad dosya adından türetiliyor (uzantısız), bu yüzden
+ * kullanıcının yazdığı ad seçilen dosyanın uzantısıyla birleştirilip
+ * gönderilir — ad ne yazıldıysa listede o görünür.
+ */
+export async function uploadAmbient(name: string, file: File): Promise<LibraryResponse> {
+  const data = await readAsDataUrl(file);
+  const dot = file.name.lastIndexOf('.');
+  const ext = dot === -1 ? '' : file.name.slice(dot);
+  return sendJson<LibraryResponse>(
+    'POST',
+    '/api/ambients/upload',
+    { name: `${name}${ext}`, data },
+    'Ambiance yüklenemedi.',
+  );
+}
+
+/**
+ * Bir Ambiance'ın dinleme adresi.
+ *
+ * Doğrudan `<audio src>` olarak kullanılır: sunucu aralık (range) isteklerini
+ * desteklediği için tarayıcı dosyanın tamamını indirmeden çalmaya başlar ve
+ * ileri/geri sarma çalışır.
+ */
+export const getAmbientAudioUrl = (name: string) =>
+  `/api/ambients/${encodeURIComponent(name)}/audio`;
+
+/** Ortak klasördeki bir Ambiance'ı Geri Dönüşüm Kutusu'na yollar. */
+export async function deleteAmbient(name: string): Promise<LibraryResponse> {
+  return sendJson<LibraryResponse>(
+    'DELETE',
+    `/api/ambients/${encodeURIComponent(name)}`,
+    undefined,
+    'Ambiance silinemedi.',
+  );
 }
 
 export async function saveTrackOrder(
@@ -418,7 +521,14 @@ export async function saveTrackOrder(
   return sendJson<ProjectDetail>('PUT', projectUrl(id, 'order'), payload, 'Track order could not be saved.');
 }
 
-export function getProjectImageUrl(projectId: string, assetType: 'angle', path: string): string {
-  const name = path.split(/[\\/]/).pop() || path;
-  return projectUrl(projectId, `assets/${assetType}/${encodeURIComponent(name)}`);
+export async function copyProjectTracks(
+  targetId: string,
+  payload: { sourceProjectId: string; trackFiles: string[] },
+): Promise<{ ok: boolean; copiedCount: number; copiedFiles: string[] }> {
+  return sendJson<{ ok: boolean; copiedCount: number; copiedFiles: string[] }>(
+    'POST',
+    projectUrl(targetId, 'copy-tracks'),
+    payload,
+    'Tracks could not be copied from source project.',
+  );
 }

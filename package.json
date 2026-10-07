@@ -64,15 +64,7 @@
       "!test/**/*",
       "!web/src/**/*"
     ],
-    "asar": true,
-    "asarUnpack": [
-      "build.js",
-      "add-style.js",
-      "new-video.js",
-      "steps/**/*",
-      "prompts/**/*",
-      "styles/**/*"
-    ],
+    "asar": false,
     "win": {
       "target": [
         {

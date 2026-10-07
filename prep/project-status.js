@@ -13,16 +13,12 @@ import { readdir, stat } from 'node:fs/promises';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 
 import { CONFIG_DEFAULTS } from '../core/config.js';
-import { AUDIO_EXTENSIONS, isImagePath, listFiles } from '../core/files.js';
+import { AUDIO_EXTENSIONS, isImagePath, listFiles, matchOrder } from '../core/files.js';
+import { probe } from '../core/probe.js';
 import { readJsonFile } from '../core/workspace.js';
 
-/** Master görseli: resimler/MASTER.<uzantı> (elle üretilir). Master1.jpg gibi açı varyantları sayılmaz. */
-export const MASTER_PATTERN = /^master\.[a-z0-9]+$/i;
-/** Kamera açıları: resimler/Master1.jpg … — Faz 2 şablonunun adları. */
-export const ANGLE_PATTERN = /^master(\d+)\.[a-z0-9]+$/i;
-
 /** Sıralı modda "bu oturumda atla" denebilen adımlar — kanıt gerektirmeyen elle işler. */
-export const SKIPPABLE_STEPS = ['faz1', 'faz3'];
+export const SKIPPABLE_STEPS = ['faz3'];
 
 /**
  * Proje klasörünün anlık durumu. Eksik klasörler hata değil, "boş" sayılır.
@@ -35,25 +31,24 @@ export async function inspectProject(dir) {
   const data = projectJson.data ?? {};
   const at = (p) => (isAbsolute(p) ? p : resolve(dir, p));
 
-  const images = await fileNames(join(dir, 'resimler'));
-  const master = images.find((n) => MASTER_PATTERN.test(n));
-  const angles = images
-    .filter((n) => ANGLE_PATTERN.test(n))
-    .sort((a, b) => Number(ANGLE_PATTERN.exec(a)[1]) - Number(ANGLE_PATTERN.exec(b)[1]));
-
   const clipValue = typeof data.clip === 'string' ? data.clip.trim() : '';
   const clipPath = clipValue ? at(clipValue) : null;
   const clipExists = clipPath ? await isFile(clipPath) : false;
 
   // Görsel kaynağı (core/config.js VIDEO_SOURCES). Tek resim modunda klip
-  // adayları resimler\ altındaki MASTER + açı varyantları: seçim, otomatik
-  // bağlama ve web listesi iki modda da aynı `clips` listesiyle çalışır.
+  // adayları resimler\ altındaki BÜTÜN görseller: belirli bir dosya adı
+  // (eski MASTER.png / Master1.jpg kuralı) aranmıyor — kullanıcı klasöre ne
+  // koyduysa seçilebilir. Seçim, web listesi ve küçük resim aynı listeden.
   const videoSource = data.video?.source === 'image' ? 'image' : 'clip';
-  const masterPath = master ? join(dir, 'resimler', master) : null;
-  const anglePaths = angles.map((n) => join(dir, 'resimler', n));
-  const clips = videoSource === 'image'
-    ? [...(masterPath ? [masterPath] : []), ...anglePaths]
-    : await filesOrEmpty(join(dir, 'videolar'), ['.mp4']);
+  const imageCandidates = (await fileNames(join(dir, 'resimler')))
+    .filter((name) => isImagePath(name))
+    .sort((a, b) => a.localeCompare(b, 'tr'))
+    .map((name) => join(dir, 'resimler', name));
+  // İki modun aday listesi de ölçülür: kullanıcı sonradan mod değiştirebiliyor
+  // (prep/project-file.js setVideoSource) ve "öbür tarafta kaç aday var"
+  // bilgisi olmadan bu seçim körlemesine olurdu.
+  const clipCandidates = await filesOrEmpty(join(dir, 'videolar'), ['.mp4']);
+  const clips = videoSource === 'image' ? imageCandidates : clipCandidates;
 
   const audioDir = at(nonEmpty(data.audioDir) ?? './audio');
   const output = data.output !== null && typeof data.output === 'object' ? data.output : {};
@@ -65,19 +60,22 @@ export async function inspectProject(dir) {
     name: dir.split(/[\\/]/).pop(),
     dir,
     projectPath,
-    promptsPath: join(dir, 'prompts.md'),
     projectJson,
+    parentId: typeof data.parentId === 'string' && data.parentId.trim() ? data.parentId.trim() : null,
     /** Müzik stili (styles/<ad>), seçilmediyse null. */
     style: nonEmpty(data.style) ?? null,
-    master: masterPath,
-    angles: anglePaths,
     videoSource,
     clips,
+    /** Mod değiştirme ekranı için: her modun aday sayısı ve klasörü. */
+    videoSourceCandidates: {
+      clip: { count: clipCandidates.length, dir: join(dir, 'videolar') },
+      image: { count: imageCandidates.length, dir: join(dir, 'resimler') },
+    },
     clip: { value: clipValue, path: clipPath, exists: clipExists },
     // Proje listesindeki küçük resim — kullanıcı seçmez: videoda görünen
-    // görsel, yoksa master, yoksa ilk açı.
+    // görsel, yoksa resimler\ altındaki ilk görsel.
     thumbnail: (clipExists && isImagePath(clipPath) ? clipPath : null)
-      ?? masterPath ?? anglePaths[0] ?? null,
+      ?? imageCandidates[0] ?? null,
     audioDir,
     audioCount: (await filesOrEmpty(audioDir, AUDIO_EXTENSIONS)).length,
     output: {
@@ -110,11 +108,6 @@ export function nextStep(s, { skipped = new Set() } = {}) {
 
   const missingClip = s.clip.value && !s.clip.exists ? `clip'teki dosya bulunamadı: ${s.clip.path}\n` : '';
 
-  if (!s.master && !skipped.has('faz1')) {
-    return step('faz1', 'manual', 'Master görseli',
-      `${missingClip}Ürettiğin görseli resimler\\MASTER.png olarak kaydet: ${join(s.dir, 'resimler')}`);
-  }
-
   const isStill = s.videoSource === 'image';
 
   // 10 Adımlı Akış: 6. Adım Video (Klip), 7. Adım Müzik'ten önce gelir!
@@ -124,15 +117,14 @@ export function nextStep(s, { skipped = new Set() } = {}) {
       : step('clip', 'auto', 'Klibi seç', `${missingClip}videolar\\ altında ${s.clips.length} klip var — kullanılacak olanı seç.`);
   }
 
-  // Tek resim: klip üretimi yok, video master görselinden üretilir.
+  // Tek resim: klip üretimi yok, video seçilen görselden üretilir.
   if (isStill && !s.clip.exists) {
-    return step('clip', 'manual', 'Görsel bekleniyor', `${missingClip}Tek resim modu: resimler\\ altına MASTER.png koy: ${join(s.dir, 'resimler')}`);
+    return step('clip', 'manual', 'Görsel bekleniyor', `${missingClip}Tek resim modu: resimler\\ altına bir görsel koy: ${join(s.dir, 'resimler')}`);
   }
 
   if (!s.clip.exists && !skipped.has('faz3')) {
     return step('faz3', 'manual', 'Klip',
-      `${missingClip}Ürettiğin döngü klibini videolar\\ altına .mp4 olarak koy: ${join(s.dir, 'videolar')}\n` +
-      `(Kamera açıları isteğe bağlı; promptları: ${s.promptsPath})`);
+      `${missingClip}Ürettiğin döngü klibini videolar\\ altına .mp4 olarak koy: ${join(s.dir, 'videolar')}`);
   }
 
   if (!s.clip.exists) {
@@ -165,8 +157,6 @@ export function nextStep(s, { skipped = new Set() } = {}) {
  */
 export const WORKFLOW_STEPS = [
   { id: 'project', title: 'Proje başlat', kind: 'manual', optional: false },
-  { id: 'master', title: 'Master görseli', kind: 'manual', optional: false },
-  { id: 'angles', title: 'Kamera açıları', kind: 'manual', optional: true },
   { id: 'video', title: 'Video', kind: 'manual', optional: false },
   { id: 'music', title: 'Müzik', kind: 'manual', optional: false },
   { id: 'order', title: 'Sıralama', kind: 'manual', optional: false },
@@ -180,24 +170,14 @@ export const WORKFLOW_STEPS = [
  */
 export function canonicalWorkflow(s) {
   const data = s.projectJson.data ?? {};
-  const workflow = isPlainObject(data.workflow) ? data.workflow : {};
-  const angles = isPlainObject(workflow.angles) ? workflow.angles : null;
   const built = s.output.exists;
   const cropBottom = data.video?.cropBottom;
-  const cropReady = Number.isSafeInteger(cropBottom) && cropBottom >= 0;
   const hasOrder = Array.isArray(data.order) && data.order.length > 0;
-  // Tek resimde açı adımı sorulmaz (seçilen görsel yine bir açı varyantı olabilir).
   const isStill = s.videoSource === 'image';
-  const anglesSkipped = isStill
-    || angles?.wanted === false || (!angles && (s.clip.exists || built) && s.angles.length === 0);
+  const cropReady = (Number.isSafeInteger(cropBottom) && cropBottom >= 0) || isStill;
 
   const done = {
     project: s.projectJson.ok,
-    master: Boolean(s.master) || built,
-    angles: isStill
-      || angles?.wanted === false
-      || (angles?.wanted === true && s.angles.length >= Math.max(1, Number(angles.count) || 1))
-      || s.clip.exists || built,
     video: (s.clip.exists && cropReady) || built,
     music: isMusicCompleted(s) || built,
     order: hasOrder || built,
@@ -214,7 +194,7 @@ export function canonicalWorkflow(s) {
       ...step,
       number: index + 1,
       status: step.id === current ? 'current' : done[step.id] ? 'done' : 'pending',
-      skipped: step.id === 'angles' && done.angles && anglesSkipped,
+      skipped: false,
     })),
   };
 }
@@ -247,6 +227,36 @@ export async function audioAddedOrder(s) {
   // Aynı zamanda oluşanlar klasörün doğal sırasında kalır (sort kararlı).
   rest.sort((a, b) => a.time - b.time);
   return [...known, ...rest.map((item) => item.name)];
+}
+
+/**
+ * Müzik parçaları, BUILD'in çalacağı sırayla ve ölçülmüş süreleriyle.
+ *
+ * Sıra kuralı `steps/02-audio-concat.js` ile aynı kaynaktan: `order` varsa
+ * matchOrder, yoksa klasörün doğal sırası. Tek yerde duruyor çünkü hem web
+ * (`server/project-api.js`) hem panel (`ui/actions.js`) Pomodoro doğrulamasını
+ * montajdan ÖNCE aynı sayılarla göstermek zorunda — iki ayrı kopya zamanla
+ * birbirinden sapardı.
+ *
+ * Süreler ffprobe başlığından geliyor; build çözülen örnek sayısını kullanıyor
+ * (dosya başına 13–27 ms fark). Build ayrıca aynı içerikli duplikeleri eliyor
+ * (md5), burada elenmiyor — son sözü build içindeki doğrulama söyler.
+ *
+ * @param {Awaited<ReturnType<typeof inspectProject>>} s
+ * @param {{ probeFn?: typeof probe }} [options]
+ * @returns {Promise<{ path: string, file: string, duration: number|null }[]>}
+ */
+export async function orderedAudioTracks(s, { probeFn = probe } = {}) {
+  const paths = await filesOrEmpty(s.audioDir, AUDIO_EXTENSIONS);
+  const order = s.projectJson.data?.order;
+  const ordered = Array.isArray(order) && order.length > 0 ? matchOrder(order, paths).ordered : paths;
+
+  const tracks = [];
+  for (const path of ordered) {
+    const info = await probeFn(path).catch(() => null);
+    tracks.push({ path, file: basename(path), duration: info?.duration ?? null });
+  }
+  return tracks;
 }
 
 /**
@@ -293,6 +303,7 @@ export async function listProjects(videosDir) {
     projects.push({
       name: entry.name,
       dir,
+      parentId: status.parentId,
       mtimeMs: Math.max(dirInfo.mtimeMs, projectInfo.mtimeMs),
       thumbnail: status.thumbnail,
       step: nextStep(status),

@@ -6,9 +6,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 
-import { loadTemplates } from '../../prep/prompts.js';
 import { PROJECT_SUBDIRS, planProject, validateVideoName } from '../../prep/scaffold.js';
-import { loadStyle } from '../../prep/styles.js';
 
 describe('validateVideoName', () => {
   for (const ok of ['video3-Neo Tokyo Night', 'video1- A Quiet Afternoon with a Book & Coffee', 'Kış (2026)', 'console']) {
@@ -41,44 +39,36 @@ describe('validateVideoName', () => {
   });
 });
 
-describe('planProject', async () => {
-  const templates = await loadTemplates();
-  const { style } = await loadStyle('anime-cel');
-  const base = { videosDir: 'X:\\videolar', videoName: 'video3-Test', templates };
+describe('planProject', () => {
+  const base = { videosDir: 'X:\\videolar', videoName: 'video3-Test' };
   const ambient = { name: 'heavyRain', path: 'X:\\ortak\\heavyRain.mp3' };
 
-  test('klasörler ve dosyalar: stil görseli ve referans yok', () => {
-    const plan = planProject({ ...base, style, ambient });
+  test('klasörler ve dosyalar', () => {
+    const plan = planProject({ ...base, ambient });
     const dir = join('X:\\videolar', 'video3-Test');
     assert.equal(plan.dir, dir);
     assert.deepEqual(PROJECT_SUBDIRS, ['audio', 'resimler', 'videolar']);
     assert.deepEqual(plan.subdirs, PROJECT_SUBDIRS.map((d) => join(dir, d)));
-    assert.deepEqual(plan.files.map((f) => [f.name, f.bom]), [['project.json', false], ['prompts.md', true]]);
+    // Kamera açısı promptları kaldırıldı: proje yalnızca project.json ile kurulur.
+    assert.deepEqual(plan.files.map((f) => [f.name, f.bom]), [['project.json', false]]);
     for (const f of plan.files) {
       assert.equal(f.path, join(dir, f.name));
       assert.ok(f.content.endsWith('\n') && !f.content.endsWith('\n\n'), f.name);
     }
   });
 
-  test('project.json: müzik stili adı ve profili plana gider', () => {
-    const json = JSON.parse(planProject({ ...base, style, ambient }).files[0].content);
+  test('project.json: seçilen Ambiance plana gider', () => {
+    const json = JSON.parse(planProject({ ...base, ambient }).files[0].content);
     assert.equal(json.clip, '');
     assert.equal(json.ambient, 'X:\\ortak\\heavyRain.mp3');
     assert.deepEqual(json.video, { cropBottom: 150, aspect: '16:9' });
-    assert.equal(json.style, 'anime-cel');
-    assert.ok(json.music.style.includes('lofi'), json.music.style);
+    assert.ok(!Object.hasOwn(json, 'style'), 'stil kavramı kaldırıldı');
   });
 
-  test('stil yoksa style anahtarı yok, planlayıcı varsayılanı; ambient yoksa anahtar yok', () => {
+  test('müzik tarifi planlayıcının varsayılanı; ambient yoksa anahtar yok', () => {
     const json = JSON.parse(planProject({ ...base, ambient: null }).files[0].content);
     assert.deepEqual(Object.keys(json), ['clip', 'audioDir', 'video', 'output', 'music']);
     assert.equal(json.music.style, 'Lo-fi / mellow / instrumental');
   });
 
-  test('prompts.md yalnızca kamera açısı promptlarını taşır', () => {
-    const prompts = planProject({ ...base, ambient: null }).files[1].content;
-    assert.ok(prompts.startsWith('# video3-Test — Kamera açısı promptları\n'));
-    assert.ok(prompts.includes('Extreme low angle'));
-    assert.ok(!prompts.includes('Style description'));
-  });
 });

@@ -7,8 +7,6 @@ import type { ProjectWorkflow, WorkflowStepId, WorkflowStepInfo } from './types'
  */
 export const STEP_ORDER: WorkflowStepId[] = [
   'project',
-  'master',
-  'angles',
   'video',
   'music',
   'order',
@@ -21,17 +19,9 @@ export const STEP_GUIDE: Record<WorkflowStepId, { who: 'user' | 'system'; lines:
     who: 'user',
     lines: ['Proje adı, müzik stili ve ambient ses seçildi; proje ayarları hazırlandı.'],
   },
-  master: {
-    who: 'user',
-    lines: ['Ürettiğin ana görseli buraya yükle (ya da resimler\\MASTER.png olarak kaydet).'],
-  },
-  angles: {
-    who: 'user',
-    lines: ['Farklı açılar ister misin? İstemiyorsan bu adımı atlayıp Video adımına geç.'],
-  },
   video: {
     who: 'user',
-    lines: ['Ürettiğin döngü klibini (.mp4) yükle — tek resim modunda videoda kalacak görseli seç.'],
+    lines: ['Ürettiğin döngü klibini (.mp4) yükle veya videoda kalacak görseli seç.'],
   },
   music: {
     who: 'user',

@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from 'react';
 
-import { fetchProject, fetchProjectPrompts, ProjectNotFoundError } from '../api';
+import { fetchProject, fetchProjects, ProjectNotFoundError } from '../api';
 import { EmptyState } from '../components/Feedback';
 import { PageHeader } from '../components/PageHeader';
 import { StatusBadge } from '../components/StatusBadge';
-import type { LoadState, ProjectDetail, ProjectPrompts, WorkflowStepId } from '../types';
+import type { LoadState, ProjectDetail, ProjectSummary, WorkflowStepId } from '../types';
 import { isStepReachable, nextStepId, previousStep, stepInfo } from '../workflow';
-import { deriveAssets, styleName } from './workspace/assetState';
-import { AnglesStage, OrderStage, ProjectStartStage } from './workspace/CanonicalStages';
+import { deriveAssets } from './workspace/assetState';
+import { OrderStage, ProjectStartStage } from './workspace/CanonicalStages';
 import {
   BuildStage,
-  MasterStage,
   MusicStage,
   OutputStage,
   VideoStage,
@@ -18,11 +17,9 @@ import {
 } from './workspace/StageSections';
 import { errorText, StepGuide } from './workspace/StepWidgets';
 
-/** Canonical 8 adımın ekranları — sıra workflow.ts STEP_ORDER'dır. */
+/** Canonical 6 adımın ekranları — sıra workflow.ts STEP_ORDER'dır. */
 const stageComponents: Record<WorkflowStepId, ComponentType<StageProps>> = {
   project: ProjectStartStage,
-  master: MasterStage,
-  angles: AnglesStage,
   video: VideoStage,
   music: MusicStage,
   order: OrderStage,
@@ -30,10 +27,25 @@ const stageComponents: Record<WorkflowStepId, ComponentType<StageProps>> = {
   publish: OutputStage,
 };
 
-export function ProjectWorkspace({ id, onBack }: { id: string; onBack: () => void }) {
+export function ProjectWorkspace({
+  id,
+  onBack,
+  onOpenProject,
+  onNewProject,
+}: {
+  id: string;
+  onBack: () => void;
+  onOpenProject?: (id: string) => void;
+  onNewProject?: (parentId?: string) => void;
+}) {
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [loadState, setLoadState] = useState<LoadState>('idle');
   const [errorMessage, setErrorMessage] = useState('Could not load project.');
+  const [allProjects, setAllProjects] = useState<ProjectSummary[]>([]);
+
+  useEffect(() => {
+    fetchProjects().then(setAllProjects).catch(() => {});
+  }, []);
 
   useEffect(() => {
     let isActive = true;
@@ -60,11 +72,127 @@ export function ProjectWorkspace({ id, onBack }: { id: string; onBack: () => voi
     };
   }, [id]);
 
+  // Projenin ait olduğu ana proje ve alt projeler grubu
+  const rootParentId = project?.parentId || project?.id;
+  const siblingSubprojects = useMemo(() => {
+    if (!rootParentId) return [];
+    return allProjects.filter((p) => p.parentId === rootParentId);
+  }, [allProjects, rootParentId]);
+
+  const hasSubprojectGroup = Boolean(project?.parentId || siblingSubprojects.length > 0);
+
   return (
     <section className="page workspace">
-      <button className="back-button" type="button" onClick={onBack}>
-        ← Back to Projects
-      </button>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+        <button className="back-button" type="button" onClick={onBack} style={{ margin: 0 }}>
+          ← Back to Projects
+        </button>
+
+        {hasSubprojectGroup && rootParentId ? (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              background: '#f8f5ee',
+              padding: '4px 10px',
+              borderRadius: 8,
+              border: '1px solid #e7ded0',
+              flexWrap: 'wrap',
+            }}
+          >
+            <span style={{ fontSize: 11, fontWeight: 600, color: '#7a6a55', marginRight: 2 }}>Sekmeler:</span>
+            <button
+              type="button"
+              style={{
+                padding: '3px 8px',
+                fontSize: 12,
+                fontWeight: project?.id === rootParentId ? 700 : 500,
+                borderRadius: 4,
+                border: '1px solid',
+                borderColor: project?.id === rootParentId ? '#a89476' : '#ded5c5',
+                background: project?.id === rootParentId ? '#ffffff' : 'transparent',
+                color: project?.id === rootParentId ? '#2c2214' : '#6b5d49',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+              }}
+              onClick={() => onOpenProject?.(rootParentId)}
+            >
+              {allProjects.find((p) => p.id === rootParentId)?.thumbnailUrl ? (
+                <img
+                  src={allProjects.find((p) => p.id === rootParentId)!.thumbnailUrl!}
+                  alt=""
+                  style={{ width: 16, height: 16, borderRadius: 3, objectFit: 'cover' }}
+                />
+              ) : (
+                <span>🏠</span>
+              )}
+              <span>{rootParentId} (Ana)</span>
+            </button>
+            {siblingSubprojects.map((sub) => (
+              <button
+                key={sub.id}
+                type="button"
+                style={{
+                  padding: '3px 8px',
+                  fontSize: 12,
+                  fontWeight: project?.id === sub.id ? 700 : 500,
+                  borderRadius: 4,
+                  border: '1px solid',
+                  borderColor: project?.id === sub.id ? '#a89476' : '#ded5c5',
+                  background: project?.id === sub.id ? '#ffffff' : 'transparent',
+                  color: project?.id === sub.id ? '#2c2214' : '#6b5d49',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                }}
+                onClick={() => onOpenProject?.(sub.id)}
+              >
+                {sub.thumbnailUrl ? (
+                  <img
+                    src={sub.thumbnailUrl}
+                    alt=""
+                    style={{ width: 16, height: 16, borderRadius: 3, objectFit: 'cover' }}
+                  />
+                ) : (
+                  <span>📄</span>
+                )}
+                <span>{sub.name}</span>
+              </button>
+            ))}
+            <button
+              type="button"
+              style={{
+                padding: '3px 7px',
+                fontSize: 11,
+                fontWeight: 600,
+                borderRadius: 4,
+                border: '1px dashed #bba990',
+                background: 'transparent',
+                color: '#6c593e',
+                cursor: 'pointer',
+                marginLeft: 4,
+              }}
+              title="Bu ana projeye yeni bir alt proje ekle"
+              onClick={() => onNewProject?.(rootParentId)}
+            >
+              ➕ Alt Proje
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="button"
+            style={{ fontSize: 12, padding: '4px 10px' }}
+            onClick={() => onNewProject?.(project?.id)}
+          >
+            ➕ Bu Projeye Alt Proje Aç
+          </button>
+        )}
+      </div>
 
       {loadState === 'loading' ? <div className="state-card">Loading project...</div> : null}
 
@@ -111,24 +239,6 @@ function WorkspaceContent({
     }
   }, [current]);
 
-  const [prompts, setPrompts] = useState<ProjectPrompts | null>(null);
-  const [promptsError, setPromptsError] = useState<string | null>(null);
-  useEffect(() => {
-    let active = true;
-    fetchProjectPrompts(project.id)
-      .then((result) => {
-        if (!active) return;
-        setPrompts(result);
-        setPromptsError(null);
-      })
-      .catch((error: unknown) => {
-        if (active) setPromptsError(errorText(error, 'Promptlar yüklenemedi.'));
-      });
-    return () => {
-      active = false;
-    };
-  }, [project.id]);
-
   const goTo = useCallback(
     (step: WorkflowStepId) => {
       if (!isStepReachable(workflow, step)) return;
@@ -161,7 +271,7 @@ function WorkspaceContent({
   return (
     <>
       <PageHeader
-        eyebrow="PROJECT WORKSPACE"
+        eyebrow={project.parentId ? `ALT PROJE (ANA: ${project.parentId})` : 'PROJECT WORKSPACE'}
         title={project.name}
         actions={
           <div className="current-step">
@@ -219,8 +329,6 @@ function WorkspaceContent({
         stageStatus={active?.status ?? 'pending'}
         onProjectUpdate={onProjectUpdate}
         onGoToStep={goTo}
-        prompts={prompts}
-        promptsError={promptsError}
       />
 
       <div className="wizard-nav">
@@ -251,8 +359,7 @@ function WorkspaceContent({
       <details className="panel evidence-panel">
         <summary>Project Assets & Filesystem Evidence</summary>
         <dl className="asset-list">
-          <AssetRow label="Music style" value={styleName(project) ?? 'Default (lofi)'} />
-          <AssetRow label="Master Frame" value={<StatusBadge status={assets.master} />} />
+          {project.parentId ? <AssetRow label="Parent Project" value={project.parentId} /> : null}
           <AssetRow label="Video Clip" value={<StatusBadge status={assets.clip} />} />
           <AssetRow label="Music" value={<StatusBadge status={assets.music} />} />
           <AssetRow label="Ambient" value={<StatusBadge status={assets.ambient} />} />
@@ -260,9 +367,6 @@ function WorkspaceContent({
         </dl>
         <dl className="evidence-list">
           <AssetRow label="Project folder" value={project.dir} />
-          <AssetRow label="Angle prompts" value={project.promptsPath} />
-          <AssetRow label="Master frame" value={project.master} />
-          <AssetRow label="Camera angles" value={project.angles?.length ? project.angles.join(', ') : undefined} />
           <AssetRow label="Video clip" value={project.clip?.path ?? project.clip?.value} />
           <AssetRow
             label="Video crop"

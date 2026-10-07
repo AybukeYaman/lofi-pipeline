@@ -6,11 +6,9 @@ export type ProjectStep = {
   skippable?: boolean;
 };
 
-/** Canonical 8 adım — backend canonicalWorkflow (prep/project-status.js). */
+/** Canonical 6 adım — backend canonicalWorkflow (prep/project-status.js). */
 export type WorkflowStepId =
   | 'project'
-  | 'master'
-  | 'angles'
   | 'video'
   | 'music'
   | 'order'
@@ -36,8 +34,9 @@ export type ProjectWorkflow = {
 export type ProjectSummary = {
   id: string;
   name: string;
+  parentId?: string | null;
   mtimeMs: number;
-  /** Sunucunun seçtiği küçük resim: videodaki görsel, yoksa master, yoksa referans. */
+  /** Sunucunun seçtiği küçük resim: videodaki görsel, yoksa resimler/ altındaki ilk görsel. */
   thumbnailUrl?: string | null;
   step?: ProjectStep;
   workflow?: ProjectWorkflow;
@@ -66,7 +65,12 @@ export type VideoSettings = {
 export type ProjectJsonState = {
   ok?: boolean;
   data?: {
-    ambient?: string | string[];
+    /** core/ambient-plan.js üç şekli de kabul ediyor. */
+    ambient?:
+      | string
+      | string[]
+      | { mode?: AmbientMode; crossfade?: number; volumeDb?: number;
+          tracks?: (string | { path: string; volumeDb?: number })[] };
     video?: VideoSettings;
     music?: {
       concept?: string;
@@ -79,10 +83,8 @@ export type ProjectJsonState = {
       dir?: string;
       name?: string;
     };
-    style?: string;
     order?: string[];
     workflow?: {
-      angles?: { wanted: boolean; count?: number };
       order?: TrackOrderMode;
     };
   };
@@ -100,13 +102,6 @@ export type MusicTrack = {
 };
 
 export type ProjectReadiness = {
-  /** Müzik stili; seçilmediyse null. */
-  style: {
-    name: string | null;
-  };
-  master: {
-    ready: boolean;
-  };
   clip: {
     ready: boolean;
     selected: string | null;
@@ -150,14 +145,13 @@ export type OutputInfo = OutputFileInfo & {
 export type ProjectDetail = {
   id: string;
   name: string;
+  parentId?: string | null;
   dir?: string;
-  promptsPath?: string;
   projectJson?: ProjectJsonState;
-  style?: string | null;
-  master?: string | null;
-  angles?: string[];
-  /** 'image': tüm video boyunca tek resim; clips o zaman MASTER + açı görselleri. */
+  /** 'image': tüm video boyunca tek resim; clips o zaman resimler/ altındaki görseller. */
   videoSource?: VideoSource;
+  /** Her modun aday sayısı — kaynak değiştirme kutusu bunu gösterir. */
+  videoSourceCandidates?: Record<VideoSource, { count: number; dir: string }>;
   clips?: string[];
   clip?: ProjectFileEvidence;
   audioDir?: string;
@@ -166,11 +160,6 @@ export type ProjectDetail = {
   step?: ProjectStep;
   workflow?: ProjectWorkflow;
   readiness?: ProjectReadiness;
-};
-
-/** Kopyalanacak kamera açısı promptları. */
-export type ProjectPrompts = {
-  angles: Array<{ title: string; prompt: string }>;
 };
 
 export type ProjectMusicAudio = {
@@ -192,64 +181,190 @@ export type ProjectMusicInfo = {
 /** 8. adım sıralama yöntemi — project.json workflow.order. */
 export type TrackOrderMode = 'alphabetical' | 'added' | 'manual';
 
-export type ImageSlot = 'master' | 'angle';
-
-export type MasterFrameInfo = {
-  ready: boolean;
-  file: string | null;
-  previewUrl: string | null;
-  folder: string;
-  expectedName: string;
-  acceptedExtensions: string[];
-};
-
-/** Müzik profili — sunucudaki prep/styles.js MUSIC_FIELDS; her alan metin ya da metin listesi. */
-export type StyleMusic = {
-  genre?: string | string[];
-  production?: string | string[];
-  instruments?: string | string[];
-  aesthetic?: string | string[];
-  exclude?: string | string[];
-};
-
-/** Müzik stili (GET /api/library, /api/styles). */
-export type BackendStyle = {
-  name: string;
-  valid: boolean;
-  music?: StyleMusic | null;
-  hasMusicProfile?: boolean;
-  suggestedAmbient?: string | null;
-  problems?: string[];
-  warnings?: string[];
-};
-
-/** POST/PUT /api/styles gövdesi; music: null profili siler, boş suggestedAmbient öneriyi siler. */
-export type StylePayload = {
-  name?: string;
-  music?: StyleMusic | null;
-  suggestedAmbient?: string;
-};
-
 export type BackendAmbient = {
   name: string;
 };
 
 export type LibraryResponse = {
-  styles: BackendStyle[];
   ambients: BackendAmbient[];
   ambientError?: string | null;
 };
 
+/** Çoklu Ambiance kullanım modu — core/ambient-plan.js AMBIENT_MODES aynası. */
+export type AmbientMode = 'layer' | 'sequence';
+
+/** Projede seçili bir Ambiance. */
+export type SelectedAmbient = {
+  name: string;
+  /** Bu parçaya özel ses ofseti (LU); null ise plan/proje varsayılanı. */
+  volumeDb: number | null;
+  /** Seçili ama ortak klasörde bulunamıyor (dosya taşınmış/silinmiş). */
+  missing: boolean;
+};
+
+/** GET/PUT /api/projects/:id/ambient yanıtı. */
+export type ProjectAmbient = {
+  /** Ortak ses efektleri klasörü — kullanıcıya nereye dosya atacağını söyler. */
+  dir: string;
+  available: BackendAmbient[];
+  /** Seçim sırası = katman/çalma sırası. */
+  selected: SelectedAmbient[];
+  mode: AmbientMode;
+  modes: AmbientMode[];
+  /** Döngü dikişinde harmanlanan saniye; 0 = harman yok. */
+  crossfade: number;
+  /** Bütün parçalar için ofset; null ise audio.ambientOffsetDb. */
+  volumeDb: number | null;
+  defaultVolumeDb: number;
+  /** Ortak klasör okunamadı. */
+  error?: string | null;
+  /** project.json'daki ambient alanı bozuksa açıklamalar. */
+  problems?: string[];
+};
+
+// ------------------------------------------------------------------ Pomodoro
+
+/** Hazır düzen — core/pomodoro-plan.js POMODORO_PRESETS aynası. */
+export type PomodoroPreset = {
+  id: string;
+  workMinutes: number;
+  breakMinutes: number;
+};
+
+/** project.json'daki normalize edilmiş Pomodoro ayarı. */
+export type PomodoroSettings = {
+  workMinutes: number;
+  breakMinutes: number;
+  rounds: number;
+  /** Değerler bir hazır düzene denk geliyorsa onun kimliği. */
+  preset: string | null;
+  countdownSeconds: number;
+  countdownBeep: boolean;
+  workStartSound: boolean;
+  breakStartSound: boolean;
+  /** Fazla müziğin kırpılması kullanıcı tarafından onaylandı mı. */
+  trimExcess: boolean;
+  cue: {
+    volumeDb: number;
+    beepFile: string | null;
+    workStartFile: string | null;
+    breakStartFile: string | null;
+  };
+};
+
+/** Bir WORK ya da BREAK oturumu. */
+export type PomodoroSession = {
+  index: number;
+  kind: 'work' | 'break';
+  round: number;
+  /** "WORK 01" / "BREAK 03". */
+  label: string;
+  startSeconds: number;
+  endSeconds: number;
+  durationSeconds: number;
+};
+
+/** Müzik toplamı ile timeline'ın karşılaştırması. */
+export type PomodoroComparison = {
+  status: 'exact' | 'excess' | 'short';
+  ok: boolean;
+  musicSeconds: number;
+  timelineSeconds: number;
+  excessSeconds: number;
+  shortSeconds: number;
+};
+
+/** Fazla müziğin nasıl kırpılacağı — orijinal dosyalara dokunulmaz. */
+export type PomodoroTrim = {
+  tracks: {
+    index: number;
+    path: string;
+    duration: number;
+    usedDuration: number;
+    startSeconds: number;
+    trimmed: boolean;
+    dropped: boolean;
+  }[];
+  usedSeconds: number;
+  trimmedSeconds: number;
+  droppedCount: number;
+  trimmedCount: number;
+};
+
+/** GET/PUT /api/projects/:id/pomodoro yanıtı. */
+export type ProjectPomodoro = {
+  enabled: boolean;
+  presets: PomodoroPreset[];
+  defaults: Omit<PomodoroSettings, 'preset'> & { enabled: boolean };
+  /** Kapalıyken null. */
+  settings: PomodoroSettings | null;
+  /** project.json'daki pomodoro bloğu bozuksa açıklamalar. */
+  problems: string[];
+  music: {
+    trackCount: number;
+    totalSeconds: number;
+    unmeasuredCount: number;
+  };
+  /** MONTAJ ÖNCESİ doğrulama — `ok: false` ise montaj başlatılmaz. */
+  validation: {
+    ok: boolean;
+    /** Kullanıcıya gösterilecek hazır metin (timeline / müzik / fazla-eksik). */
+    message: string | null;
+    problems: string[];
+    warnings: string[];
+    needsTrimConfirmation: boolean;
+    comparison: PomodoroComparison | null;
+    trim: PomodoroTrim | null;
+    timeline: { sessions: PomodoroSession[]; totalSeconds: number; totalMinutes: number } | null;
+    cueCount: number;
+  };
+};
+
+/** PUT /api/projects/:id/pomodoro gövdesi. `enabled: false` ayarı kaldırır. */
+export type UpdatePomodoroPayload = {
+  enabled: boolean;
+  preset?: string;
+  workMinutes?: number;
+  breakMinutes?: number;
+  rounds?: number;
+  countdownSeconds?: number;
+  countdownBeep?: boolean;
+  workStartSound?: boolean;
+  breakStartSound?: boolean;
+  trimExcess?: boolean;
+};
+
+/** PUT /api/projects/:id/ambient gövdesi. */
+export type UpdateAmbientPayload = {
+  tracks: (string | { name: string; volumeDb?: number | null })[];
+  mode?: AmbientMode;
+  crossfade?: number;
+  volumeDb?: number;
+};
+
 export type VideoSource = 'clip' | 'image';
+
+/** PUT /video-source yanıtı: güncel proje + ne değiştiği. */
+export type VideoSourceChange = {
+  source: VideoSource;
+  previous: VideoSource;
+  changed: boolean;
+  /** Yeni moda uymadığı için boşaltılan klip/görsel; boşaltılmadıysa null. */
+  clearedClip: string | null;
+  warnings: string[];
+};
+
+export type VideoSourceResponse = ProjectDetail & { videoSourceChange: VideoSourceChange };
 
 export type CreateProjectPayload = {
   name: string;
-  /** Müzik stili, isteğe bağlı. */
-  style?: string;
   ambient?: string[];
   videoSource?: VideoSource;
   concept?: string;
   totalTracks?: number;
+  parentId?: string;
+  selectedTracks?: string[];
+  aspect?: string;
 };
 
 export type CreateProjectResponse = {
@@ -276,9 +391,8 @@ export type Route =
   | { name: 'dashboard' }
   | { name: 'newProject' }
   | { name: 'project'; id: string }
-  | { name: 'music' }
-  | { name: 'styles' }
   | { name: 'ambient' }
+  | { name: 'prompts' }
   | { name: 'settings' };
 
 export type Navigate = (path: string) => void;
@@ -334,3 +448,31 @@ export type SunoIngestResponse = {
 };
 
 
+
+/** Prompt kütüphanesi etiketi — hangi aşamada işe yaradığı. */
+export type PromptTag = 'general' | 'image' | 'music' | 'video';
+
+/** Kullanıcının kütüphaneye kaydettiği bir prompt. */
+export type LibraryPrompt = {
+  id: string;
+  title: string;
+  text: string;
+  note: string | null;
+  tags: PromptTag[];
+  updatedAt: string | null;
+  /** Dosya elle bozulmuşsa doldurulur; kart salt okunur gösterilir. */
+  error?: string;
+};
+
+export type PromptLibraryResponse = {
+  prompts: LibraryPrompt[];
+  tags: PromptTag[];
+  limits: { title: number; text: number; note: number };
+};
+
+export type PromptPayload = {
+  title?: string;
+  text?: string;
+  note?: string | null;
+  tags?: PromptTag[];
+};

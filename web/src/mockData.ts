@@ -7,8 +7,6 @@ export type LibraryAmbient = {
   id: string;
   name: string;
   category: string;
-  isLocalDraft?: boolean;
-  fileName?: string;
 };
 
 export const sampleAmbients: LibraryAmbient[] = [

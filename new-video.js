@@ -2,13 +2,13 @@
 /**
  * Aşama 7a — yeni video projesi.
  *
- *   node new-video.js "<isim>" [--style <ad>] [--ambient <ad>] [--video-source clip|image]
+ *   node new-video.js "<isim>" [--ambient <ad>] [--video-source clip|image]
  *                     [--videos-dir <yol>] [--ambient-dir <yol>]
  *
  * videolar/<isim>/ altına audio/, resimler/, videolar/ + project.json (clip
- * boş), prompts.md (kamera açısı promptları). Stil isteğe bağlı bir müzik
- * profilidir; görseller elle üretilir. Önce her şey doğrulanır, sonra
- * yazılır; klasör zaten varsa hiçbir şeye dokunulmaz.
+ * boş). Stil isteğe bağlı bir müzik profilidir; görseller elle üretilir.
+ * Önce her şey doğrulanır, sonra yazılır; klasör zaten varsa hiçbir şeye
+ * dokunulmaz.
  */
 
 import { resolve } from 'node:path';
@@ -17,11 +17,9 @@ import { parseArgs } from 'node:util';
 
 import { VIDEO_SOURCES } from './core/config.js';
 import { AmbientError, DEFAULT_AMBIENT_DIR, findAmbient, listAmbients } from './prep/ambients.js';
-import { PromptError, loadTemplates } from './prep/prompts.js';
 import {
   DEFAULT_VIDEOS_DIR, ProjectExistsError, planProjectAsync, validateVideoName, writeProject,
 } from './prep/scaffold.js';
-import { STYLES_DIR, StyleError, loadStyle } from './prep/styles.js';
 
 export class NewVideoError extends Error {
   /** @param {string[]} problems */
@@ -37,16 +35,13 @@ export class NewVideoError extends Error {
  *
  * @param {{
  *   videoName: string,
- *   styleName?: string,
  *   ambientName?: string|string[],
  *   videoSource?: 'clip'|'image',
  *   videosDir?: string,
  *   ambientDir?: string,
- *   stylesDir?: string,
- *   promptsDir?: string,
  *   concept?: string,
  *   totalTracks?: number,
- * }} input styleName: müzik stili, isteğe bağlı
+ * }} input
  * @returns {Promise<{
  *   dir: string,
  *   files: string[],
@@ -57,15 +52,14 @@ export class NewVideoError extends Error {
  */
 export async function runNewVideo({
   videoName,
-  styleName,
   ambientName,
   videoSource = 'clip',
   videosDir = DEFAULT_VIDEOS_DIR,
   ambientDir = DEFAULT_AMBIENT_DIR,
-  stylesDir = STYLES_DIR,
-  promptsDir,
   concept,
   totalTracks,
+  parentId,
+  aspect = '16:9',
 }) {
   const problems = validateVideoName(videoName);
   const warnings = [];
@@ -80,18 +74,6 @@ export async function runNewVideo({
     if (!(error instanceof AmbientError)) throw error;
     if (ambientName !== undefined) problems.push(error.message);
     else warnings.push(`${error.message} — önerilen ambient denetlenmedi`);
-  }
-
-  let style = null;
-  if (styleName !== undefined) {
-    try {
-      const loaded = await loadStyle(styleName, { dir: stylesDir, ambients: ambients ?? undefined });
-      style = loaded.style;
-      warnings.push(...loaded.warnings);
-    } catch (error) {
-      if (!(error instanceof StyleError)) throw error;
-      problems.push(...error.problems.map((p) => `stil "${styleName}": ${p}`));
-    }
   }
 
   let ambient = null;
@@ -111,53 +93,36 @@ export async function runNewVideo({
     }
   }
 
-  let templates = null;
-  try {
-    templates = await loadTemplates({ dir: promptsDir });
-  } catch (error) {
-    if (!(error instanceof PromptError)) throw error;
-    problems.push(...error.problems);
-  }
-
   if (problems.length > 0) throw new NewVideoError(problems);
 
-  let plan;
-  try {
-    plan = await planProjectAsync({ videosDir, videoName, style, ambient, templates, concept, totalTracks, videoSource });
-  } catch (error) {
-    if (!(error instanceof PromptError)) throw error;
-    throw new NewVideoError(error.problems);
-  }
+  const plan = await planProjectAsync({
+    videosDir, videoName, ambient, concept, totalTracks, videoSource, parentId, aspect,
+  });
   await writeProject(plan);
 
-  const suggested = style?.suggestedAmbient;
   return {
     dir: plan.dir,
     files: plan.files.map((f) => f.path),
     warnings,
     ambient,
-    suggestion: ambient || !suggested ? null : {
-      name: suggested,
-      ambient: ambients ? findAmbient(ambients, suggested) : null,
-    },
+    // Ambiance önerisi stil dosyasından geliyordu; stil kavramı kaldırıldı.
+    suggestion: null,
   };
 }
 
 // ---------------------------------------------------------------- CLI
 
 const USAGE = `Kullanım:
-  node new-video.js "<isim>" [--style <ad>] [--ambient <ad>] [--video-source clip|image]
+  node new-video.js "<isim>" [--ambient <ad>] [--video-source clip|image]
                     [--concept <metin>] [--total-tracks <sayı>]
 
   <isim>               videolar klasöründe açılacak proje (boşluk varsa tırnak içinde)
-  --style <ad>         styles/ içindeki müzik stili — verilmezse varsayılan lofi profili
   --ambient <ad>       ortak ses efekti (ör. heavyRain) — verilmezse project.json'da ambient olmaz
   --video-source <tür> clip: döngü video (.mp4, varsayılan) · image: tüm video boyunca tek resim
   --concept <metin>    albüm konsepti (ör. "2:17 AM — Everyone Is Asleep")
   --total-tracks <n>   üretilecek müzik parça sayısı (varsayılan: 17)
   --videos-dir <yol>   videolar kökü (varsayılan: ${DEFAULT_VIDEOS_DIR})
   --ambient-dir <yol>  ambient klasörü (varsayılan: ${DEFAULT_AMBIENT_DIR})
-  --styles-dir <yol>   stil klasörü (varsayılan: repodaki styles/)
   -h, --help           bu metin`;
 
 /** @param {string[]} argv */
@@ -167,14 +132,12 @@ export function parseCli(argv) {
     strict: true,
     allowPositionals: true,
     options: {
-      style: { type: 'string' },
       ambient: { type: 'string' },
       'video-source': { type: 'string' },
       concept: { type: 'string' },
       'total-tracks': { type: 'string' },
       'videos-dir': { type: 'string' },
       'ambient-dir': { type: 'string' },
-      'styles-dir': { type: 'string' },
       help: { type: 'boolean', short: 'h', default: false },
     },
   });
@@ -189,14 +152,12 @@ export function parseCli(argv) {
   return {
     help: values.help,
     videoName: positionals[0],
-    styleName: values.style,
     ambientName: values.ambient,
     videoSource: values['video-source'],
     concept: values.concept,
     totalTracks: values['total-tracks'] ? parseInt(values['total-tracks'], 10) : undefined,
     videosDir: values['videos-dir'],
     ambientDir: values['ambient-dir'],
-    stylesDir: values['styles-dir'],
   };
 }
 
@@ -205,7 +166,7 @@ function describeResult(result) {
   const lines = [
     `Proje oluşturuldu: ${result.dir}`,
     '  audio\\  resimler\\  videolar\\',
-    '  project.json · prompts.md',
+    '  project.json',
   ];
 
   if (result.warnings.length > 0) {
@@ -222,10 +183,9 @@ function describeResult(result) {
   lines.push(
     '',
     'Sıradaki adımlar:',
-    '  1. Master görselini resimler\\MASTER.png olarak koy (açı promptları: prompts.md)',
-    '  2. Klibi videolar\\ altına koy (tek resim modunda gerekmez)',
-    '  3. Suno parçalarını audio\\ altına koy',
-    `  4. node build.js --project "${resolve(result.dir, 'project.json')}"`,
+    '  1. Klibi videolar\\ altına koy (tek resim modunda resimler\\ altına bir görsel)',
+    '  2. Suno parçalarını audio\\ altına koy',
+    `  3. node build.js --project "${resolve(result.dir, 'project.json')}"`,
   );
   return lines.join('\n');
 }
@@ -257,14 +217,12 @@ export async function main(argv) {
   try {
     const result = await runNewVideo({
       videoName: cli.videoName,
-      styleName: cli.styleName,
       ambientName: cli.ambientName,
       videoSource: cli.videoSource,
       concept: cli.concept,
       totalTracks: cli.totalTracks,
       videosDir: cli.videosDir,
       ambientDir: cli.ambientDir,
-      stylesDir: cli.stylesDir,
     });
     console.log(describeResult(result));
     return 0;

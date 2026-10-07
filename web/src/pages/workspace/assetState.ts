@@ -12,11 +12,6 @@ export function fileName(path?: string | null) {
   return path.split(/[\\/]/).pop() || path;
 }
 
-/** Projenin müzik stili; seçilmediyse null. */
-export function styleName(project: ProjectDetail) {
-  return project.style ?? project.projectJson?.data?.style ?? null;
-}
-
 export function musicTracks(project: ProjectDetail): MusicTrack[] {
   const tracks = project.projectJson?.data?.music?.tracks;
   return Array.isArray(tracks) ? tracks : [];
@@ -29,7 +24,7 @@ export function ambientFiles(project: ProjectDetail): string[] {
 }
 
 export type ProjectAssets = Record<
-  'master' | 'clip' | 'music' | 'ambient' | 'assembly' | 'output',
+  'clip' | 'music' | 'ambient' | 'assembly' | 'output',
   AssetStatus
 >;
 
@@ -41,7 +36,6 @@ export function deriveAssets(project: ProjectDetail): ProjectAssets {
 
   if (readiness) {
     return {
-      master: readiness.master.ready ? 'ready' : 'missing',
       clip: readiness.clip.ready ? 'ready' : (readiness.clip.selected || clipCount > 0 ? 'waiting' : 'missing'),
       music: readiness.music.ready ? 'ready' : (readiness.music.audioCount > 0 || readiness.music.completedTrackCount > 0 ? 'waiting' : 'missing'),
       ambient: ambientCount > 0 ? 'ready' : 'optional',
@@ -51,7 +45,6 @@ export function deriveAssets(project: ProjectDetail): ProjectAssets {
   }
 
   return {
-    master: project.master ? 'ready' : 'missing',
     clip: project.clip?.exists ? 'ready' : !project.clip?.value && clipCount > 0 ? 'waiting' : 'missing',
     music: musicStatus(project),
     ambient: ambientCount > 0 ? 'ready' : 'optional',

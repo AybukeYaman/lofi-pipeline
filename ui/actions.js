@@ -5,22 +5,23 @@ import { basename, extname, join } from 'node:path';
 import { moveFile, resolveDownloadsDir } from '../core/downloads.js';
 import { AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, listFiles, uniqueFileName } from '../core/files.js';
 import {
+  POMODORO_PRESETS, formatClock, normalizePomodoroSelection, validatePomodoro,
+} from '../core/pomodoro-plan.js';
+import { probe } from '../core/probe.js';
+import {
   DOWNLOAD_AUDIO_EXTENSIONS, DOWNLOAD_VIDEO_EXTENSIONS,
   RECENT_WINDOW_MINUTES, cleanDownloadName, createDownloadWatcher,
 } from '../prep/download-watch.js';
 import { AmbientError, listAmbients } from '../prep/ambients.js';
 import {
   ProjectFileError, completeMusicByUser, cropForWatermark, recordAudioAdded, setProjectClip, setProjectCropBottom,
-  setProjectField,
+  setProjectField, setProjectPomodoro, setVideoSource, videoSourceForClip,
 } from '../prep/project-file.js';
 import {
   WORKFLOW_STEPS, audioAddedOrder, inspectProject, isMusicCompleted, listProjects, nextStep,
+  orderedAudioTracks,
 } from '../prep/project-status.js';
-import { getAnglePrompts } from '../prep/prompts.js';
 import { validateVideoName } from '../prep/scaffold.js';
-import {
-  StyleError, hasMusicProfile, listStyles, loadStyle,
-} from '../prep/styles.js';
 import { ingestSunoUrl, sanitizeFilename } from '../prep/suno-ingest.js';
 import { SunoIngestError } from '../prep/suno-errors.js';
 
@@ -187,27 +188,11 @@ export async function newProject(ctx) {
     for (const problem of problems) prompter.print(`  - ${problem}`);
   }
 
-  const items = [{ label: '— Varsayılan (lofi profili, stil yok)', value: 'none' }];
-  for (const styleName of await listStyles({ dir: ctx.stylesDir })) {
-    try {
-      const { style } = await loadStyle(styleName, { dir: ctx.stylesDir });
-      items.push({ label: `${styleName} — müzik profili ${hasMusicProfile(style) ? 'var' : 'boş'}`, value: style });
-    } catch (error) {
-      if (!(error instanceof StyleError)) throw error;
-      items.push({ label: `${styleName} (geçersiz stil dosyası)`, value: null, disabled: true });
-    }
-  }
-  const choice = await prompter.choose('Music Style:', items, { zeroLabel: 'Geri' });
-  if (!choice) return false;
-  const style = choice === 'none' ? null : choice;
-
   const ambients = await ambientsOrEmpty(ctx);
-  const suggestedName = style?.suggestedAmbient?.toLowerCase();
-  const suggested = suggestedName ? ambients.find((a) => a.name.toLowerCase() === suggestedName) : undefined;
-  const ordered = suggested ? [suggested, ...ambients.filter((a) => a !== suggested)] : ambients;
+  const ordered = ambients;
   const selectedAmbients = await prompter.chooseMany(
-    `Select Ambient (${suggested ? `stilin önerisi: ${suggested.name}; ` : ''}Boşluk ile çoklu seç):`,
-    ordered.map((a) => ({ label: a === suggested ? `${a.name} (öneri)` : a.name, value: a.name })),
+    'Select Ambient (Boşluk ile çoklu seç):',
+    ordered.map((a) => ({ label: a.name, value: a.name })),
     { zeroLabel: 'Ambient yok' },
   );
 
@@ -248,11 +233,10 @@ export async function newProject(ctx) {
 
   const code = await ctx.run('new-video.js', [
     name,
-    ...(style ? ['--style', style.name] : []),
     ...(ambientArg ? ['--ambient', ambientArg] : []),
     '--concept', concept,
     '--total-tracks', String(totalTracks),
-    '--videos-dir', ctx.videosDir, '--ambient-dir', ctx.ambientDir, '--styles-dir', ctx.stylesDir,
+    '--videos-dir', ctx.videosDir, '--ambient-dir', ctx.ambientDir,
   ]);
   if (code !== 0) {
     prompter.print(`Proje oluşturulamadı (çıkış kodu ${code}).`);
@@ -284,124 +268,10 @@ export async function newProject(ctx) {
 }
 
 /**
- * 2. Adım: Master görseli — elle üretilir, resimler/MASTER.png olarak konur.
- */
-export async function stepMasterFrame(ctx, dir, status, { pollMs = 50 } = {}) {
-  const { prompter } = ctx;
-  const imgDir = join(dir, 'resimler');
-
-  let folderOpen = false;
-  for (;;) {
-    const cur = await inspectProject(dir);
-    if (cur.master) {
-      ctx.store?.set({ watchNotice: null });
-      prompter.print('\x1b[32m[✓ Master Görseli Algılandı]\x1b[0m resimler/MASTER.png — Otomatik devam ediliyor...');
-      return true;
-    }
-
-    ctx.store?.set({
-      watchNotice: {
-        asset: 'Master Image',
-        description: 'Ürettiğin ana görsel — video bu görselden (ya da ondan üretilen klipten) oluşur.',
-        folder: 'resimler/',
-        expected: 'MASTER.png',
-        folderOpen,
-      },
-    });
-
-    const choice = await prompter.choose('MASTER FRAME READY — Ne yapmak istersiniz?', [
-      { label: '📂 [ Klasörü Aç ] - Resim Klasörünü Windows\'ta Aç', value: 'open' },
-      { label: '🔄 [ Yenile ] - Klasörü Yeniden Tara', value: 'refresh' },
-      { label: '⏳ [ Auto Watch ] - Otomatik Dosya Bekle', value: 'watch' },
-      { label: '🏠 Ana Menüye Dön', value: 'menu' },
-    ]);
-
-    if (!choice || choice === 'menu') {
-      ctx.store?.set({ watchNotice: null });
-      return 'menu';
-    }
-
-    if (choice === 'open') {
-      (ctx.openFolderFn ?? openFolder)(imgDir);
-      folderOpen = true;
-      ctx.store?.set({ watchNotice: { file: 'resimler/MASTER.png', folderOpen: true } });
-      prompter.print('\x1b[32m[📂 Klasör Açıldı]\x1b[0m resimler/ klasörü Windows Explorer\'da açıldı.');
-    } else if (choice === 'refresh') {
-      const updated = await inspectProject(dir);
-      if (updated.master) {
-        ctx.store?.set({ watchNotice: null });
-        prompter.print('\x1b[32m[✓ Master Görseli Algılandı]\x1b[0m resimler/MASTER.png — Otomatik devam ediliyor...');
-        return true;
-      }
-      prompter.print('\x1b[33m[! Dosya Henüz Bulunamadı]\x1b[0m resimler/MASTER.png bekleniyor...');
-    } else if (choice === 'watch') {
-      const recentMinutes = await prompter.choose(
-        'Auto Watch — İndirilenler\'de ne kadar önce inmiş dosyalar da alınsın?',
-        RECENT_WINDOW_MINUTES.map((minutes) => ({ label: `Son ${minutes} dakika`, value: minutes })),
-        { zeroLabel: 'Geri' },
-      );
-      if (!recentMinutes) continue;
-      const { detected } = await autoWatchAsset(ctx, {
-        targetDir: imgDir,
-        extensions: IMAGE_EXTENSIONS,
-        nameFor: (src) => `MASTER${extname(src).toLowerCase()}`,
-        recentMinutes,
-        pollMs: ctx.downloadPollMs ?? pollMs,
-        label: 'resimler/MASTER.png',
-        folderLabel: 'resimler/',
-        detect: async () => (await inspectProject(dir)).master,
-      });
-      if (detected) {
-        ctx.store?.set({ watchNotice: null });
-        prompter.print('\x1b[32m[✓ Master Görseli Algılandı]\x1b[0m resimler/MASTER.png — Otomatik devam ediliyor...');
-        return true;
-      }
-    }
-  }
-}
-
-/**
- * 3. Adım: Kamera Açıları (Opsiyonel)
- */
-export async function stepCameraAngles(ctx, dir, status) {
-  const { prompter } = ctx;
-
-  prompter.print(renderStepBox(3, 'Kamera Açıları (Opsiyonel Varyantlar)', [
-    'Farklı kamera açıları (Geniş açı, yakın plan, farklı perspektifler) ister misiniz?',
-    '(Bu adım opsiyoneldir ve montajı asla engellemez.)',
-  ]));
-
-  const choice = await prompter.choose('Kamera Açıları — Ne yapmak istersiniz?', [
-    { label: '⏩ [ Hayır / Atla ] - Doğrudan Video Üretimine Geç', value: 'skip' },
-    { label: '📸 [ Evet ] - Hazır Açı Promptlarını Göster (Master1.jpg vb.)', value: 'view' },
-    { label: '🏠 Ana Menüye Dön', value: 'menu' },
-  ]);
-
-  if (!choice || choice === 'menu') return 'menu';
-  if (choice === 'skip') return true;
-
-  if (choice === 'view') {
-    let anglePrompts = '';
-    try {
-      anglePrompts = await getAnglePrompts();
-    } catch {
-      anglePrompts = 'Kamera açısı promptları prompts.md dosyasında mevcuttur.';
-    }
-
-    prompter.print('\n\x1b[1;36m=== FAZ 2: KAMERA AÇI PROMPTLARI ===\x1b[0m\n' + anglePrompts);
-    copyToClipboard(anglePrompts);
-    prompter.print('\x1b[32m[✓ Açı promptları panoya kopyalandı!]\x1b[0m AI Studio\'da üretip resimler/Master1.jpg vb. olarak koyabilirsiniz.');
-
-    await prompter.choose('Açıları İnceledikten Sonra:', [
-      { label: '✓ [ Tamam, Video Üretimine Geç ]', value: 'next' },
-    ]);
-    return true;
-  }
-  return true;
-}
-
-/**
- * 4. Adım: Video — elle üretilen döngü klibi videolar/ altına konur.
+ * 4. Adım: Video — kaynağa göre elle üretilen döngü klibi videolar/ altına,
+ * tek resim modunda ise görsel resimler/ altına konur. Kaynak burada
+ * değiştirilebilir: "resimden yapmıştım, videodan yapayım" kararı montajdan
+ * önceki her anda verilebilsin (switchVideoSource).
  */
 export async function stepMotionVideo(ctx, dir, status, { pollMs = 50 } = {}) {
   const { prompter } = ctx;
@@ -418,40 +288,65 @@ export async function stepMotionVideo(ctx, dir, status, { pollMs = 50 } = {}) {
       break;
     }
 
+    // Beklenen dosya moda göre değişir; tek resim modunda videolar\ beklemek
+    // kullanıcıyı sonsuza kadar bekletirdi.
+    const isStill = cur.videoSource === 'image';
+    const assetDir = isStill ? join(dir, 'resimler') : vidDir;
+    const assetLabel = isStill ? 'resimler/MASTER.png' : 'videolar/*.mp4';
+
     ctx.store?.set({
       watchNotice: {
-        asset: 'Looping Video Clip',
-        description: 'Ürettiğin döngüsel video klibi (.mp4).',
-        folder: 'videolar/',
-        expected: '*.mp4',
+        asset: isStill ? 'Still Image' : 'Looping Video Clip',
+        description: isStill
+          ? 'Video boyunca ekranda kalacak tek görsel.'
+          : 'Ürettiğin döngüsel video klibi (.mp4).',
+        folder: isStill ? 'resimler/' : 'videolar/',
+        expected: isStill ? 'MASTER.png' : '*.mp4',
         folderOpen,
       },
     });
 
-    const choice = await prompter.choose('CAMERA / VIDEO CLIP READY — Ne yapmak istersiniz?', [
-      { label: '📂 [ Klasörü Aç ] - Video Klasörünü Windows\'ta Aç', value: 'open' },
-      { label: '🔄 [ Yenile ] - Klasörü Yeniden Tara', value: 'refresh' },
-      { label: '⏳ [ Auto Watch ] - Otomatik Dosya Bekle', value: 'watch' },
-      { label: '🏠 Ana Menüye Dön', value: 'menu' },
-    ]);
+    const choice = await prompter.choose(
+      isStill ? 'STILL IMAGE READY — Ne yapmak istersiniz?' : 'CAMERA / VIDEO CLIP READY — Ne yapmak istersiniz?',
+      [
+        { label: '📂 [ Klasörü Aç ] - Kaynak Klasörünü Windows\'ta Aç', value: 'open' },
+        { label: '🔄 [ Yenile ] - Klasörü Yeniden Tara', value: 'refresh' },
+        { label: '⏳ [ Auto Watch ] - Otomatik Dosya Bekle', value: 'watch' },
+        {
+          label: isStill
+            ? '🔀 [ Kaynağı Değiştir ] - Tek resim yerine döngü videosu kullan'
+            : '🔀 [ Kaynağı Değiştir ] - Döngü videosu yerine tek resim kullan',
+          value: 'source',
+        },
+        { label: '🏠 Ana Menüye Dön', value: 'menu' },
+      ],
+    );
 
     if (!choice || choice === 'menu') {
       ctx.store?.set({ watchNotice: null });
       return 'menu';
     }
 
+    if (choice === 'source') {
+      ctx.store?.set({ watchNotice: null });
+      // Mod değişti: aday listesi de değişti, döngü baştan ölçsün.
+      await switchVideoSource(ctx, dir, isStill ? 'clip' : 'image');
+      folderOpen = false;
+      continue;
+    }
+
     if (choice === 'open') {
-      (ctx.openFolderFn ?? openFolder)(vidDir);
+      (ctx.openFolderFn ?? openFolder)(assetDir);
       folderOpen = true;
-      ctx.store?.set({ watchNotice: { file: 'videolar/*.mp4', folderOpen: true } });
-      prompter.print('\x1b[32m[📂 Klasör Açıldı]\x1b[0m videolar/ klasörü Windows Explorer\'da açıldı.');
+      ctx.store?.set({ watchNotice: { file: assetLabel, folderOpen: true } });
+      prompter.print(`\x1b[32m[📂 Klasör Açıldı]\x1b[0m ${basename(assetDir)}/ klasörü Windows Explorer'da açıldı.`);
     } else if (choice === 'refresh') {
       const updated = await inspectProject(dir);
       if (updated.clips.length > 0) {
         detectedClip = updated.clips[0];
         break;
       }
-      prompter.print('\x1b[33m[! Dosya Henüz Bulunamadı]\x1b[0m videolar/*.mp4 bekleniyor...');
+      prompter.print(`\x1b[33m[! Dosya Henüz Bulunamadı]\x1b[0m ${assetLabel} bekleniyor...`);
     } else if (choice === 'watch') {
       const recentMinutes = await prompter.choose(
         'Auto Watch — İndirilenler\'de ne kadar önce inmiş dosyalar da alınsın?',
@@ -460,13 +355,17 @@ export async function stepMotionVideo(ctx, dir, status, { pollMs = 50 } = {}) {
       );
       if (!recentMinutes) continue;
       const { detected } = await autoWatchAsset(ctx, {
-        targetDir: vidDir,
-        extensions: DOWNLOAD_VIDEO_EXTENSIONS,
-        nameFor: (src) => `${sanitizeFilename(cleanDownloadName(basename(src, extname(src))))}${extname(src).toLowerCase()}`,
+        targetDir: assetDir,
+        extensions: isStill ? IMAGE_EXTENSIONS : DOWNLOAD_VIDEO_EXTENSIONS,
+        // Tek resim modunda aday yalnızca MASTER/MasterN adlarıyla sayılır
+        // (prep/project-status.js MASTER_PATTERN), inen dosya öyle adlanır.
+        nameFor: (src) => (isStill
+          ? `MASTER${extname(src).toLowerCase()}`
+          : `${sanitizeFilename(cleanDownloadName(basename(src, extname(src))))}${extname(src).toLowerCase()}`),
         recentMinutes,
         pollMs: ctx.downloadPollMs ?? pollMs,
-        label: 'videolar/*.mp4',
-        folderLabel: 'videolar/',
+        label: assetLabel,
+        folderLabel: isStill ? 'resimler/' : 'videolar/',
         detect: async () => (await inspectProject(dir)).clips[0] ?? null,
       });
       if (detected) detectedClip = detected;
@@ -475,7 +374,16 @@ export async function stepMotionVideo(ctx, dir, status, { pollMs = 50 } = {}) {
 
   ctx.store?.set({ watchNotice: null });
   const writtenClip = await setProjectClip(status.projectPath, detectedClip);
-  prompter.print(`\x1b[32m[✓ Video Klip Algılandı & Bağlandı]\x1b[0m clip = ${writtenClip}`);
+  const boundStill = videoSourceForClip(detectedClip) === 'image';
+  prompter.print(
+    `\x1b[32m[✓ ${boundStill ? 'Görsel' : 'Video Klip'} Algılandı & Bağlandı]\x1b[0m clip = ${writtenClip}`,
+  );
+
+  // Watermark yalnızca üretilmiş videolarda sorun; görselde sorulacak bir şey yok.
+  if (boundStill) {
+    prompter.print('\x1b[32m[✓ Tek resim modu]\x1b[0m Watermark sorusu atlandı, otomatik devam ediliyor...');
+    return true;
+  }
 
   const wmChoice = await prompter.choose('WATERMARK CONTROL — Bu videoda watermark var mı?', [
     { label: ' [Hayır, watermark yok] - Alttan kırpma yapma', value: 'no' },
@@ -487,6 +395,65 @@ export async function stepMotionVideo(ctx, dir, status, { pollMs = 50 } = {}) {
 
   prompter.print('\x1b[32m[✓ Watermark Kararı Kaydedildi]\x1b[0m Otomatik devam ediliyor...');
   return true;
+}
+
+/**
+ * Görsel kaynağını değiştirir (`clip` ↔ `image`) — "resimden yapmıştım, videodan
+ * yapmak istiyorum".
+ *
+ * Seçili dosya yeni moda uymuyorsa setVideoSource onu boşaltır; kullanıcı
+ * uyarıları görsün diye burada tek tek basılır. Montaj çıktısı silinmez:
+ * build.js base.mp4'ü her çalışmada baştan üretir.
+ *
+ * @param {object} ctx
+ * @param {string} dir proje klasörü
+ * @param {'clip'|'image'} [target] verilmezse sorulur
+ * @returns {Promise<boolean>} yazıldı mı
+ */
+export async function switchVideoSource(ctx, dir, target = null) {
+  const { prompter } = ctx;
+  const status = await inspectProject(dir);
+  if (!status.projectJson.ok) {
+    prompter.print(`project.json okunamadı: ${status.projectJson.error}`);
+    return false;
+  }
+
+  const current = status.videoSource;
+  const candidates = status.videoSourceCandidates;
+  let next = target;
+
+  if (!next) {
+    const describe = (source) => {
+      const { count } = candidates[source];
+      const folder = source === 'image' ? 'resimler\\' : 'videolar\\';
+      return `${source === 'image' ? 'Tek resim' : 'Döngü videosu'} — ${folder} altında ${count} aday` +
+        (source === current ? ' (şu anki)' : '');
+    };
+    next = await prompter.choose('Görsel kaynağı:', [
+      { label: describe('clip'), value: 'clip' },
+      { label: describe('image'), value: 'image' },
+    ], { zeroLabel: 'Geri' });
+    if (!next) return false;
+  }
+
+  if (next === current) {
+    prompter.print(`Kaynak zaten "${current}" — değişiklik yapılmadı.`);
+    return false;
+  }
+
+  try {
+    const result = await setVideoSource(status.projectPath, next);
+    prompter.print(`\x1b[32m[✓ Kaynak Değişti]\x1b[0m video.source: ${result.previous} → ${result.source}`);
+    for (const warning of result.warnings) prompter.print(`\x1b[33m[!]\x1b[0m ${warning}`);
+    if (candidates[next].count === 0) {
+      prompter.print(`\x1b[33m[!]\x1b[0m ${candidates[next].dir} boş — dosyayı koyduktan sonra "Yenile" ile taranır.`);
+    }
+    return true;
+  } catch (error) {
+    if (!(error instanceof ProjectFileError)) throw error;
+    prompter.print(error.message);
+    return false;
+  }
 }
 
 /**
@@ -672,6 +639,7 @@ export async function stepMusic(ctx, dir, status, { pollMs = 50 } = {}) {
       { label: '📂 [ Klasörü Aç ] - Müzik Klasörünü Windows\'ta Aç', value: 'open' },
       { label: '🔄 [ Refresh ] - Klasörü Yeniden Tara', value: 'refresh' },
       { label: '⏳ [ Auto Watch ] - Default music (İndirilenler ve audio/ izlensin)', value: 'default' },
+      { label: '⏱ [ Pomodoro Modu ] - Çalışma/mola oturumları ve süre kontrolü', value: 'pomodoro' },
       { label: '🏠 Ana Menüye Dön', value: 'menu' },
     ]);
 
@@ -680,7 +648,11 @@ export async function stepMusic(ctx, dir, status, { pollMs = 50 } = {}) {
       return 'menu';
     }
 
-    if (musicSource === 'open') {
+    if (musicSource === 'pomodoro') {
+      // Pomodoro müzik adımında: kaç dakika parça gerektiği, parçalar
+      // eklenmeden önce bilinmeli.
+      await stepPomodoro(ctx, dir, status);
+    } else if (musicSource === 'open') {
       (ctx.openFolderFn ?? openFolder)(status.audioDir);
       folderOpen = true;
       ctx.store?.set({ watchNotice: { file: 'audio/*.mp3|m4a|wav', folderOpen: true } });
@@ -740,6 +712,138 @@ export async function stepMusic(ctx, dir, status, { pollMs = 50 } = {}) {
 }
 
 /**
+ * Projedeki Pomodoro durumu: ayar + MONTAJ ÖNCESİ doğrulama.
+ *
+ * Hesabın tamamı `core/pomodoro-plan.js`'te; burası yalnızca parçaları
+ * build'in çalacağı sırayla ölçüp o fonksiyona veriyor. Sıra kuralı
+ * `steps/02-audio-concat.js` ile aynı kaynaktan (`order` → matchOrder).
+ *
+ * @param {Awaited<ReturnType<typeof inspectProject>>} status
+ * @param {{ probeFn?: typeof probe }} [options]
+ */
+export async function inspectPomodoro(status, { probeFn = probe } = {}) {
+  const { plan, problems } = normalizePomodoroSelection(status.projectJson.data?.pomodoro);
+  const tracks = await orderedAudioTracks(status, { probeFn });
+
+  // Süreler ffprobe başlığından; build çözülen örnek sayısını kullanıyor
+  // (dosya başına 13-27 ms fark). Tolerans parça sayısıyla büyüyor ki panel
+  // "eksik" derken build "tam" demesin.
+  return {
+    ...validatePomodoro({ plan, tracks, tolerance: Math.max(1, tracks.length * 0.05) }),
+    settingsProblems: problems,
+  };
+}
+
+/** Panelde Pomodoro özetinin tek satırı. */
+function pomodoroLine(check) {
+  if (!check.enabled) return 'Pomodoro: kapalı';
+  const { plan, timeline } = check;
+  return (
+    `Pomodoro: ${plan.workMinutes}/${plan.breakMinutes} × ${plan.rounds} tur = ` +
+    `${formatClock(timeline.totalSeconds)} (${check.ok ? 'müzik uyuyor' : 'müzik uymuyor'})`
+  );
+}
+
+/**
+ * Pomodoro ayar ekranı — düzen, tur sayısı ve fazla müzik onayı.
+ *
+ * Web'deki `PomodoroPicker` ile aynı uçlara değil ama aynı domain
+ * fonksiyonlarına bağlı (`setProjectPomodoro` + `validatePomodoro`), bu yüzden
+ * iki arayüz hiçbir zaman farklı bir sonuç gösteremiyor.
+ *
+ * @returns {Promise<'menu'|true>}
+ */
+export async function stepPomodoro(ctx, dir, status, { probeFn = probe } = {}) {
+  const { prompter } = ctx;
+
+  for (;;) {
+    const current = await inspectProject(dir);
+    const check = await inspectPomodoro(current, { probeFn });
+
+    prompter.print(renderStepBox(0, 'Pomodoro Modu', [
+      pomodoroLine(check),
+      ...(check.enabled ? [check.message ?? ''] : [
+        'Kapalıyken video bugünkü gibi kurulur: müzik baştan sona düz akar.',
+      ]),
+      ...check.settingsProblems.map((problem) => `! ${problem}`),
+      ...check.problems.map((problem) => `! ${problem}`),
+      ...check.warnings.map((warning) => `i ${warning}`),
+    ]));
+
+    const choice = await prompter.choose('Pomodoro — Ne yapmak istersiniz?', [
+      { label: '⏹ [ KAPALI ] - Pomodoro kullanma (bugünkü düz akış)', value: 'off' },
+      ...POMODORO_PRESETS.map((preset) => ({
+        label: `⏱ [ ${preset.workMinutes} / ${preset.breakMinutes} ] - ${preset.workMinutes} dk çalışma + ${preset.breakMinutes} dk mola`,
+        value: `preset:${preset.id}`,
+      })),
+      ...(check.enabled ? [{ label: '🔁 [ Tur Sayısı ] - Kaç tur çalışsın', value: 'rounds' }] : []),
+      ...(check.needsTrimConfirmation
+        ? [{ label: '✂ [ Fazlayı Kırp ] - Fazla müziği timeline\'a sığdır (orijinal dosyalar değişmez)', value: 'trim' }]
+        : []),
+      { label: '← Geri', value: 'back' },
+    ]);
+
+    if (!choice || choice === 'back') return 'menu';
+
+    try {
+      if (choice === 'off') {
+        await setProjectPomodoro(current.projectPath, null);
+        prompter.print('\x1b[32m[✓ Pomodoro Kapatıldı]\x1b[0m Montaj bugünkü düz akışla çalışacak.');
+        return true;
+      }
+
+      if (choice === 'trim') {
+        await setProjectPomodoro(current.projectPath, { ...toSettings(check.plan), trimExcess: true });
+        prompter.print('\x1b[32m[✓ Kırpma Onaylandı]\x1b[0m Fazla süre yalnızca montajda kesilecek.');
+        continue;
+      }
+
+      if (choice === 'rounds') {
+        const rounds = await prompter.choose('Kaç tur?', [2, 4, 6, 8].map((n) => ({
+          label: `${n} tur — ${formatClock((check.plan.workMinutes + check.plan.breakMinutes) * 60 * n)}`,
+          value: n,
+        })), { zeroLabel: 'Geri' });
+        if (!rounds) continue;
+        // Tur değişince eski kırpma onayı taşınmaz: fazlanın miktarı değişti,
+        // kullanıcı yeni sayıyı görüp yeniden onaylasın.
+        await setProjectPomodoro(current.projectPath, { ...toSettings(check.plan), rounds, trimExcess: false });
+        continue;
+      }
+
+      const preset = POMODORO_PRESETS.find((p) => `preset:${p.id}` === choice);
+      await setProjectPomodoro(current.projectPath, {
+        ...(check.enabled ? toSettings(check.plan) : {}),
+        enabled: true,
+        preset: preset.id,
+        workMinutes: preset.workMinutes,
+        breakMinutes: preset.breakMinutes,
+        trimExcess: false,
+      });
+    } catch (error) {
+      if (!(error instanceof ProjectFileError)) throw error;
+      prompter.print(`\x1b[31m[! Pomodoro Ayarı Yazılamadı]\x1b[0m ${error.message}`);
+      return 'menu';
+    }
+  }
+}
+
+/** Plandan setProjectPomodoro'nun beklediği sade ayar nesnesi. */
+function toSettings(plan) {
+  return {
+    enabled: true,
+    workMinutes: plan.workMinutes,
+    breakMinutes: plan.breakMinutes,
+    rounds: plan.rounds,
+    countdownSeconds: plan.countdownSeconds,
+    countdownBeep: plan.countdownBeep,
+    workStartSound: plan.workStartSound,
+    breakStartSound: plan.breakStartSound,
+    trimExcess: plan.trimExcess,
+    cue: plan.cue,
+  };
+}
+
+/**
  * 6. Adım: Sıralama
  */
 export async function stepOrdering(ctx, dir, status) {
@@ -795,7 +899,7 @@ export async function stepOrdering(ctx, dir, status) {
 /**
  * 7. Adım: Montaj
  */
-export async function stepMontage(ctx, dir, status, { forceOverwrite = false } = {}) {
+export async function stepMontage(ctx, dir, status, { forceOverwrite = false, probeFn = probe } = {}) {
   const { prompter } = ctx;
   const overwrite = forceOverwrite || status.output.exists;
 
@@ -804,12 +908,29 @@ export async function stepMontage(ctx, dir, status, { forceOverwrite = false } =
     if (!confirmOverwrite) return false;
   }
 
+  // Pomodoro doğrulaması montajın ÖN KOŞULU: build.js da aynı denetimi
+  // yapıyor, ama kullanıcıyı boşuna başlayan bir montajla bekletmemek için
+  // burada duruyoruz.
+  const pomodoro = await inspectPomodoro(status, { probeFn });
+
   prompter.print(renderStepBox(7, 'Montaj (Build Automation)', [
     `Klip: ${status.clip.value || 'videolar/*.mp4'}`,
     `Parça Sayısı: ${status.audioCount} adet`,
     `Ambient: ${status.projectJson.data?.ambient || 'none'}`,
+    pomodoroLine(pomodoro),
     'Sistem: Watermark kırpma, ses birleştirme, ambient miksaj ve tracklist üretimini başlatıyor...',
   ]));
+
+  if (!pomodoro.ok) {
+    prompter.print(`\x1b[31m[! Pomodoro Doğrulaması Geçmedi]\x1b[0m\n${pomodoro.message}`);
+    for (const problem of pomodoro.problems) prompter.print(`  - ${problem}`);
+    const fix = await prompter.confirm('Pomodoro ayarlarını şimdi açayım mı?', { defaultValue: true });
+    if (fix) await stepPomodoro(ctx, dir, status);
+    return false;
+  }
+  for (const warning of pomodoro.warnings) {
+    prompter.print(`\x1b[33m[i]\x1b[0m ${warning}`);
+  }
 
   prompter.print('\n\x1b[33m[Montaj Başlatılıyor...]\x1b[0m build.js çalışıyor...');
   const code = await ctx.run('build.js', ['--project', status.projectPath, ...(overwrite ? ['--overwrite'] : [])]);
@@ -906,9 +1027,7 @@ export async function continueProject(ctx, targetDir = null, { pollMs = 50 } = {
       projectStatus: {
         name: status.name,
         dir: status.projectPath,
-        style: status.style ?? status.projectJson.data?.style ?? '-',
         ambient: status.projectJson.data?.ambient ?? 'none',
-        master: status.master,
         clip: status.clip,
         clips: status.clips,
         audioCount: status.audioCount,
@@ -919,13 +1038,6 @@ export async function continueProject(ctx, targetDir = null, { pollMs = 50 } = {
         currentStep: step.id,
       },
     });
-
-    // 2. ADIM: Master görseli
-    if (step.id === 'faz1') {
-      const res = await stepMasterFrame(ctx, dir, status, { pollMs });
-      if (res === 'menu' || res === false) return;
-      continue;
-    }
 
     // 5. ADIM: Müzik
     if (step.id === 'audio') {
@@ -1116,22 +1228,10 @@ export async function showStatus(ctx, dir) {
   ].join('\n'));
 }
 
-/** Ayarlar: müzik stilleri ve ambient'ler */
+/** Ayarlar: ortak Ambiance kütüphanesi */
 export async function showLibrary(ctx) {
-  const lines = ['Müzik stilleri:'];
-  for (const name of await listStyles({ dir: ctx.stylesDir })) {
-    try {
-      const { style } = await loadStyle(name, { dir: ctx.stylesDir });
-      const ambient = style.suggestedAmbient ? ` · ambient önerisi: ${style.suggestedAmbient}` : '';
-      lines.push(`  ${name} — müzik profili ${hasMusicProfile(style) ? 'var' : 'boş'}${ambient}`);
-    } catch (error) {
-      if (!(error instanceof StyleError)) throw error;
-      lines.push(`  ${name} (geçersiz: ${error.problems.length} problem)`);
-    }
-  }
   const ambients = await ambientsOrEmpty(ctx);
-  lines.push('', `Ambient'ler: ${ambients.map((a) => a.name).join(', ') || '(yok)'}`);
-  ctx.prompter.print(lines.join('\n'));
+  ctx.prompter.print(`Ambient'ler: ${ambients.map((a) => a.name).join(', ') || '(yok)'}`);
 }
 
 async function ambientsOrEmpty(ctx) {

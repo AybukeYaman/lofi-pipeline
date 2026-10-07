@@ -19,6 +19,7 @@ import { mkdir, readFile } from 'node:fs/promises';
 import { basename, dirname } from 'node:path';
 
 import { ffmpeg } from '../core/ffmpeg.js';
+import { PomodoroValidationError, validatePomodoro } from '../core/pomodoro-plan.js';
 import { listFiles, findDuplicates, matchOrder } from '../core/files.js';
 import { durationsMatch, measureDecodedDuration, probe } from '../core/probe.js';
 
@@ -49,6 +50,11 @@ const NOOP_LOGGER = { info() {}, warn() {} };
  * @param {string[]} [options.order] parça sırası (sade adlar, ör. "midnight-window");
  *   verilirse orderFile'dan önce gelir
  * @param {string} [options.orderFile] order.txt yolu (ikisi de yoksa alfabetik sıraya düşülür)
+ * @param {import('../core/pomodoro-plan.js').PomodoroPlan|null} [options.pomodoro]
+ *   Pomodoro planı (core/config.js çözer). Verilirse parçalar ÖLÇÜLDÜKTEN ama
+ *   birleştirilmeden ÖNCE timeline ile karşılaştırılır; uymuyorsa tek kare
+ *   encode edilmeden PomodoroValidationError atılır. null/undefined → mevcut
+ *   davranış, hiçbir denetim eklenmez.
  * @param {{ info: Function, warn: Function }} [options.logger]
  * @param {(seconds: number) => void} [options.onProgress]
  * @returns {Promise<object>} manifest
@@ -59,6 +65,7 @@ export async function concatAudio(options) {
     outputPath,
     order,
     orderFile,
+    pomodoro = null,
     logger = NOOP_LOGGER,
     onProgress,
   } = options;
@@ -118,6 +125,34 @@ export async function concatAudio(options) {
     return seconds;
   });
 
+  // 4b — Pomodoro doğrulaması: montajdan ÖNCE. Parçalar burada zaten ölçülmüş
+  // oluyor; karşılaştırma ve kırpma kararı tek kare encode edilmeden veriliyor.
+  // Pomodoro kapalıyken bu blok hiçbir şey yapmaz.
+  const validation = validatePomodoro({
+    plan: pomodoro,
+    tracks: probes.map((p, i) => ({ path: p.path, duration: decoded[i] })),
+  });
+  if (!validation.ok) throw new PomodoroValidationError(validation);
+  for (const message of validation.warnings) warn(message);
+
+  // Kırpma yalnızca bu plana göre uygulanır: orijinal dosyalara dokunulmaz,
+  // concat filtresinde `atrim` olarak yaşar (bkz. buildFilterArgs).
+  const segments = probes
+    .map((p, i) => ({
+      probe: p,
+      duration: decoded[i],
+      useDuration: validation.trim ? validation.trim.tracks[i].usedDuration : decoded[i],
+    }))
+    .filter((segment) => segment.useDuration > 0);
+
+  if (validation.trim) {
+    logger.info(
+      `Pomodoro kırpması: ${validation.trim.trimmedCount} parça kısaltıldı, ` +
+      `${validation.trim.droppedCount} parça kullanılmadı ` +
+      `(toplam ${validation.trim.trimmedSeconds.toFixed(1)} sn).`,
+    );
+  }
+
   const kinds = [...new Set(probes.map((p) => `${p.audioCodec}/${p.sampleRate}/${p.channels}`))];
   logger.info(
     `Girdiler: ${kinds.join(', ')} → concat filtresi, ${TARGET.codec}/${TARGET.sampleRate}/` +
@@ -126,11 +161,11 @@ export async function concatAudio(options) {
 
   // 5 — Birleştir
   await mkdir(dirname(outputPath), { recursive: true });
-  await ffmpeg(buildFilterArgs(probes, outputPath), { onProgress });
+  await ffmpeg(buildFilterArgs(segments, outputPath), { onProgress });
 
   // 6 — Doğrula (beklenen: çözülen sürelerin toplamı)
   const result = await probe(outputPath);
-  const expectedDuration = decoded.reduce((sum, d) => sum + d, 0);
+  const expectedDuration = segments.reduce((sum, segment) => sum + segment.useDuration, 0);
 
   if (!durationsMatch(result.duration, expectedDuration)) {
     throw new Error(
@@ -146,17 +181,20 @@ export async function concatAudio(options) {
 
   // 7 — Manifest (05-tracklist.js damgaları ve adları buradan üretir, dosyaları yeniden ölçmez)
   let elapsed = 0;
-  const tracks = probes.map((p, i) => {
+  const tracks = segments.map(({ probe: p, duration, useDuration }) => {
     const track = {
       file: p.path,
-      duration: decoded[i],
+      // Videoda gerçekten duyulan süre: kırpıldıysa kullanılan kadarı.
+      duration: useDuration,
+      sourceDuration: duration,
+      trimmed: useDuration < duration,
       probeDuration: p.duration,
       startSeconds: elapsed,
       codec: p.audioCodec,
       sampleRate: p.sampleRate,
       channels: p.channels,
     };
-    elapsed += decoded[i];
+    elapsed += useDuration;
     return track;
   });
 
@@ -174,6 +212,18 @@ export async function concatAudio(options) {
     tracks,
     duplicates,
     sortSource,
+    // Pomodoro kapalıyken `enabled: false` — rapor alanı her zaman var,
+    // böylece okuyan taraf iki ayrı şekille uğraşmıyor.
+    pomodoro: validation.enabled
+      ? {
+        enabled: true,
+        timeline: validation.timeline,
+        comparison: validation.comparison,
+        trim: validation.trim,
+        cues: validation.cues,
+        warnings: validation.warnings,
+      }
+      : { enabled: false },
     orderReport,
     codec: { action: 'encode', method: 'filter', inputs: kinds },
     warnings,
@@ -261,12 +311,16 @@ async function resolveOrder(paths, { order, orderFile }, warn) {
  * @param {number} index
  * @param {{ channels: number|null }} input
  */
-export function normalizeBranch(index, input) {
+export function normalizeBranch(index, input, trimEnd = null) {
   const layout = input.channels === 1
     ? 'pan=stereo|c0=c0|c1=c0,'
     : '';
+  // Pomodoro kırpması: parça yalnızca gereken yerine kadar çalınır. asetpts
+  // concat'in beklediği 0'dan başlayan damgayı geri verir (03'teki
+  // makeSeamlessLoop ile aynı kural).
+  const trim = trimEnd === null ? '' : `atrim=end=${trimEnd.toFixed(3)},asetpts=N/SR/TB,`;
   return (
-    `[${index}:a]aresample=${TARGET.sampleRate},${layout}` +
+    `[${index}:a]aresample=${TARGET.sampleRate},${trim}${layout}` +
     `aformat=sample_fmts=fltp:sample_rates=${TARGET.sampleRate}:channel_layouts=stereo[a${index}]`
   );
 }
@@ -305,17 +359,21 @@ async function mapLimited(items, limit, fn) {
  * concat filtresi argümanları: her girdi ayrı açılır (priming doğru atılır),
  * ortak biçime çekilir, tek geçişte float WAV'a yazılır.
  *
- * @param {Array<{ path: string, channels: number|null }>} inputs
+ * Kırpılan parça (`useDuration < duration`) dalına `atrim` girer; orijinal
+ * dosya değişmez, yalnızca bu çağrıda kullanılan segment kısalır.
+ *
+ * @param {Array<{ probe: { path: string, channels: number|null }, duration: number, useDuration: number }>} segments
  * @param {string} outputPath
  */
-function buildFilterArgs(inputs, outputPath) {
-  const branches = inputs.map((input, i) => normalizeBranch(i, input));
-  const labels = inputs.map((_, i) => `[a${i}]`).join('');
+function buildFilterArgs(segments, outputPath) {
+  const branches = segments.map(({ probe: input, duration, useDuration }, i) =>
+    normalizeBranch(i, input, useDuration < duration ? useDuration : null));
+  const labels = segments.map((_, i) => `[a${i}]`).join('');
 
   return [
-    ...inputs.flatMap((input) => ['-i', input.path]),
+    ...segments.flatMap(({ probe: input }) => ['-i', input.path]),
     '-filter_complex',
-    `${branches.join(';')};${labels}concat=n=${inputs.length}:v=0:a=1[out]`,
+    `${branches.join(';')};${labels}concat=n=${segments.length}:v=0:a=1[out]`,
     '-map', '[out]',
     '-vn',
     '-c:a', TARGET.codec,

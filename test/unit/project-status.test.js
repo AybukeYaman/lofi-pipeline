@@ -133,10 +133,10 @@ describe('nextStep — karar tablosu (sondan başa)', () => {
     assert.ok(step.detail.includes('döngü klibini videolar\\ altına'));
   });
 
-  test('taze proje → master görseli (elle, prompt yok)', () => {
+  // Master görseli adımı kaldırıldı: taze proje doğrudan klibe bakıyor.
+  test('taze proje → klip', () => {
     const fresh = nextStep(makeStatus());
-    assert.deepEqual([fresh.id, fresh.kind, fresh.skippable], ['faz1', 'manual', true]);
-    assert.ok(fresh.detail.includes('resimler\\MASTER.png olarak kaydet'));
+    assert.deepEqual([fresh.id, fresh.kind, fresh.skippable], ['faz3', 'manual', true]);
   });
 });
 
@@ -150,11 +150,11 @@ describe('nextStep — tek resim modu (video.source = image)', () => {
     assert.deepEqual([step.id, step.kind, step.title], ['clip', 'auto', 'Görseli seç']);
   });
 
-  test('aday yok ve faz1 atlanmış → görsel bekleniyor (faz3 değil)', () => {
-    const step = nextStep(makeStatus(still), { skipped: new Set(['faz1', 'faz3']) });
+  test('aday yok → görsel bekleniyor (faz3 değil)', () => {
+    const step = nextStep(makeStatus(still), { skipped: new Set(['faz3']) });
     assert.deepEqual([step.id, step.kind], ['clip', 'manual']);
-    assert.match(step.detail, /MASTER\.png/);
-    assert.equal(id(still, { skipped: new Set(['faz1']) }), 'clip');
+    assert.match(step.detail, /resimler/);
+    assert.equal(id(still), 'clip');
   });
 
   test('görsel hazır → müzik, sonra montaj', () => {
@@ -164,22 +164,22 @@ describe('nextStep — tek resim modu (video.source = image)', () => {
 });
 
 describe('nextStep — bu oturumda atlananlar', () => {
-  test('faz1 atlanınca faz3, faz1 ve faz3 atlanınca "klip bekleniyor" (atlanamaz)', () => {
-    assert.equal(id({}, { skipped: new Set(['faz1']) }), 'faz3');
-    const step = nextStep(makeStatus({}), { skipped: new Set(['faz1', 'faz3']) });
+  test('faz3 atlanınca "klip bekleniyor" (atlanamaz)', () => {
+    assert.equal(id({}), 'faz3');
+    const step = nextStep(makeStatus({}), { skipped: new Set(['faz3']) });
     assert.deepEqual([step.id, step.kind, step.skippable], ['clip', 'manual', false]);
   });
 
   test('kanıt gerektiren adımlar atlanmaz: audio atlandı sayılsa da yine audio', () => {
-    assert.equal(id({ clip: readyClip }, { skipped: new Set(['audio', 'faz1', 'faz3']) }), 'audio');
+    assert.equal(id({ clip: readyClip }, { skipped: new Set(['audio', 'faz3']) }), 'audio');
   });
 
-  test('yalnızca faz1 ve faz3 atlanabilir', () => {
-    assert.deepEqual(SKIPPABLE_STEPS, ['faz1', 'faz3']);
+  test('yalnızca faz3 atlanabilir', () => {
+    assert.deepEqual(SKIPPABLE_STEPS, ['faz3']);
   });
 });
 
-describe('canonicalWorkflow — 8 adımlı akış', () => {
+describe('canonicalWorkflow — 6 adımlı akış', () => {
   const master = 'X:\\videolar\\v\\resimler\\MASTER.png';
   const flow = (patch) => canonicalWorkflow(makeStatus({
     style: null, angles: [], ...patch,
@@ -188,25 +188,17 @@ describe('canonicalWorkflow — 8 adımlı akış', () => {
 
   test('ilk tamamlanmamış adım current; sonrakiler pending', () => {
     const wf = flow({});
-    assert.equal(wf.current, 'master');
-    assert.equal(wf.currentTitle, 'Master görseli');
-    assert.deepEqual(wf.steps.map((s) => s.id), ['project', 'master', 'angles', 'video', 'music', 'order', 'build', 'publish']);
+    assert.equal(wf.current, 'video');
+    assert.equal(wf.currentTitle, 'Video');
+    assert.deepEqual(wf.steps.map((s) => s.id), ['project', 'video', 'music', 'order', 'build', 'publish']);
     assert.deepEqual(wf.steps.map((s) => s.status), [
-      'done', 'current', 'pending', 'pending', 'pending', 'pending', 'pending', 'pending',
+      'done', 'current', 'pending', 'pending', 'pending', 'pending',
     ]);
-    assert.deepEqual(wf.steps.map((s) => s.number), [1, 2, 3, 4, 5, 6, 7, 8]);
+    assert.deepEqual(wf.steps.map((s) => s.number), [1, 2, 3, 4, 5, 6]);
   });
 
   test('bozuk project.json → proje adımı', () => {
     assert.equal(flow({ projectJson: { ok: false, data: null, error: 'x' } }).current, 'project');
-  });
-
-  test('açı kararı yoksa sorulur; istenen sayı tamamlanınca geçilir', () => {
-    assert.equal(flow({ master }).current, 'angles');
-    assert.equal(flow({ master, ...withData({ workflow: { angles: { wanted: false } } }) }).current, 'video');
-    const wanted = withData({ workflow: { angles: { wanted: true, count: 2 } } });
-    assert.equal(flow({ master, ...wanted, angles: ['a'] }).current, 'angles');
-    assert.equal(flow({ master, ...wanted, angles: ['a', 'b'] }).current, 'video');
   });
 
   test('video adımı klip + kırpma kaydı ister; müzik sonra sıralama', () => {
@@ -217,20 +209,17 @@ describe('canonicalWorkflow — 8 adımlı akış', () => {
     assert.equal(flow({ master, clip: readyClip, audioCount: 2, ...withData({ video, order: ['a'] }) }).current, 'build');
   });
 
-  test('tek resim: açı adımı atlanır, video adımı seçili görsel + kırpma kaydıyla tamam', () => {
+  test('tek resim: video adımı seçili görsel + kırpma kaydıyla tamam', () => {
     const image = { value: './resimler/MASTER.png', path: master, exists: true };
     const data = withData({ video: { source: 'image', cropBottom: 0 } });
     const wf = flow({ master, videoSource: 'image', ...data });
     assert.equal(wf.current, 'video');
-    assert.equal(wf.steps[2].status, 'done');
-    assert.equal(wf.steps[2].skipped, true);
     assert.equal(flow({ master, videoSource: 'image', clip: image, ...data }).current, 'music');
   });
 
-  test('çıktı varsa yayın; tüm adımlar tamam, açı adımı atlandı görünür', () => {
+  test('çıktı varsa yayın; tüm adımlar tamam', () => {
     const wf = flow({ output: { path: 'o', exists: true } });
     assert.equal(wf.current, 'publish');
-    assert.ok(wf.steps.slice(0, 7).every((s) => s.status === 'done'));
-    assert.equal(wf.steps[2].skipped, true);
+    assert.ok(wf.steps.slice(0, 5).every((s) => s.status === 'done'));
   });
 });

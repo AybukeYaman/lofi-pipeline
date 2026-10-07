@@ -34,10 +34,9 @@ describe('inspectProject — taze projeden montaja', () => {
   });
   after(() => root?.cleanup());
 
-  test('taze proje: faz1, yollar ve varsayılan çıktı', async () => {
+  test('taze proje: faz3, yollar ve varsayılan çıktı', async () => {
     const s = await inspectProject(dir);
     assert.equal(s.projectJson.ok, true);
-    assert.equal(s.master, null);
     assert.deepEqual(s.clips, []);
     assert.deepEqual(s.clip, { value: '', path: null, exists: false });
     assert.equal(s.audioDir, join(dir, 'audio'));
@@ -48,17 +47,15 @@ describe('inspectProject — taze projeden montaja', () => {
       tracklistPath: join(dir, 'out', 'tracklist.txt'),
       tracklistExists: false,
     });
-    assert.equal(s.promptsPath, join(dir, 'prompts.md'));
-    assert.equal(nextStep(s).id, 'faz1');
+    assert.equal(nextStep(s).id, 'faz3');
   });
 
-  test('açı varyantı MASTER sayılmaz; MASTER.PNG sayılır → faz3 (Video)', async () => {
+  test('resimler\ altındaki görseller aday listesine girer', async () => {
     await writeFile(join(dir, 'resimler', 'Master1.jpg'), '');
-    assert.equal(nextStep(await inspectProject(dir)).id, 'faz1');
+    assert.equal(nextStep(await inspectProject(dir)).id, 'faz3');
 
     await writeFile(join(dir, 'resimler', 'MASTER.PNG'), '');
     const s = await inspectProject(dir);
-    assert.equal(s.master, join(dir, 'resimler', 'MASTER.PNG'));
     assert.equal(nextStep(s).id, 'faz3');
   });
 
@@ -117,7 +114,7 @@ describe('listProjects', () => {
     const projects = await listProjects(videos);
     assert.deepEqual(projects.map((p) => p.name), ['yeni', 'eski']);
     assert.equal(projects[0].dir, join(videos, 'yeni'));
-    assert.equal(projects[0].step.id, 'faz1');
+    assert.equal(projects[0].step.id, 'faz3');
   });
 
   test('videolar kökü yoksa boş liste', async () => {
@@ -135,7 +132,7 @@ describe('inspectProject — kenar durumlar', () => {
     await mkdir(empty);
     let s = await inspectProject(empty);
     assert.deepEqual(s.projectJson, { ok: false, data: null, error: 'dosya yok' });
-    assert.deepEqual([s.clips, s.audioCount, s.master], [[], 0, null]);
+    assert.deepEqual([s.clips, s.audioCount], [[], 0]);
     assert.equal(nextStep(s).id, 'fix-project');
 
     await writeFile(join(empty, 'project.json'), '{ "clip": ');
@@ -157,7 +154,7 @@ describe('inspectProject — kenar durumlar', () => {
     assert.equal(s.audioCount, 1);
     assert.equal(s.output.path, join(dir, 'cikti', 'son.mp4'));
     assert.deepEqual(s.clip, { value: './yok.mp4', path: join(dir, 'yok.mp4'), exists: false });
-    assert.equal(nextStep(s).id, 'faz1');
+    assert.equal(nextStep(s).id, 'faz3');
     assert.ok(nextStep(s).detail.startsWith("clip'teki dosya bulunamadı"));
   });
 });
@@ -193,7 +190,7 @@ describe('tek resim modu — new-video\'dan montaj konfigine', () => {
     await writeFile(join(dir, 'resimler', 'MASTER.png'), '');
     let s = await inspectProject(dir);
     assert.deepEqual(s.clips, [join(dir, 'resimler', 'MASTER.png'), join(dir, 'resimler', 'Master2.jpg')]);
-    assert.equal(s.thumbnail, s.master);
+    assert.equal(s.thumbnail, s.clips[0]);
     assert.equal(nextStep(s).id, 'clip');
 
     await setProjectClip(s.projectPath, s.clips[1]);

@@ -70,7 +70,7 @@ describe('project.json', () => {
       assert.deepEqual(e.problems, [
         'clip: boş olmayan bir metin olmalı',
         'audioDir: boş olmayan bir metin olmalı',
-        'ambient: boş olmayan bir metin olmalı',
+        'ambient[0]: boş olmayan bir metin olmalı',
       ]) === undefined);
   });
 

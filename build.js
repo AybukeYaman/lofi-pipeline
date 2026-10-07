@@ -12,6 +12,7 @@
  *   2  02-audio-concat  parçalar → mix.wav, sonra disk kontrolü
  *   3  03-ambient-mix   (opsiyonel) ambient → mix'e karışır (yalnız ses; video bir kez yazılır)
  *   4  04-assemble      base × n + ses + fade → nihai video
+ *   5  06-pomodoro-cues (opsiyonel) countdown beep + oturum efektleri sese biner
  *   5  05-tracklist     damgalar
  *   6  çıktıları taşı, rapor yaz, workspace'i temizle
  *
@@ -27,12 +28,16 @@ import { parseArgs } from 'node:util';
 
 import { ConfigError, loadProject } from './core/config.js';
 import { abortAll } from './core/ffmpeg.js';
+import { PomodoroValidationError, describeTimeline } from './core/pomodoro-plan.js';
+import { AUDIO_EXTENSIONS, listFiles } from './core/files.js';
 import { createWorkspace, writeTextFile } from './core/workspace.js';
 import { CropNotConfirmedError, prepareVideo } from './steps/01-video-prep.js';
 import { concatAudio } from './steps/02-audio-concat.js';
 import { mixAmbient } from './steps/03-ambient-mix.js';
 import { assembleVideo } from './steps/04-assemble.js';
 import { writeTracklist } from './steps/05-tracklist.js';
+import { mixPomodoroCues } from './steps/06-pomodoro-cues.js';
+import { buildStreamPackage } from './steps/07-stream-package.js';
 
 /** Disk tahminine eklenen pay: ses, geçici wav'lar, tahmin hatası. */
 const DISK_MARGIN = { ratio: 1.1, bytes: 200 * 1024 * 1024 };
@@ -64,6 +69,9 @@ export class BuildCancelledError extends Error {
  *   onay gereken durumda CropNotConfirmedError
  * @param {(tag: string, seconds: number, total: number|null) => void} [options.onProgress]
  * @param {boolean} [options.overwrite]
+ * @param {boolean} [options.render] uzun videoyu da üret (varsayılan: yalnızca
+ *   yayın paketi). Render 24/7 yayın için gerekmiyor ve çıktının 30-60 katı yer
+ *   kaplıyor; VOD gerektiğinde açıkça istenir.
  * @param {boolean} [options.keep] workspace silinmez
  * @param {AbortSignal} [options.signal] adımlar arasında denetlenir
  * @param {(dir: string) => Promise<number>} [options.diskFree] klasörün bulunduğu
@@ -76,6 +84,7 @@ export async function runBuild(config, options = {}) {
     confirm,
     onProgress,
     overwrite = false,
+    render = false,
     keep = false,
     signal,
     diskFree = freeBytesOf,
@@ -88,7 +97,9 @@ export async function runBuild(config, options = {}) {
   for (const w of config.warnings) log.warn(w);
 
   // --- 0: çıktı çakışması (hiçbir şey üretmeden)
-  const targets = [config.output.video, config.output.tracklist];
+  // Yalnızca render edilen çıktılar çakışabilir; yayın paketi her çalışmada
+  // yeni albüm adı alıyor (steps/07 freeAlbumName).
+  const targets = render ? [config.output.video, config.output.tracklist] : [];
   if (!overwrite) {
     const existing = [];
     for (const path of targets) if (await exists(path)) existing.push(path);
@@ -127,7 +138,70 @@ export async function runBuild(config, options = {}) {
   };
   const progress = (tag, total) => (onProgress ? (s) => onProgress(tag, s, total) : undefined);
 
+  /**
+   * Yayın paketi (07) — 24/7 yayının asıl çıktısı.
+   *
+   * Render'dan BAĞIMSIZ: kısa döngüyü ve parçaları doğrudan kaynaklardan
+   * üretiyor, uzun videoya ihtiyacı yok. Bu yüzden hem render'sız hem
+   * render'lı çalışmada aynı yerden çağrılıyor.
+   */
+  const makeStreamPackage = async () => {
+    if (!config.stream.enabled) {
+      log.info('Yayın paketi kapalı (stream.enabled: false) — adım atlandı.');
+      return null;
+    }
+    const trackPaths = await listFiles(config.audioDir, AUDIO_EXTENSIONS);
+    return step('07', 'Yayın paketi', (logger) => buildStreamPackage({
+      clipPath: config.clip,
+      videoSource: config.video.source,
+      crop: {
+        bottom: config.video.cropBottom,
+        top: config.video.cropTop,
+        left: config.video.cropLeft,
+        right: config.video.cropRight,
+      },
+      aspect: config.video.aspect,
+      trackPaths,
+      names: config.names,
+      outDir: config.output.streamPackage,
+      streamerDir: config.stream.dir,
+      album: config.stream.album,
+      logger,
+      onProgress: progress('07', null),
+    }));
+  };
+
   try {
+    // --- Render istenmediyse: uzun video hiç üretilmez. 24/7 yayın onu
+    // kullanmıyor ve ölçüldüğüne göre çıktı malzemesinin 30-60 katı yer
+    // kaplıyor, montaj da build süresinin %45-92'si.
+    if (!render) {
+      const streamPackage = await makeStreamPackage();
+      const report = {
+        project: config.projectPath,
+        finishedAt: new Date().toISOString(),
+        totalSeconds: Number(((Date.now() - startedAt) / 1000).toFixed(1)),
+        mode: 'stream-package',
+        rendered: false,
+        outputs: streamPackage ? { streamPackage: streamPackage.dir } : {},
+        streamPackage: streamPackage
+          ? {
+            album: streamPackage.album,
+            dir: streamPackage.dir,
+            published: streamPackage.published?.dir ?? null,
+            trackCount: streamPackage.tracks.length,
+            totalBytes: streamPackage.totalBytes,
+            background: streamPackage.background,
+          }
+          : null,
+        steps: steps.map(({ tag, name, seconds }) => ({ tag, name, seconds })),
+        warnings,
+        details: Object.fromEntries(steps.map(({ tag, report: r }) => [tag, r])),
+      };
+      await writeTextFile(config.output.report, JSON.stringify(report, null, 2) + '\n');
+      return report;
+    }
+
     // --- 1: video hazırlığı (onay burada — ucuz, pahalı adımlardan önce)
     const video = await step('01', 'Video hazırlığı', (logger) => prepareVideo({
       clipPath: config.clip,
@@ -161,13 +235,18 @@ export async function runBuild(config, options = {}) {
       audioDir: config.audioDir,
       outputPath: workspace.path('mix.wav'),
       order: config.order ?? undefined,
+      // Pomodoro doğrulaması burada: parçalar ölçülüyor ama henüz
+      // birleştirilmiyor — uymayan seçim tek kare encode edilmeden durur.
+      pomodoro: config.pomodoro,
       logger,
       onProgress: progress('02', null),
     }));
 
-    const ambientPaths = config.ambient
-      ? (Array.isArray(config.ambient) ? config.ambient : [config.ambient])
-      : [];
+    const ambientPlan = config.ambient;
+    // Pomodoro açık ve yerleşen işaret varsa 06 çalışacak. Plan 02'de üretildi
+    // (doğrulamayla aynı hesap); burada yeniden hesaplanmıyor.
+    const pomodoro = audio.pomodoro.enabled ? audio.pomodoro : null;
+    const cuePlan = pomodoro && pomodoro.cues.events.length > 0 ? pomodoro.cues : null;
 
     const disk = await checkDiskSpace({
       dir: config.output.dir,
@@ -175,25 +254,36 @@ export async function runBuild(config, options = {}) {
       baseDuration: video.result.duration,
       targetDuration: audio.duration,
       copies: 1, // ambient sese karıştığı için video yalnızca montajda yazılır
-      // Her ambient karışımı mix.wav boyutunda bir WAV daha yazar.
-      extraBytes: audio.format.size * ambientPaths.length,
+      // Ambiance karışımı mix.wav boyutunda TEK bir WAV daha yazar (parça
+      // sayısından bağımsız): bütün döngüler tek amix çağrısında karışıyor.
+      // Parça başına yazılan hazırlık/döngü dosyaları ambient'in kendi
+      // uzunluğunda, mix.wav'ın yanında ihmal edilebilir.
+      // Her ara karışım mix.wav boyutunda TEK bir WAV daha yazar: Ambiance (03)
+      // ve Pomodoro işaretleri (06). İkisi de açıksa iki kopya.
+      extraBytes: (ambientPlan ? audio.format.size : 0)
+        + (cuePlan ? audio.format.size : 0),
       diskFree,
     });
     log.info(
       `Disk: ~${gb(disk.requiredBytes)} GB gerekli, ${gb(disk.freeBytes)} GB boş.`,
     );
 
+    // --- 7: yayın paketi. Kırpma onayından (01) ve disk denetiminden SONRA —
+    // onaylanmamış çerçeveyle ya da yer yokken yayına albüm çıkmasın. Ama
+    // montajdan (04, 8-14 dk) ÖNCE: yayın asıl çıktı, render ona bağlı değil.
+    const streamPackage = await makeStreamPackage();
+
     // --- 3: ambient (03, opsiyonel) — videoya değil sese karışır: 48 dakikalık
     // video yalnızca montajda bir kez yazılır. Müzik seviyesi mix.wav'dan ölçülür.
     let finalAudio = audio.output;
-    for (let i = 0; i < ambientPaths.length; i++) {
-      const stepName = ambientPaths.length > 1
-        ? `Ambient karıştırma (${i + 1}/${ambientPaths.length})`
-        : 'Ambient karıştırma';
+    if (ambientPlan) {
+      const stepName = ambientPlan.tracks.length > 1
+        ? `Ambiance karıştırma (${ambientPlan.tracks.length} parça, ${ambientPlan.mode})`
+        : 'Ambiance karıştırma';
       const mixed = await step('03', stepName, (logger) => mixAmbient({
         audioPath: finalAudio,
-        ambientPath: ambientPaths[i],
-        outputPath: workspace.path(`final_mix_${i}.wav`),
+        plan: ambientPlan,
+        outputPath: workspace.path('final_mix.wav'),
         workspace,
         ambientOffsetDb: config.audio.ambientOffsetDb,
         fadeOut: config.video.fadeOut,
@@ -201,8 +291,27 @@ export async function runBuild(config, options = {}) {
         onProgress: progress('03', audio.duration),
       }));
       finalAudio = mixed.output;
+    } else {
+      log.info('Ambiance tanımlı değil — adım atlandı.');
     }
-    if (ambientPaths.length === 0) log.info('Ambient tanımlı değil — adım atlandı.');
+
+    // --- 3b: Pomodoro işaretleri (06, opsiyonel) — nihai sesin ÜZERİNE biner.
+    // Müzik dosyalarına ve mix.wav'a dokunulmaz: Pomodoro kapatılırsa iz kalmaz.
+    let cues = null;
+    if (cuePlan) {
+      cues = await step('06', `Pomodoro işaretleri (${cuePlan.events.length} olay)`, (logger) => mixPomodoroCues({
+        audioPath: finalAudio,
+        plan: config.pomodoro,
+        cues: cuePlan,
+        outputPath: workspace.path('cue_mix.wav'),
+        workspace,
+        logger,
+        onProgress: progress('06', audio.duration),
+      }));
+      finalAudio = cues.output;
+    } else if (pomodoro) {
+      log.info('Pomodoro açık ama işaret sesi kapalı — 06 atlandı.');
+    }
 
     // --- 4: montaj (04) — gövde kopya, kuyruk (fade) encode; ses son karışım.
     const finalVideo = workspace.path('final.mp4');
@@ -231,21 +340,68 @@ export async function runBuild(config, options = {}) {
     if (signal?.aborted) throw new BuildCancelledError();
     await rename(finalVideo, config.output.video);
     await rename(tracklist.output, config.output.tracklist);
+    // WORK/BREAK dökümü ayrı dosyada: tracklist YouTube'un biçimi, bu ise
+    // oturum planı. Pomodoro kapalıyken üretilmez.
+    if (pomodoro) {
+      await writeTextFile(config.output.pomodoroTimeline, describeTimeline(pomodoro.timeline));
+    }
 
     const report = {
       project: config.projectPath,
       finishedAt: new Date().toISOString(),
       totalSeconds: Number(((Date.now() - startedAt) / 1000).toFixed(1)),
+      mode: 'render',
+      rendered: true,
       outputs: {
         video: config.output.video,
         tracklist: config.output.tracklist,
         report: config.output.report,
+        ...(pomodoro ? { pomodoroTimeline: config.output.pomodoroTimeline } : {}),
+        ...(streamPackage ? { streamPackage: streamPackage.dir } : {}),
       },
+      streamPackage: streamPackage
+        ? {
+          album: streamPackage.album,
+          dir: streamPackage.dir,
+          published: streamPackage.published?.dir ?? null,
+          trackCount: streamPackage.tracks.length,
+          totalBytes: streamPackage.totalBytes,
+          background: streamPackage.background,
+        }
+        : null,
       musicDuration: audio.duration,
       sortSource: audio.sortSource,
-      ambient: config.ambient ? 'mixed' : 'skipped',
+      // Düz metin kalıyor: regresyon karşılaştırması (test/helpers/
+      // regression-compare.js) bu alanı birebir eşitlikle kontrol ediyor.
+      // Plan ayrıntısı ayrı alanda.
+      ambient: ambientPlan ? 'mixed' : 'skipped',
+      ambientPlan: ambientPlan
+        ? {
+          mode: ambientPlan.mode,
+          crossfade: ambientPlan.crossfade,
+          tracks: ambientPlan.tracks.map((track) => ({
+            path: track.path, volumeDb: track.volumeDb,
+          })),
+        }
+        : null,
       configLine,
       disk,
+      // Düz metin alanı Ambiance ile aynı gerekçeyle: okuyan taraf tek bakışta
+      // açık mı kapalı mı görsün, ayrıntı ayrı alanda.
+      pomodoro: pomodoro ? 'applied' : 'off',
+      pomodoroPlan: pomodoro
+        ? {
+          workMinutes: config.pomodoro.workMinutes,
+          breakMinutes: config.pomodoro.breakMinutes,
+          rounds: config.pomodoro.rounds,
+          preset: config.pomodoro.preset,
+          totalSeconds: pomodoro.timeline.totalSeconds,
+          sessions: pomodoro.timeline.sessions,
+          comparison: pomodoro.comparison,
+          trim: pomodoro.trim,
+          cueEvents: cues ? cues.eventCount : 0,
+        }
+        : null,
       settings: {
         source: config.video.source,
         cropBottom: config.video.cropBottom,
@@ -344,6 +500,7 @@ Seçenekler:
   --verify-crop       değer konfigde olsa da kontrol karesi göster, onay iste
   --aspect <W:H|off>  en-boy kırpması (varsayılan 16:9)
   --scale <genişlik>  base.mp4'ü bu genişliğe ölçekle (çift sayı)
+  --render            uzun videoyu da üret (varsayılan: yalnızca yayın paketi)
   --keep              workspace'i silme (ara dosyalar + loop testi kalır)
   --overwrite         çıktı varsa üzerine yaz
   -h, --help          bu metin`;
@@ -363,6 +520,7 @@ export function parseCli(argv) {
       'verify-crop': { type: 'boolean', default: false },
       aspect: { type: 'string' },
       scale: { type: 'string' },
+      render: { type: 'boolean', default: false },
       keep: { type: 'boolean', default: false },
       overwrite: { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h', default: false },
@@ -374,6 +532,7 @@ export function parseCli(argv) {
   return {
     help: values.help,
     project: values.project,
+    render: values.render,
     keep: values.keep,
     overwrite: values.overwrite,
     overrides: {
@@ -491,13 +650,20 @@ export async function main(argv) {
       onProgress: ui.onProgress,
       confirm: interactive ? askConfirm : undefined,
       overwrite: cli.overwrite,
+      render: cli.render,
       keep: cli.keep,
       signal: controller.signal,
     });
     ui.clearProgress();
+    // Render'sız çalışmada video/tracklist yok; üretilenleri raporun kendisi söyler.
+    const produced = Object.values(report.outputs).map((path) => `  ${path}`);
     console.log(
       `\nBitti (${formatClock(report.totalSeconds)} dk):\n` +
-      `  ${report.outputs.video}\n  ${report.outputs.tracklist}\n  ${report.outputs.report}` +
+      [...produced, `  ${config.output.report}`].join('\n') +
+      (report.streamPackage?.published
+        ? `\nYayın tarafına alındı: ${report.streamPackage.published} ` +
+          `(${report.streamPackage.trackCount} parça, ${gb(report.streamPackage.totalBytes)} GB)`
+        : '') +
       (report.warnings.length ? `\n${report.warnings.length} uyarı — raporda.` : ''),
     );
     return 0;
@@ -506,6 +672,17 @@ export async function main(argv) {
     if (controller.signal.aborted) {
       console.error(new BuildCancelledError().message);
       return 130;
+    }
+    // Pomodoro doğrulaması: hiçbir şey üretilmedi, konfig hatasıyla aynı sınıf.
+    // Çıkış kodu 2 → server/build-jobs.js bunu "config-invalid" olarak etiketler.
+    if (error instanceof PomodoroValidationError) {
+      console.error(
+        `\nPomodoro doğrulaması başarısız — montaj başlatılmadı.\n\n${error.message}` +
+        (error.validation.needsTrimConfirmation
+          ? '\n\nFazlayı kırpmak için project.json\'a: "pomodoro": { ..., "trimExcess": true }'
+          : ''),
+      );
+      return 2;
     }
     if (error instanceof CropNotConfirmedError && !interactive) {
       console.error(

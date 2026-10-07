@@ -11,7 +11,7 @@ import { after, before, describe, test } from 'node:test';
 import { createBuildJobs } from '../../server/build-jobs.js';
 import {
   completeMusic, createProject, deleteProject, describeReadiness, getAsset, getBuild, getLibrary, getProject, getProjects, listClips,
-  getProjectPrompts, selectClip, startBuild, updateCrop, updateTrackOrder, updateWorkflow, uploadProjectAudio,
+  selectClip, startBuild, updateCrop, updateTrackOrder, updateVideoSource, uploadProjectAudio,
   uploadProjectClip, uploadProjectImage,
 } from '../../server/project-api.js';
 import { createWebServer } from '../../server/web-server.js';
@@ -98,21 +98,21 @@ before(async () => {
 
   spawned = [];
   const buildJobs = createBuildJobs({ spawnFn: fakeSpawn, repoRoot: 'X:\\repo', now: () => 0 });
-  const stylesDir = STYLES_DIR;
   const options = { videosDir };
   server = createWebServer({
     projectApi: {
       getProjects: () => getProjects(options),
       getProject: (id) => getProject(id, options),
       deleteProject: (id) => deleteProject(id, { videosDir, buildJobs, trashFn: async () => {} }),
-      createProject: (body) => createProject(body, { videosDir, ambientDir, stylesDir }),
-      getLibrary: () => getLibrary({ stylesDir, ambientDir }),
+      createProject: (body) => createProject(body, { videosDir, ambientDir }),
+      getLibrary: () => getLibrary({ ambientDir }),
       selectClip: (id, body) => selectClip(id, body, options),
       completeMusic: (id, body) => completeMusic(id, body, options),
       startBuild: (id, body) => startBuild(id, body, { videosDir, buildJobs }),
       getBuild: (id) => getBuild(id, { videosDir, buildJobs }),
       getAsset: (id, type, file) => getAsset(id, type, file, options),
       updateCrop: (id, body) => updateCrop(id, body, options),
+      updateVideoSource: (id, body) => updateVideoSource(id, body, options),
       listClips: (id) => listClips(id, { videosDir, probeFn: fakeProbe }),
     },
   });
@@ -130,7 +130,6 @@ describe('readiness — workflow sırasından bağımsız kanıt', () => {
   test('müzik adımındaki projede klip hazır sayılmaz; montaj eksikleri listelenir', async () => {
     const project = await getProject('music-step', { videosDir });
     assert.equal(project.step.id, 'clip');
-    assert.equal(project.readiness.master.ready, true);
     assert.deepEqual(project.readiness.clip, { ready: false, selected: null, availableCount: 1 });
     assert.equal(project.readiness.music.ready, false);
     assert.deepEqual(project.readiness.build, { ready: false, missing: ['clip', 'music'] });
@@ -147,12 +146,10 @@ describe('readiness — workflow sırasından bağımsız kanıt', () => {
   test('bozuk project.json montaj eksiği olarak raporlanır', () => {
     const readiness = describeReadiness({
       projectJson: { ok: false, data: null, error: 'x' },
-      style: null, master: null,
       clip: { value: '', path: null, exists: false }, clips: [], audioCount: 0,
       output: { path: 'X:\\o.mp4', exists: false },
     });
     assert.deepEqual(readiness.build.missing, ['projectJson', 'clip', 'music']);
-    assert.deepEqual(readiness.style, { name: null });
   });
 
   test('isMusicCompleted: parça planı varsa plan durumu, yoksa ses dosyası', () => {
@@ -171,25 +168,21 @@ describe('readiness — workflow sırasından bağımsız kanıt', () => {
     assert.equal(project.id, 'music-step');
     assert.equal(project.step.id, 'clip');
     // Web akışı canonical sırada: klip (Video) müzikten önce.
-    assert.equal(project.workflow.current, 'angles');
+    assert.equal(project.workflow.current, 'video');
     assert.equal(project.projectJson.ok, true);
     assert.equal(project.readiness.clip.ready, false);
   });
 });
 
 describe('GET /api/library', () => {
-  test('müzik stilleri ve ambient adları', async () => {
+  // Stil kütüphanesi kaldırıldı: kütüphane artık yalnızca Ambiance'ları taşıyor.
+  test('ambient adları', async () => {
     const response = await send('GET', '/api/library');
     assert.equal(response.status, 200);
     const library = await response.json();
-    assert.ok(!library.styles.some((style) => style.name === 'custom-generated'));
-    const watercolor = library.styles.find((style) => style.name === 'watercolor');
-    assert.equal(watercolor.valid, true);
-    assert.equal(typeof watercolor.suggestedAmbient, 'string');
-    assert.equal(typeof watercolor.hasMusicProfile, 'boolean');
-    assert.ok(!('styleBlock' in watercolor));
     assert.deepEqual(library.ambients, [{ name: 'campfire' }, { name: 'gentleRain' }]);
     assert.equal(library.ambientError, null);
+    assert.ok(!('styles' in library), 'stil kavramı kaldırıldı');
   });
 
   test('ambient klasörü yoksa boş liste ve hata mesajı', async () => {
@@ -198,42 +191,30 @@ describe('GET /api/library', () => {
     assert.match(library.ambientError, /ambient klasörü okunamadı/);
   });
 
-  test('geçersiz stil dosyası listede problemleriyle döner', async () => {
-    const stylesDir = join(base, 'styles-invalid');
-    await mkdir(stylesDir);
-    await writeFile(join(stylesDir, 'broken.json'), '{ "name": "baska" }');
-    const library = await getLibrary({ stylesDir, ambientDir });
-    const broken = library.styles.find((style) => style.name === 'broken');
-    assert.equal(broken.valid, false);
-    assert.ok(broken.problems.length > 0);
-  });
 });
 
 describe('POST /api/projects', () => {
   test('geçerli istek projeyi mevcut iskeletle oluşturur', async () => {
     const response = await send('POST', '/api/projects', {
-      body: { name: 'new album', style: 'watercolor', ambient: ['gentleRain'], concept: 'Rainy night', totalTracks: 3 },
+      body: { name: 'new album', ambient: ['gentleRain'], concept: 'Rainy night', totalTracks: 3 },
     });
     assert.equal(response.status, 201);
     const { project, warnings } = await response.json();
     assert.ok(Array.isArray(warnings));
     assert.equal(project.id, 'new album');
-    assert.equal(project.step.id, 'faz1');
-    assert.equal(project.style, 'watercolor');
+    assert.equal(project.step.id, 'faz3');
 
     const dir = join(videosDir, 'new album');
     for (const sub of ['audio', 'resimler', 'videolar']) {
       assert.ok((await stat(join(dir, sub))).isDirectory());
     }
     const json = JSON.parse(await readFile(join(dir, 'project.json'), 'utf8'));
-    assert.equal(json.style, 'watercolor');
     assert.equal(json.music.concept, 'Rainy night');
     assert.equal(json.music.tracks.length, 3);
     assert.equal(json.ambient, join(ambientDir, 'gentleRain.mp3'));
-    assert.ok((await stat(join(dir, 'prompts.md'))).isFile());
   });
 
-  test('stil isteğe bağlı: stilsiz proje oluşturulur', async () => {
+  test('stil kavramı yok: project.json dosyasına style yazılmaz', async () => {
     const response = await send('POST', '/api/projects', { body: { name: 'stilsiz album' } });
     assert.equal(response.status, 201);
     const json = JSON.parse(await readFile(join(videosDir, 'stilsiz album', 'project.json'), 'utf8'));
@@ -241,7 +222,7 @@ describe('POST /api/projects', () => {
   });
 
   test('aynı isim ikinci kez → 409, klasöre dokunulmaz', async () => {
-    const response = await send('POST', '/api/projects', { body: { name: 'ready', style: 'watercolor' } });
+    const response = await send('POST', '/api/projects', { body: { name: 'ready' } });
     assert.equal(response.status, 409);
     assert.deepEqual(await response.json(), { error: 'Project already exists' });
     const json = JSON.parse(await readFile(join(videosDir, 'ready', 'project.json'), 'utf8'));
@@ -252,27 +233,26 @@ describe('POST /api/projects', () => {
     let called = false;
     const runNewVideoFn = async () => { called = true; };
     await assert.rejects(
-      createProject({ name: 'ready', style: 'watercolor' }, { videosDir, ambientDir, runNewVideoFn }),
+      createProject({ name: 'ready' }, { videosDir, ambientDir, runNewVideoFn }),
       { name: 'ApiError', status: 409 },
     );
     assert.equal(called, false);
   });
 
-  test('domain doğrulaması 422 ve problemler: geçersiz isim, bilinmeyen stil/ambient', async () => {
+  test('domain doğrulaması 422 ve problemler: geçersiz isim, bilinmeyen ambient', async () => {
     const response = await send('POST', '/api/projects', {
-      body: { name: 'bad:name', style: 'no-such-style', ambient: ['thunder'] },
+      body: { name: 'bad:name', ambient: ['thunder'] },
     });
     assert.equal(response.status, 422);
     const body = await response.json();
     assert.equal(body.error, 'Project could not be created');
     assert.ok(body.problems.some((p) => p.includes('geçersiz karakter')));
-    assert.ok(body.problems.some((p) => p.includes('bilinmeyen stil')));
     assert.ok(body.problems.some((p) => p.includes('bilinmeyen ambient "thunder"')));
   });
 
   test('yol kaçışı içeren isim 422, videolar kökü dışına yazılmaz', async () => {
     for (const name of ['../escape', '..', 'a\\b']) {
-      const response = await send('POST', '/api/projects', { body: { name, style: 'watercolor' } });
+      const response = await send('POST', '/api/projects', { body: { name } });
       assert.equal(response.status, 422, name);
     }
     await assert.rejects(stat(join(base, 'escape')), { code: 'ENOENT' });
@@ -282,14 +262,14 @@ describe('POST /api/projects', () => {
     const cases = [
       [undefined, 'Request body must be a JSON object'],
       [[], 'Request body must be a JSON object'],
-      [{ style: 'watercolor' }, 'Missing field: name'],
-      [{ name: 'x', style: 'watercolor', extra: 1 }, 'Unknown field: extra'],
-      [{ name: 5, style: 'watercolor' }, 'Field name must be a string'],
-      [{ name: 'x', style: 'watercolor', ambient: 'gentleRain' }, 'Field ambient must be an array'],
-      [{ name: 'x', style: 'watercolor', ambient: [''] }, 'ambient must be an array of names'],
-      [{ name: 'x', style: 'watercolor', totalTracks: 0 }, 'totalTracks must be an integer between 1 and 50'],
-      [{ name: 'x', style: 'watercolor', totalTracks: 2.5 }, 'totalTracks must be an integer between 1 and 50'],
-      [{ name: 'x', style: 'watercolor', concept: 'c'.repeat(301) }, 'concept must be at most 300 characters'],
+      [{}, 'Missing field: name'],
+      [{ name: 'x', extra: 1 }, 'Unknown field: extra'],
+      [{ name: 5 }, 'Field name must be a string'],
+      [{ name: 'x', ambient: 'gentleRain' }, 'Field ambient must be an array'],
+      [{ name: 'x', ambient: [''] }, 'ambient must be an array of names'],
+      [{ name: 'x', totalTracks: 0 }, 'totalTracks must be an integer between 1 and 50'],
+      [{ name: 'x', totalTracks: 2.5 }, 'totalTracks must be an integer between 1 and 50'],
+      [{ name: 'x', concept: 'c'.repeat(301) }, 'concept must be at most 300 characters'],
     ];
     for (const [body, error] of cases) {
       const response = body === undefined
@@ -307,25 +287,25 @@ describe('POST /api/projects', () => {
     assert.deepEqual(await invalid.json(), { error: 'Request body must be valid JSON' });
 
     const plain = await send('POST', '/api/projects', {
-      body: JSON.stringify({ name: 'plain', style: 'watercolor' }),
+      body: JSON.stringify({ name: 'plain' }),
       headers: { 'content-type': 'text/plain' },
     });
     assert.equal(plain.status, 415);
 
     const foreign = await send('POST', '/api/projects', {
-      body: { name: 'foreign', style: 'watercolor' },
+      body: { name: 'foreign' },
       headers: { origin: 'http://evil.example' },
     });
     assert.equal(foreign.status, 403);
     assert.deepEqual(await foreign.json(), { error: 'Forbidden origin' });
 
     const local = await send('POST', '/api/projects', {
-      body: { name: 'from-vite', style: 'watercolor' },
+      body: { name: 'from-vite' },
       headers: { origin: 'http://127.0.0.1:5173' },
     });
     assert.equal(local.status, 201);
 
-    const huge = await send('POST', '/api/projects', { body: { name: 'x', style: 'watercolor', concept: 'c'.repeat(70000) } });
+    const huge = await send('POST', '/api/projects', { body: { name: 'x', concept: 'c'.repeat(70000) } });
     assert.equal(huge.status, 413);
 
     for (const name of ['plain', 'foreign']) {
@@ -394,7 +374,7 @@ describe('POST /api/projects/:id/music/complete', () => {
     });
     const before = await getProject('music-plan', { videosDir });
     assert.equal(before.step.id, 'faz3');
-    assert.equal(before.workflow.current, 'angles');
+    assert.equal(before.workflow.current, 'video');
 
     const response = await postEmpty('/api/projects/music-plan/music/complete');
     assert.equal(response.status, 200);
@@ -472,7 +452,7 @@ describe('build — arka planda build.js', () => {
     assert.equal(response.status, 409);
     const body = await response.json();
     assert.equal(body.error, 'Project is not ready to build');
-    assert.equal(body.step.id, 'faz1');
+    assert.equal(body.step.id, 'faz3');
     assert.deepEqual(body.missing, ['clip', 'music']);
     assert.equal(spawned.length, 0);
   });
@@ -734,8 +714,6 @@ describe('asset önizleme — salt okunur', () => {
 
   test('izinli dosyalar gerçek içerik ve MIME ile döner', async () => {
     const cases = [
-      ['master', 'MASTER.png', 'image/png', 'png-bytes'],
-      ['angle', 'Master1.jpg', 'image/jpeg', 'variant'],
       ['clip', 'clip.mp4', 'video/mp4', '0123456789'],
       ['output', 'final_ambient.mp4', 'video/mp4', 'output'],
     ];
@@ -762,10 +740,7 @@ describe('asset önizleme — salt okunur', () => {
 
   test('türün listesinde olmayan dosya 404', async () => {
     for (const [type, file] of [
-      ['master', 'Master1.jpg'],      // açı varyantı master değil
-      ['angle', 'MASTER.png'],        // master açı değil
       ['clip', 'other.mp4'],          // seçili olmayan klip
-      ['angle', 'missing.jpg'],
       ['output', 'final_ambient.mp4'],
     ]) {
       const id = type === 'output' ? 'ready' : 'assets'; // ready'de çıktı yok
@@ -781,14 +756,14 @@ describe('asset önizleme — salt okunur', () => {
     assert.equal((await asset('assets', 'project', 'project.json')).status, 400);
     assert.equal((await asset('assets', 'constructor', 'x.png')).status, 400);
     for (const file of ['..%2Fproject.json', '..%5C..%5Cready%5Cresimler%5CMASTER.png', 'C%3A%5CWindows%5Cwin.ini', '%00.png', '%E0%A4%A']) {
-      assert.equal((await asset('assets', 'master', file)).status, 400, file);
+      assert.equal((await asset('assets', 'clip', file)).status, 400, file);
     }
-    assert.equal((await asset('..%2Fassets', 'master', 'MASTER.png')).status, 400);
-    assert.equal((await asset('nope', 'master', 'MASTER.png')).status, 404);
+    assert.equal((await asset('..%2Fassets', 'clip', 'clip.mp4')).status, 400);
+    assert.equal((await asset('nope', 'clip', 'clip.mp4')).status, 404);
     // Normalleşen yol başka rotaya düşer; dosya sunulmaz.
-    assert.equal((await asset('assets', 'master', '../../../project.json')).status, 404);
-    assert.equal((await asset('assets', 'master', '%2E%2E')).status, 404);
-    assert.equal((await send('POST', '/api/projects/assets/assets/master/MASTER.png', { body: {} })).status, 405);
+    assert.equal((await asset('assets', 'clip', '../../../project.json')).status, 404);
+    assert.equal((await asset('assets', 'clip', '%2E%2E')).status, 404);
+    assert.equal((await send('POST', '/api/projects/assets/assets/clip/clip.mp4', { body: {} })).status, 405);
   });
 });
 
@@ -952,24 +927,9 @@ describe('canonical akış — 8 adım, diskten kaldığı yer', () => {
     await writeProjectFolder('flow', { project: { video: { aspect: '16:9' } } });
     const fresh = await getProject('flow', options());
     assert.deepEqual(fresh.workflow.steps.map((step) => step.id), [
-      'project', 'master', 'angles', 'video', 'music', 'order', 'build', 'publish',
+      'project', 'video', 'music', 'order', 'build', 'publish',
     ]);
-    assert.equal(fresh.workflow.current, 'master');
-
-    await uploadProjectImage('flow', { slot: 'master', name: 'm.jpg', data: b64('m1') }, options());
-    await uploadProjectImage('flow', { slot: 'master', name: 'm.png', data: b64('m2') }, options());
-    const withMaster = await getProject('flow', options());
-    assert.ok(withMaster.master.endsWith('MASTER.png'), 'eski uzantılı MASTER kaldırılır');
-    assert.equal(withMaster.workflow.current, 'angles');
-
-    await updateWorkflow('flow', { angles: { wanted: true, count: 2 } }, options());
-    await uploadProjectImage('flow', { slot: 'angle', index: 1, name: 'a.jpg', data: b64('a') }, options());
-    assert.equal(await current('flow'), 'angles', 'istenen 2 açıdan 1 tanesi var');
-    await uploadProjectImage('flow', { slot: 'angle', index: 2, name: 'b.jpg', data: b64('b') }, options());
-    const withAngles = await getProject('flow', options());
-    assert.equal(withAngles.angles.length, 2);
-    assert.ok(withAngles.master.endsWith('MASTER.png'), 'açı dosyası MASTER sayılmaz');
-    assert.equal(withAngles.workflow.current, 'video');
+    assert.equal(fresh.workflow.current, 'video');
 
     await uploadProjectClip('flow', { name: 'loop.mp4', data: b64('v') }, options());
     assert.equal(await current('flow'), 'video', 'klip seçilip kırpma kaydedilene kadar');
@@ -1006,16 +966,10 @@ describe('canonical akış — 8 adım, diskten kaldığı yer', () => {
     await writeFile(join(videosDir, 'flow', 'out', 'final_ambient.mp4'), 'x');
     const published = await getProject('flow', options());
     assert.equal(published.workflow.current, 'publish');
-    assert.ok(published.workflow.steps.slice(0, 7).every((step) => step.status === 'done'));
+    assert.ok(published.workflow.steps.slice(0, 5).every((step) => step.status === 'done'));
   });
 
-  test('açı istemeyen proje adımı atlar; eski projede sonraki kanıt önceki adımı tamamlar', async () => {
-    await writeProjectFolder('skip-angles', { files: ['resimler/MASTER.png'] });
-    assert.equal(await current('skip-angles'), 'angles');
-    const skipped = await updateWorkflow('skip-angles', { angles: { wanted: false } }, options());
-    assert.equal(skipped.workflow.current, 'video');
-    assert.equal(skipped.workflow.steps.find((step) => step.id === 'angles').skipped, true);
-
+  test('eski projede sonraki kanıt önceki adımı tamamlar', async () => {
     // Eski proje: workflow kaydı yok, klip + müzik var, sıra yok → Sıralama.
     await writeProjectFolder('legacy', {
       project: { clip: './videolar/in.mp4' },
@@ -1025,42 +979,31 @@ describe('canonical akış — 8 adım, diskten kaldığı yer', () => {
     assert.equal(legacy.workflow.current, 'order');
     assert.deepEqual(
       legacy.workflow.steps.filter((step) => step.status === 'done').map((step) => step.id),
-      ['project', 'master', 'angles', 'video', 'music'],
+      ['project', 'video', 'music'],
     );
   });
 
-  test('geçersiz istekler reddedilir; sahne referansı yuvası yok', async () => {
+  test('geçersiz yükleme istekleri reddedilir', async () => {
     await writeProjectFolder('custom-flow');
 
     const bad = (promise, status) => assert.rejects(promise, (error) => error.status === status);
-    await bad(uploadProjectImage('custom-flow', { slot: 'scene', name: 'a.png', data: b64('x') }, options()), 400);
-    await bad(uploadProjectImage('custom-flow', { slot: 'angle', index: 9, name: 'a.png', data: b64('x') }, options()), 400);
-    await bad(uploadProjectImage('custom-flow', { slot: 'master', name: 'a.gif', data: b64('x') }, options()), 400);
-    await bad(uploadProjectImage('custom-flow', { slot: 'master', name: '../a.png', data: b64('x') }, options()), 400);
+    await bad(uploadProjectImage('custom-flow', { name: 'a.gif', data: b64('x') }, options()), 400);
+    await bad(uploadProjectImage('custom-flow', { name: '../a.png', data: b64('x') }, options()), 400);
     await bad(uploadProjectClip('custom-flow', { name: 'a.mov', data: b64('x') }, options()), 400);
     await bad(uploadProjectAudio('custom-flow', { name: 'a.mp3', data: '' }, options()), 400);
-    await bad(updateWorkflow('custom-flow', { angles: { wanted: true, count: 0 } }, options()), 400);
     await bad(updateTrackOrder('custom-flow', { mode: 'alphabetical' }, options()), 409);
   });
 
-  test('promptlar: yalnızca kamera açıları, kod bloklarıyla', async () => {
-    const prompts = await getProjectPrompts('flow', { videosDir });
-    assert.deepEqual(Object.keys(prompts), ['angles']);
-    assert.equal(prompts.angles.length, 5);
-    assert.equal(prompts.angles[0].title, 'Extreme low angle');
-    assert.ok(prompts.angles[0].prompt.startsWith('Image 1 = master frame'));
-    assert.ok(!prompts.angles[0].prompt.includes('Style description'));
-  });
 });
 
 describe('tek resim modu ve proje küçük resmi', () => {
   test('POST videoSource=image → project.json video.source image, kırpma 0; geçersiz değer 400', async () => {
-    const created = await send('POST', '/api/projects', { body: { name: 'still album', style: 'watercolor', videoSource: 'image' } });
+    const created = await send('POST', '/api/projects', { body: { name: 'still album', videoSource: 'image' } });
     assert.equal(created.status, 201);
     const json = JSON.parse(await readFile(join(videosDir, 'still album', 'project.json'), 'utf8'));
     assert.deepEqual(json.video, { source: 'image', cropBottom: 0, aspect: '16:9' });
 
-    const bad = await send('POST', '/api/projects', { body: { name: 'bad source', style: 'watercolor', videoSource: 'gif' } });
+    const bad = await send('POST', '/api/projects', { body: { name: 'bad source', videoSource: 'gif' } });
     assert.equal(bad.status, 400);
     assert.match((await bad.json()).error, /videoSource must be one of: clip, image/);
   });
@@ -1084,6 +1027,62 @@ describe('tek resim modu ve proje küçük resmi', () => {
     const thumb = await send('GET', entry.thumbnailUrl);
     assert.equal(thumb.status, 200);
     assert.equal(await thumb.text(), 'angle');
+  });
+
+  test('PUT /video-source image→clip: seçim boşaltılır, kırpma korunur, aday sayıları döner', async () => {
+    const dir = await writeProjectFolder('switch-to-clip', {
+      project: { video: { source: 'image', cropBottom: 150 } },
+      files: ['videolar/loop.mp4'],
+    });
+    await writeFile(join(dir, 'resimler', 'MASTER.png'), 'master');
+    await send('PUT', '/api/projects/switch-to-clip/clip', { body: { file: 'MASTER.png' } });
+
+    const response = await send('PUT', '/api/projects/switch-to-clip/video-source', { body: { source: 'clip' } });
+    assert.equal(response.status, 200);
+    const project = await response.json();
+    assert.equal(project.videoSource, 'clip');
+    assert.equal(project.clip.value, '');
+    assert.equal(project.readiness.clip.ready, false);
+    assert.equal(project.videoSourceChange.previous, 'image');
+    assert.equal(project.videoSourceChange.clearedClip, './resimler/MASTER.png');
+    // Aday sayıları iki mod için de ölçülür: arayüz "öbür tarafta ne var" diyebilsin.
+    assert.equal(project.videoSourceCandidates.clip.count, 1);
+    assert.equal(project.videoSourceCandidates.image.count, 1);
+    // Klip listesi artık videolar\ altını gösterir.
+    assert.deepEqual(project.clips.map((p) => p.split(/[\\/]/).pop()), ['loop.mp4']);
+
+    const json = JSON.parse(await readFile(join(dir, 'project.json'), 'utf8'));
+    assert.equal(json.video.source, 'clip');
+    assert.equal(json.video.cropBottom, 150, 'kırpma ölçümü mod değişince silinmemeli');
+  });
+
+  test('PUT /video-source clip→image: görsel seçilebilir; kırpma yazılmamışken de montaj hazır', async () => {
+    // video bloğu hiç yok: watermark kararı verilmemiş bir proje.
+    const dir = await writeProjectFolder('switch-to-image', { project: { video: {} }, files: ['videolar/loop.mp4'] });
+    await writeFile(join(dir, 'resimler', 'MASTER.png'), 'master');
+
+    const switched = await send('PUT', '/api/projects/switch-to-image/video-source', { body: { source: 'image' } });
+    assert.equal(switched.status, 200);
+    const project = await switched.json();
+    assert.equal(project.videoSource, 'image');
+    // Tek resimde watermark kararı yok: cropBottom yazılmasa da video aşaması hazır.
+    assert.equal(project.readiness.video.ready, true);
+    assert.equal(project.readiness.video.cropBottom, null);
+
+    const picked = await send('PUT', '/api/projects/switch-to-image/clip', { body: { file: 'MASTER.png' } });
+    assert.equal((await picked.json()).clip.value, './resimler/MASTER.png');
+    assert.equal(JSON.parse(await readFile(join(dir, 'project.json'), 'utf8')).video.source, 'image');
+  });
+
+  test('aynı kaynak → changed false; geçersiz gövde 400, olmayan proje 404', async () => {
+    await writeProjectFolder('same-source', { files: ['videolar/loop.mp4'] });
+    const same = await send('PUT', '/api/projects/same-source/video-source', { body: { source: 'clip' } });
+    assert.equal((await same.json()).videoSourceChange.changed, false);
+
+    for (const body of [{}, { source: 'gif' }, { source: 3 }]) {
+      assert.equal((await send('PUT', '/api/projects/same-source/video-source', { body })).status, 400);
+    }
+    assert.equal((await send('PUT', '/api/projects/nope/video-source', { body: { source: 'image' } })).status, 404);
   });
 
   test('görseli olmayan projede thumbnailUrl null', async () => {

@@ -29,6 +29,8 @@ describe('disk yetersizliği', () => {
       clip: './clip.mp4',
       audioDir: './audio',
       video: { cropBottom: 150 },
+      // Testler canlı yayın klasörüne albüm yazmasın.
+      stream: { dir: null },
     }));
     config = await loadProject(dir.path('project.json'));
   });
@@ -40,6 +42,7 @@ describe('disk yetersizliği', () => {
     const asked = [];
     try {
       const report = await runBuild(config, {
+        render: true,
         diskFree: async (path) => { asked.push(path); return diskFree; },
         overwrite: true,
         loggerFor: (tag) => ({
@@ -77,7 +80,8 @@ describe('disk yetersizliği', () => {
     assert.ok(report.disk.requiredBytes >= size, `tahmin ${report.disk.requiredBytes}, montaj ${size}`);
     assert.deepEqual(
       (await readdir(config.output.dir)).sort(),
-      ['final_ambient.mp4', 'final_ambient.report.json', 'tracklist.txt'],
+      // stream-package: yayın albümünün projedeki kopyası (render'dan bağımsız üretilir).
+      ['final_ambient.mp4', 'final_ambient.report.json', 'stream-package', 'tracklist.txt'],
     );
   });
 

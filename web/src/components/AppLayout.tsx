@@ -6,9 +6,8 @@ import type { Navigate, Route } from '../types';
 const navItems = [
   { label: 'Projects', path: paths.dashboard, routes: ['dashboard', 'project'] },
   { label: 'New Project', path: paths.newProject, routes: ['newProject'] },
-  { label: 'Music Hub', path: paths.music, routes: ['music'] },
-  { label: 'Music Styles', path: paths.styles, routes: ['styles'] },
   { label: 'Ambient', path: paths.ambient, routes: ['ambient'] },
+  { label: 'Promptlar', path: paths.prompts, routes: ['prompts'] },
   { label: 'Settings', path: paths.settings, routes: ['settings'] },
 ] as const;
 

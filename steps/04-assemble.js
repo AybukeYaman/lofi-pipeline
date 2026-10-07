@@ -40,7 +40,7 @@ const NOOP_LOGGER = { info() {}, warn() {} };
  *
  * @param {object} options
  * @param {string} options.videoPath base.mp4 (01-video-prep.js çıktısı)
- * @param {string} options.audioPath mix.wav ya da final_mix_N.wav (02/03 çıktısı)
+ * @param {string} options.audioPath mix.wav ya da final_mix.wav (02/03 çıktısı)
  * @param {string} options.outputPath
  * @param {object} options.workspace core/workspace.js örneği
  * @param {number} [options.fadeOut] sondaki fade süresi (sn), 0 = fade yok

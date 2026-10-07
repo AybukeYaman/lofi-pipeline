@@ -1,21 +1,13 @@
-/** Canonical akışta StageSections dışındaki adımlar: 1 (proje), 3 (açılar), 6 (sıralama). */
+/** Canonical akışta StageSections dışındaki adımlar: 1 (proje), 4 (sıralama). */
 
 import { useEffect, useState } from 'react';
 
-import {
-  fetchProjectMusic,
-  getProjectImageUrl,
-  saveTrackOrder,
-  updateProjectAngles,
-  uploadProjectImage,
-} from '../../api';
-import { AssetPreview } from '../../components/AssetPreview';
+import { fetchProjectMusic, saveTrackOrder } from '../../api';
 import { EmptyState } from '../../components/Feedback';
-import { IMAGE_ACCEPT } from '../../imageTypes';
 import type { ProjectMusicInfo, TrackOrderMode } from '../../types';
-import { ambientFiles, fileName, styleName } from './assetState';
+import { ambientFiles, fileName } from './assetState';
 import { StagePanel, type StageProps } from './StageSections';
-import { CopyPrompt, errorText, UploadButton } from './StepWidgets';
+import { errorText } from './StepWidgets';
 
 // ---------------------------------------------------------------- 1. Proje başlat
 
@@ -29,136 +21,10 @@ export function ProjectStartStage({ project, stageStatus }: StageProps) {
           <dd>{project.name}</dd>
         </div>
         <div>
-          <dt>Müzik stili</dt>
-          <dd>{styleName(project) ?? 'Varsayılan (lofi)'}</dd>
-        </div>
-        <div>
           <dt>Ambient ses</dt>
           <dd>{ambients.length > 0 ? ambients.map((path) => fileName(path)).join(', ') : 'Yok'}</dd>
         </div>
-        <div>
-          <dt>Açı promptları</dt>
-          <dd>
-            <code>{project.promptsPath ?? 'prompts.md'}</code>
-          </dd>
-        </div>
       </dl>
-    </StagePanel>
-  );
-}
-
-// ---------------------------------------------------------------- 3. Kamera açıları
-
-const MAX_ANGLES = 5;
-
-export function AnglesStage({
-  project,
-  stageStatus,
-  onProjectUpdate,
-  prompts,
-  promptsError,
-}: StageProps) {
-  const decision = project.projectJson?.data?.workflow?.angles;
-  const angleFiles = project.angles ?? [];
-  const [count, setCount] = useState<number>(decision?.wanted ? decision.count ?? 1 : 1);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (decision?.wanted && decision.count) setCount(decision.count);
-  }, [decision?.wanted, decision?.count]);
-
-  const choose = async (wanted: boolean, nextCount?: number) => {
-    setSaving(true);
-    setError(null);
-    try {
-      onProjectUpdate?.(await updateProjectAngles(project.id, wanted ? { wanted, count: nextCount } : { wanted }));
-    } catch (err: unknown) {
-      setError(errorText(err, 'Seçim kaydedilemedi.'));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const fileForIndex = (index: number) =>
-    angleFiles.find((path) => new RegExp(`^master${index}\\.`, 'i').test(fileName(path) ?? ''));
-  const wanted = decision?.wanted === true;
-  const requested = wanted ? decision?.count ?? 1 : 0;
-  const uploaded = Array.from({ length: requested }, (_, i) => fileForIndex(i + 1)).filter(Boolean).length;
-  const statusLabel = decision?.wanted === false
-    ? 'Atlandı'
-    : wanted
-      ? `${uploaded}/${requested} açı yüklendi`
-      : angleFiles.length > 0
-        ? `${angleFiles.length} açı mevcut`
-        : 'Karar bekleniyor';
-
-  return (
-    <StagePanel
-      section="angles"
-      title="3. Kamera açıları (opsiyonel)"
-      status={decision?.wanted === false ? 'optional' : wanted && uploaded >= requested ? 'ready' : 'waiting'}
-      statusLabel={statusLabel}
-      stageStatus={stageStatus}
-    >
-      <div className="choice-row">
-        <span>Kaç farklı açı?</span>
-        <select value={count} disabled={saving} onChange={(event) => setCount(Number(event.target.value))}>
-          {Array.from({ length: MAX_ANGLES }, (_, i) => (
-            <option key={i + 1} value={i + 1}>
-              {i + 1}
-            </option>
-          ))}
-        </select>
-        <button className="button button-primary" type="button" disabled={saving} onClick={() => choose(true, count)}>
-          Evet, {count} açı istiyorum
-        </button>
-        <button className="button" type="button" disabled={saving} onClick={() => choose(false)}>
-          Hayır, atla → Video
-        </button>
-      </div>
-      {error ? (
-        <p className="field-hint field-error" role="alert">
-          {error}
-        </p>
-      ) : null}
-
-      {wanted ? (
-        <div className="angle-list">
-          <p className="field-hint">
-            Her promptu yeni bir sohbette kullan; ek olarak yalnızca master frame'i ver. Üretilen görseli ilgili açının altına yükle.
-          </p>
-          {Array.from({ length: requested }, (_, i) => {
-            const index = i + 1;
-            const angle = prompts?.angles[i];
-            const file = fileForIndex(index);
-            return (
-              <div className="angle-item" key={index}>
-                <h3>
-                  Açı {index}
-                  {angle ? ` — ${angle.title}` : ''}
-                </h3>
-                <CopyPrompt label={`Açı ${index} promptu`} prompt={angle?.prompt} error={promptsError} />
-                <div className="stage-media">
-                  <AssetPreview
-                    kind="image"
-                    fileName={fileName(file)}
-                    src={file ? getProjectImageUrl(project.id, 'angle', file) : null}
-                    emptyLabel="Bu açı henüz yüklenmedi."
-                  />
-                  <UploadButton
-                    label={file ? 'Görseli değiştir' : `Açı ${index} görselini yükle`}
-                    accept={IMAGE_ACCEPT}
-                    onFiles={async ([upload]) => {
-                      onProjectUpdate?.(await uploadProjectImage(project.id, 'angle', upload, index));
-                    }}
-                  />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      ) : null}
     </StagePanel>
   );
 }
@@ -232,7 +98,7 @@ export function OrderStage({ project, stageStatus, onProjectUpdate }: StageProps
   return (
     <StagePanel
       section="order"
-      title="6. Sıralama"
+      title="4. Sıralama"
       status={savedOrder && savedOrder.length > 0 ? 'ready' : 'waiting'}
       statusLabel={savedOrder && savedOrder.length > 0 ? 'Sıra kaydedildi' : 'Sıra bekleniyor'}
       stageStatus={stageStatus}

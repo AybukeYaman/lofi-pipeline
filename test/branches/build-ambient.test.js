@@ -31,9 +31,11 @@ describe('build — ambient sese karışır, video bir kez yazılır', () => {
       clip: './clip.mp4', audioDir: './audio', ambient: './amb.wav',
       video: { cropBottom: 0, aspect: '16:9', preset: 'ultrafast', fadeOut: 2 },
       output: { dir: './out' },
+      // Testler canlı yayın klasörüne albüm yazmasın.
+      stream: { dir: null },
     }));
     config = await loadProject(dir.path('project.json'));
-    report = await runBuild(config);
+    report = await runBuild(config, { render: true });
   });
   after(() => dir?.cleanup());
 
@@ -45,7 +47,7 @@ describe('build — ambient sese karışır, video bir kez yazılır', () => {
   });
 
   test('adım sırası: ses → ambient → montaj; montaj gövdeyi kopyalar', () => {
-    assert.deepEqual(report.steps.map((s) => s.tag), ['01', '02', '03', '04', '05']);
+    assert.deepEqual(report.steps.map((s) => s.tag), ['01', '02', '07', '03', '04', '05']);
     assert.equal(report.details['04'].method, 'copy-body+encode-tail');
   });
 

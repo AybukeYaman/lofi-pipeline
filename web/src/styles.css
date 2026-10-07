@@ -519,11 +519,6 @@ h1 {
   font-size: 14px;
 }
 
-.project-list {
-  display: grid;
-  gap: 12px;
-}
-
 .project-card,
 .state-card {
   border: 1px solid var(--border);
@@ -533,26 +528,127 @@ h1 {
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 
+/*
+ * Proje kartı üç yatay şeritten oluşur: sekmeler · gövde · işlemler.
+ *
+ * Şeritler kartın kenarına kadar uzanıyor, bu yüzden kartın KENDİ dolgusu yok
+ * (dolgu şeritlerin içinde). Kart ızgarada esneyerek kardeşleriyle aynı boyu
+ * tutuyor; işlem şeridi `margin-top: auto` ile en alta yapışıyor, böylece
+ * yan yana duran kartların düğmeleri aynı hizada kalıyor.
+ */
 .project-card {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0;
+  border-radius: 10px;
+  overflow: hidden;
 }
 
 .project-card:hover {
   border-color: var(--border-hover);
 }
 
-/* Kartın açılan kısmı; yanındaki Sil butonu iç içe buton olmasın diye ayrı. */
-.project-card-open {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+/* --- şerit 1: alt proje sekmeleri */
+.project-tabs {
+  display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 6px;
+  /* Sarmak yerine kaydır: sekme sayısı kartlar arasında değişiyor, sarınca
+     başlık yüksekliği karttan karta farklı oluyor ve satır kayık görünüyordu. */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  /* Şerit yüksekliği her kartta birebir aynı olmalı: yan yana duran kartlardan
+     yalnız birinde kaydırma çubuğu çıkınca o kartın gövdesi aşağı kayıyor ve
+     satır kayık görünüyordu. Çubuk gizli, taşmayı yarım görünen sekme ve sağ
+     kenardaki solma gösteriyor; tekerlek/sürükleme ile kaydırma çalışmaya
+     devam ediyor. */
+  min-height: 52px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-surface-subtle);
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.project-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.project-tab {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+  max-width: 190px;
+  min-height: 30px;
+  padding: 3px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.project-tab:hover {
+  border-color: var(--border-hover);
+  color: var(--text-main);
+}
+
+.project-tab[aria-selected='true'] {
+  border-color: var(--border-current);
+  color: var(--text-main);
+  background: var(--bg-surface);
+  font-weight: 700;
+}
+
+.project-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Sekmedeki küçük resim de 16:9: kart görseliyle aynı kırpma, farklı ölçek. */
+.project-tab-thumb {
+  flex: none;
+  width: 32px;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: var(--bg-surface);
+  object-fit: cover;
+}
+
+.project-tab-thumb.is-empty {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.project-tab-count {
+  flex: none;
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--bg-surface-hover);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* --- şerit 2: gövde (kartın açılan kısmı; Sil düğmesi iç içe olmasın diye ayrı) */
+.project-card-open {
+  display: block;
+  flex: 1;
   min-width: 0;
-  padding: 0;
+  padding: 16px;
   border: 0;
   color: inherit;
   background: none;
@@ -561,37 +657,96 @@ h1 {
   cursor: pointer;
 }
 
-.project-delete {
-  min-height: 32px;
+.project-card-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  min-width: 0;
+}
+
+.project-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.project-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.project-badge {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--bg-surface-subtle);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* Video 16:9 olduğu için küçük resim de 16:9 kırpılır. */
+.project-thumb {
+  display: block;
+  flex: none;
+  width: 160px;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--bg-surface-subtle);
+  object-fit: cover;
+}
+
+/* Görseli olmayan proje (<span>): boş bir blok yüklenmemiş bir resim gibi
+   duruyordu. Ölçü aynı kalıyor — satırın hizası bozulmasın — ama bunun bir
+   eksik değil "henüz görsel yok" olduğu belli oluyor. */
+span.project-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-style: dashed;
+}
+
+span.project-thumb::after {
+  content: '🖼';
+  opacity: 0.35;
+  font-size: 22px;
+  line-height: 1;
+}
+
+/* --- şerit 3: işlemler */
+.project-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* Gövde kısa kalsa bile en alta yapış: kartların düğmeleri aynı hizada. */
+  margin-top: auto;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-surface-subtle);
+}
+
+.project-card-actions .button {
+  min-height: 30px;
   padding: 0 12px;
+  font-size: 12px;
+}
+
+/* Sil en sağda, yapıcı işlemlerden ayrı dursun. */
+.project-card-actions .project-delete {
+  margin-left: auto;
+}
+
+.project-delete {
   color: var(--text-muted);
 }
 
 .project-delete:hover:not(:disabled) {
   border-color: var(--status-missing-text);
   color: var(--status-missing-text);
-}
-
-.project-card-main {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  min-width: 0;
-}
-
-.project-card-text {
-  min-width: 0;
-}
-
-/* Video 16:9 olduğu için küçük resim de 16:9 kırpılır. */
-.project-thumb {
-  flex: none;
-  width: 112px;
-  aspect-ratio: 16 / 9;
-  border: 1px solid var(--border-subtle);
-  border-radius: 6px;
-  background: var(--bg-surface-subtle);
-  object-fit: cover;
 }
 
 .project-card-open:focus-visible,
@@ -607,21 +762,27 @@ h1 {
 }
 
 .project-card h2 {
-  margin-bottom: 8px;
+  /* Satır aralığını .project-card-text'in gap'i veriyor; başlığın kendi
+     payı olursa iki ayrı boşluk üst üste biniyor ve kartlar kayık duruyordu. */
+  margin: 0;
+  min-width: 0;
   overflow-wrap: anywhere;
   color: var(--text-main);
-  font-size: 18px;
-  line-height: 1.25;
+  font-size: 17px;
+  line-height: 1.3;
 }
 
 .project-card p,
 .project-card time {
+  display: block;
+  margin: 0;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: 13.5px;
+  line-height: 1.4;
 }
 
 .project-card time {
-  white-space: nowrap;
+  font-size: 12.5px;
 }
 
 .state-card {
@@ -1567,7 +1728,6 @@ h1 {
 
   .page-header,
   .summary-row,
-  .project-card-open,
   .workspace-grid,
   .asset-list div,
   .evidence-list div {
@@ -1582,8 +1742,15 @@ h1 {
     align-items: stretch;
   }
 
-  .project-card time {
-    white-space: normal;
+  /* Dar ekranda görsel yan yana sığmıyor: tek sütundaki kart da üstten
+     görselli düzene geçer. */
+  .card-grid-layout.cols-1 .project-card-main {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .card-grid-layout.cols-1 .project-thumb {
+    width: 100%;
   }
 }
 
@@ -1676,18 +1843,25 @@ h1 {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
-.card-grid-layout:not(.cols-1) .project-card {
-  align-items: start;
-}
-
-.card-grid-layout:not(.cols-1) .project-card-open {
-  grid-template-columns: 1fr;
-  align-items: start;
+/*
+ * Çok sütunlu ızgarada kart daralıyor: 160 px'lik yan görsel metne yer
+ * bırakmıyor ve başlıklar iki-üç satıra kırılıp kartları farklı boylara
+ * sokuyordu. Görsel tepeye, tam genişlikte alınıyor — oran yine 16:9, yani
+ * bütün kartların görsel yüksekliği birbirinin aynısı.
+ */
+.card-grid-layout:not(.cols-1) .project-card-main {
+  flex-direction: column;
+  align-items: stretch;
   gap: 12px;
 }
 
-.card-grid-layout:not(.cols-1) .project-card time {
-  white-space: normal;
+.card-grid-layout:not(.cols-1) .project-thumb {
+  width: 100%;
+}
+
+/* Tek sütunda kart geniş: görsel yanda kalır, satırlar dikeyde ortalanır. */
+.card-grid-layout.cols-1 .project-card-main {
+  align-items: center;
 }
 
 .card-grid-layout.cols-1 .library-card {

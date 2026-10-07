@@ -7,29 +7,31 @@
  */
 
 import { spawn } from 'node:child_process';
-import { mkdir, readdir, readFile, realpath, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile, realpath, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
-import { VIDEO_SOURCES } from '../core/config.js';
-import { AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, imageMimeType, listFiles } from '../core/files.js';
+import {
+  AMBIENT_MODES, DEFAULT_AMBIENT_MODE, DEFAULT_CROSSFADE_SECONDS, normalizeAmbientSelection,
+} from '../core/ambient-plan.js';
+import { CONFIG_DEFAULTS, VIDEO_SOURCES } from '../core/config.js';
+import { AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, imageMimeType, listFiles, uniqueFileName } from '../core/files.js';
+import {
+  POMODORO_DEFAULTS, POMODORO_PRESETS, buildTimeline, normalizePomodoroSelection, validatePomodoro,
+} from '../core/pomodoro-plan.js';
 import { probe } from '../core/probe.js';
-import { moveDirToTrash } from '../core/trash.js';
+import { moveDirToTrash, moveFileToTrash } from '../core/trash.js';
 import { readJsonFile, writeTextFile } from '../core/workspace.js';
 import { NewVideoError, runNewVideo } from '../new-video.js';
-import { AmbientError, DEFAULT_AMBIENT_DIR, listAmbients } from '../prep/ambients.js';
+import { AmbientError, DEFAULT_AMBIENT_DIR, findAmbient, listAmbients } from '../prep/ambients.js';
 import {
-  DEFAULT_CROP_BOTTOM, ProjectFileError, completeMusicByUser, cropForWatermark, recordAudioAdded, setProjectClip, setProjectCrop,
-  setProjectCropBottom, setProjectField,
+  DEFAULT_CROP_BOTTOM, ProjectFileError, completeMusicByUser, cropForWatermark, recordAudioAdded, setProjectAmbient, setProjectClip, setProjectCrop,
+  setProjectCropBottom, setProjectField, setProjectPomodoro, setVideoSource,
 } from '../prep/project-file.js';
 import {
-  ANGLE_PATTERN, MASTER_PATTERN, audioAddedOrder, canonicalWorkflow, inspectProject, isMusicCompleted,
-  listProjects, nextStep,
+  audioAddedOrder, canonicalWorkflow, inspectProject, isMusicCompleted,
+  listProjects, nextStep, orderedAudioTracks,
 } from '../prep/project-status.js';
-import { codeBlocks, getAnglePrompts } from '../prep/prompts.js';
 import { DEFAULT_VIDEOS_DIR, ProjectExistsError, validateVideoName } from '../prep/scaffold.js';
-import {
-  STYLES_DIR, STYLE_NAME_PATTERN, StyleError, hasMusicProfile, listStyles, loadStyle, validateStyle,
-} from '../prep/styles.js';
 
 /** Albümdeki parça sayısı sınırı — music-planner ile aynı aralık. */
 const MAX_TRACKS = 50;
@@ -41,11 +43,9 @@ const TRACK_ORDER_MODES = ['alphabetical', 'added', 'manual'];
  * ve türün sunabileceği MIME ailesi (ör. MASTER.txt master olarak sunulmaz).
  */
 const ASSET_TYPES = {
-  master: { kind: 'image/', files: (status) => (status.master ? [status.master] : []) },
-  angle: { kind: 'image/', files: (status) => status.angles },
   /** Seçili klip; tek resim modunda (video.source = "image") bir görsel. */
   clip: { kind: ['video/', 'image/'], files: (status) => (status.clip.exists ? [status.clip.path] : []) },
-  /** Seçim ekranı: selectClip'in kabul ettiği adaylar — videolar/*.mp4 ya da tek resimde MASTER + açılar */
+  /** Seçim ekranı: selectClip'in kabul ettiği adaylar — videolar/*.mp4 ya da tek resim modunda resimler/ altındaki görseller */
   video: { kind: ['video/', 'image/'], files: (status) => status.clips },
   /** Proje listesindeki küçük resim (inspectProject seçer). */
   thumbnail: { kind: 'image/', files: (status) => (status.thumbnail ? [status.thumbnail] : []) },
@@ -69,8 +69,6 @@ const ASSET_MIME_TYPES = {
   '.ogg': 'audio/ogg',
   '.txt': 'text/plain; charset=utf-8',
 };
-/** Süren stil yazımları: aynı stile eşzamanlı ikinci istek 409. */
-const runningStyleWrites = new Set();
 /** Yüklenen görsel (master, açı) üst sınırı. */
 const MAX_IMAGE_SIZE_BYTES = 15 * 1024 * 1024;
 
@@ -106,9 +104,10 @@ export class ApiError extends Error {
 /** Mevcut proje klasorlerini UI'nin liste gorunumune uyarlar. */
 export async function getProjects({ videosDir = DEFAULT_VIDEOS_DIR } = {}) {
   const projects = await listProjects(videosDir);
-  return projects.map(({ name, mtimeMs, thumbnail, step, workflow }) => ({
+  return projects.map(({ name, parentId, mtimeMs, thumbnail, step, workflow }) => ({
     id: name,
     name,
+    parentId: parentId ?? null,
     mtimeMs,
     thumbnailUrl: thumbnail ? assetUrl(name, 'thumbnail', basename(thumbnail)) : null,
     step,
@@ -134,13 +133,12 @@ export async function getProject(id, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
 /**
  * Yeni proje — panelin kullandigi runNewVideo (new-video.js) ile.
  *
- * @param {unknown} body `{ name, style, ambient?, videoSource?, concept?, totalTracks? }`
+ * @param {unknown} body `{ name, ambient?, videoSource?, concept?, totalTracks? }`
  * @returns {Promise<{ project: object, warnings: string[] }>}
  */
 export async function createProject(body, {
   videosDir = DEFAULT_VIDEOS_DIR,
   ambientDir = DEFAULT_AMBIENT_DIR,
-  stylesDir = STYLES_DIR,
   runNewVideoFn = runNewVideo,
 } = {}) {
   const input = parseCreateBody(body);
@@ -150,18 +148,27 @@ export async function createProject(body, {
     throw new ApiError(409, 'Project already exists');
   }
 
+  let parentDir = null;
+  if (input.parentId) {
+    try {
+      parentDir = await resolveProjectDir(input.parentId, videosDir);
+    } catch {
+      throw new ApiError(404, `Parent project "${input.parentId}" not found`);
+    }
+  }
+
   let result;
   try {
     result = await runNewVideoFn({
       videoName: input.name,
-      styleName: input.style,
       ambientName: input.ambient.length > 0 ? input.ambient : undefined,
       videoSource: input.videoSource,
       concept: input.concept,
       totalTracks: input.totalTracks,
+      parentId: input.parentId,
+      aspect: input.aspect,
       videosDir,
       ambientDir,
-      stylesDir,
     });
   } catch (error) {
     if (error instanceof NewVideoError) {
@@ -173,14 +180,117 @@ export async function createProject(body, {
     throw error;
   }
 
+  if (parentDir && Array.isArray(input.selectedTracks) && input.selectedTracks.length > 0) {
+    try {
+      const parentStatus = await inspectProject(parentDir);
+      const parentAudioFiles = await listFiles(parentStatus.audioDir, AUDIO_EXTENSIONS).catch(() => []);
+      const matchingPaths = parentAudioFiles.filter((p) => input.selectedTracks.includes(basename(p)));
+
+      const targetDir = join(videosDir, input.name);
+      const targetStatus = await inspectProject(targetDir);
+      await mkdir(targetStatus.audioDir, { recursive: true });
+
+      const copiedFiles = [];
+      for (const srcPath of matchingPaths) {
+        const originalName = basename(srcPath);
+        const destName = await uniqueFileName(targetStatus.audioDir, originalName);
+        const destPath = join(targetStatus.audioDir, destName);
+        await copyFile(srcPath, destPath);
+        copiedFiles.push(destName);
+      }
+
+      if (copiedFiles.length > 0) {
+        await recordAudioAdded(targetStatus.projectPath, copiedFiles);
+
+        const musicData = targetStatus.projectJson.data?.music;
+        if (musicData && Array.isArray(musicData.tracks) && musicData.tracks.length > 0) {
+          const pendingTracks = musicData.tracks.filter((t) => t.status === 'pending');
+          const count = Math.min(copiedFiles.length, pendingTracks.length);
+          for (let i = 0; i < count; i++) {
+            pendingTracks[i].status = 'completed';
+            pendingTracks[i].file = copiedFiles[i];
+          }
+          musicData.completedCount = musicData.tracks.filter((t) => t.status === 'completed').length;
+          musicData.status = musicData.completedCount === musicData.totalTracks ? 'completed' : 'in_progress';
+          await setProjectField(targetStatus.projectPath, 'music', musicData);
+        }
+      }
+    } catch {
+      // Müzik kopyalama hatası proje oluşturulmasını bozmasın
+    }
+  }
+
   return {
     project: await getProject(input.name, { videosDir }),
     warnings: result.warnings,
   };
 }
 
-/** Müzik stili kütüphanesi ve ambient listesi — web "Music Styles" ekranının verisi. */
-export async function getLibrary({ stylesDir = STYLES_DIR, ambientDir = DEFAULT_AMBIENT_DIR } = {}) {
+/**
+ * Ana projeden veya başka bir projeden müzik parçalarını hedef projeye kopyalar.
+ */
+export async function copyTracksFromProject(targetId, body, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
+  const input = parseBody(
+    body,
+    { sourceProjectId: 'string', trackFiles: 'array' },
+    ['sourceProjectId', 'trackFiles']
+  );
+  const trackFiles = input.trackFiles;
+  if (!Array.isArray(trackFiles) || trackFiles.length === 0) {
+    throw new ApiError(400, 'trackFiles must be a non-empty array of file names');
+  }
+
+  const sourceDir = await resolveProjectDir(input.sourceProjectId, videosDir);
+  const targetDir = await resolveProjectDir(targetId, videosDir);
+
+  const sourceStatus = await inspectProject(sourceDir);
+  const targetStatus = await inspectProject(targetDir);
+
+  const sourceAudioFiles = await listFiles(sourceStatus.audioDir, AUDIO_EXTENSIONS).catch(() => []);
+  const matchingPaths = sourceAudioFiles.filter((p) => trackFiles.includes(basename(p)));
+
+  if (matchingPaths.length === 0) {
+    throw new ApiError(422, 'No matching audio files found in source project');
+  }
+
+  await mkdir(targetStatus.audioDir, { recursive: true });
+  const copiedFiles = [];
+  for (const srcPath of matchingPaths) {
+    const originalName = basename(srcPath);
+    const destName = await uniqueFileName(targetStatus.audioDir, originalName);
+    const destPath = join(targetStatus.audioDir, destName);
+    await copyFile(srcPath, destPath);
+    copiedFiles.push(destName);
+  }
+  await recordAudioAdded(targetStatus.projectPath, copiedFiles);
+
+  const musicData = targetStatus.projectJson.data?.music;
+  if (musicData && Array.isArray(musicData.tracks) && musicData.tracks.length > 0) {
+    const pendingTracks = musicData.tracks.filter((t) => t.status === 'pending');
+    const count = Math.min(copiedFiles.length, pendingTracks.length);
+    for (let i = 0; i < count; i++) {
+      pendingTracks[i].status = 'completed';
+      pendingTracks[i].file = copiedFiles[i];
+    }
+    musicData.completedCount = musicData.tracks.filter((t) => t.status === 'completed').length;
+    musicData.status = musicData.completedCount === musicData.totalTracks ? 'completed' : 'in_progress';
+    await setProjectField(targetStatus.projectPath, 'music', musicData);
+  }
+
+  return {
+    ok: true,
+    copiedCount: copiedFiles.length,
+    copiedFiles,
+  };
+}
+
+/**
+ * Ortak Ambiance kütüphanesi — Ambiance ekranının ve seçicilerin verisi.
+ *
+ * Eskiden burada müzik stilleri de dönüyordu; stil kavramı kaldırıldı
+ * (stil kütüphanesi, `project.json` `style` alanı ve /api/styles uçları).
+ */
+export async function getLibrary({ ambientDir = DEFAULT_AMBIENT_DIR } = {}) {
   let ambients = [];
   let ambientError = null;
   try {
@@ -190,108 +300,9 @@ export async function getLibrary({ stylesDir = STYLES_DIR, ambientDir = DEFAULT_
     ambientError = error.message;
   }
 
-  const styles = [];
-  for (const name of await listStyles({ dir: stylesDir })) {
-    styles.push(await describeLibraryStyle(name, { stylesDir, ambients }));
-  }
-
   return {
-    styles,
     ambients: ambients.map((ambient) => ({ name: ambient.name })),
     ambientError,
-  };
-}
-
-/** İstekteki stil alanları: `music` (profil) ve `suggestedAmbient`; ikisi de isteğe bağlı. */
-const STYLE_BODY = { name: 'string', music: 'object', suggestedAmbient: 'string' };
-
-/**
- * Kütüphaneye müzik stili ekler.
- *
- * @param {unknown} body `{ name, music?, suggestedAmbient? }`
- * @returns {Promise<{ style: object }>} GET /api/library'deki stil girdisiyle aynı biçim
- */
-export async function createLibraryStyle(body, { stylesDir = STYLES_DIR, ambientDir = DEFAULT_AMBIENT_DIR } = {}) {
-  const input = parseBody(body, STYLE_BODY, ['name']);
-  const name = styleNameOf(input.name);
-
-  return exclusive(`style:${name}`, async () => {
-    if ((await listStyles({ dir: stylesDir })).includes(name)) {
-      throw new ApiError(409, 'Style already exists', { name });
-    }
-    const ambients = await ambientsOrEmpty(ambientDir);
-    await writeStyle(join(stylesDir, `${name}.json`), styleFrom({ name }, name, input), { ambients });
-    return { style: await describeLibraryStyle(name, { stylesDir, ambients }) };
-  });
-}
-
-/** Tek bir stilin ayrıntısı. */
-export async function getStyle(name, { stylesDir = STYLES_DIR, ambientDir = DEFAULT_AMBIENT_DIR } = {}) {
-  if (!(await listStyles({ dir: stylesDir })).includes(name)) {
-    throw new ApiError(404, `Style "${name}" not found`);
-  }
-  return describeLibraryStyle(name, { stylesDir, ambients: await ambientsOrEmpty(ambientDir) });
-}
-
-/**
- * Var olan stili günceller (yeniden adlandırma dahil). Dosyadaki diğer
- * alanlar (eski görsel alanlar dahil) korunur.
- *
- * @param {unknown} body `{ name?, music?, suggestedAmbient? }` — music: null profili siler
- */
-export async function updateLibraryStyle(name, body, { stylesDir = STYLES_DIR, ambientDir = DEFAULT_AMBIENT_DIR } = {}) {
-  if (!STYLE_NAME_PATTERN.test(name)) throw new ApiError(400, 'Invalid style name');
-  const input = parseBody(body ?? {}, STYLE_BODY);
-  const targetName = input.name === undefined ? name : styleNameOf(input.name);
-
-  return exclusive(`style:${name}`, async () => {
-    const names = await listStyles({ dir: stylesDir });
-    if (!names.includes(name)) throw new ApiError(404, `Style "${name}" not found`);
-    if (targetName !== name && names.includes(targetName)) {
-      throw new ApiError(409, `Style with name "${targetName}" already exists`);
-    }
-
-    const stylePath = join(stylesDir, `${name}.json`);
-    const existing = await readJsonFile(stylePath).catch(() => ({}));
-    const ambients = await ambientsOrEmpty(ambientDir);
-    await writeStyle(join(stylesDir, `${targetName}.json`), styleFrom(existing, targetName, input), { ambients });
-    if (targetName !== name) await unlink(stylePath).catch(() => {});
-    return { style: await describeLibraryStyle(targetName, { stylesDir, ambients }) };
-  });
-}
-
-/** Kütüphaneden stil siler. */
-export async function deleteLibraryStyle(name, { stylesDir = STYLES_DIR } = {}) {
-  if (!STYLE_NAME_PATTERN.test(name)) throw new ApiError(400, 'Invalid style name');
-
-  return exclusive(`style:${name}`, async () => {
-    if (!(await listStyles({ dir: stylesDir })).includes(name)) {
-      throw new ApiError(404, `Style "${name}" not found`);
-    }
-    await rm(join(stylesDir, `${name}.json`), { force: true });
-    return { ok: true, deleted: name };
-  });
-}
-
-/**
- * Master görseli — elle üretilir ve resimler/MASTER.<uzanti> olarak konur
- * (web'den yüklenir ya da klasöre kopyalanır; algılama inspectProject).
- */
-export async function getMaster(id, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
-  const projectDir = await resolveProjectDir(id, videosDir);
-  const status = await inspectProject(projectDir);
-
-  const masterPath = status.master && await realPathInside(projectDir, status.master);
-  const file = masterPath ? basename(status.master) : null;
-  const previewable = file !== null && assetContentType('master', file) !== null;
-
-  return {
-    ready: file !== null,
-    file,
-    previewUrl: previewable ? assetUrl(id, 'master', file) : null,
-    folder: join(projectDir, 'resimler'),
-    expectedName: 'MASTER.png',
-    acceptedExtensions: IMAGE_EXTENSIONS,
   };
 }
 
@@ -323,6 +334,353 @@ export async function selectClip(id, body, { videosDir = DEFAULT_VIDEOS_DIR } = 
     throw new ApiError(422, error.message);
   }
   return getProject(id, { videosDir });
+}
+
+/**
+ * Gorsel kaynagini degistirir (`clip` <-> `image`) — "resimden yapmistim,
+ * videodan yapmak istiyorum". Panelin switchVideoSource'u ile ayni yazici.
+ *
+ * Yeni moda uymayan `clip` degeri setVideoSource tarafindan bosaltilir; ne
+ * yapildigi `videoSourceChange` altinda doner (istemci uyarilari gosterir).
+ *
+ * @param {unknown} body `{ source: 'clip' | 'image' }`
+ */
+export async function updateVideoSource(id, body, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
+  const projectDir = await resolveProjectDir(id, videosDir);
+  const { source } = parseBody(body, { source: 'string' }, ['source']);
+  if (!VIDEO_SOURCES.includes(source)) {
+    throw new ApiError(400, `source must be one of: ${VIDEO_SOURCES.join(', ')}`);
+  }
+
+  const status = await inspectProject(projectDir);
+  if (!status.projectJson.ok) {
+    throw new ApiError(409, 'project.json is invalid', { problem: status.projectJson.error });
+  }
+
+  let change;
+  try {
+    change = await setVideoSource(status.projectPath, source);
+  } catch (error) {
+    if (!(error instanceof ProjectFileError)) throw error;
+    throw new ApiError(422, error.message);
+  }
+
+  return { ...await getProject(id, { videosDir }), videoSourceChange: change };
+}
+
+/**
+ * Ortak Ambiance klasorune ses yukler.
+ *
+ * Ambiance'lar projeye degil ALBUMLERIN PAYLASTIGI klasore yaziliyor
+ * (prep/ambients.js DEFAULT_AMBIENT_DIR): bir kez eklenen yagmur sesi butun
+ * projelerden secilebilsin. Bu yuzden proje yuklemelerinin aksine burada
+ * proje kimligi yok.
+ *
+ * Ayni adli dosya varsa 409 doner — sessizce uzerine yazmak, baska
+ * projelerin kullandigi sesi degistirmek olurdu.
+ *
+ * @param {unknown} body `{ name, data }` — data: base64
+ */
+export async function uploadAmbient(body, { ambientDir = DEFAULT_AMBIENT_DIR } = {}) {
+  const { name, data } = uploadName(body, AUDIO_EXTENSIONS, 'ambient');
+  const buffer = decodeUpload(data, MAX_AUDIO_UPLOAD_BYTES, 'Audio');
+
+  await mkdir(ambientDir, { recursive: true });
+
+  const target = join(ambientDir, name);
+  const exists = await stat(target).then(() => true, () => false);
+  if (exists) {
+    throw new ApiError(409, `Bu adda bir Ambiance zaten var: ${name}`, { name });
+  }
+
+  await writeFile(target, buffer);
+  return getLibrary({ ambientDir });
+}
+
+/** Onizlemede sunulabilen ses turleri — uzanti -> MIME. */
+const AMBIENT_MIMES = {
+  '.mp3': 'audio/mpeg',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.wav': 'audio/wav',
+  '.flac': 'audio/flac',
+  '.opus': 'audio/ogg',
+  '.ogg': 'audio/ogg',
+};
+
+/**
+ * Bir Ambiance'in ses dosyasi — tarayicida dinlenebilsin diye.
+ *
+ * Secimi yapmadan once "bu ses hangisiydi" diye klasore gitmek gerekmesin.
+ * Yol disariya hic cikmiyor: ad once `listAmbients` ciktisinda aranir, dosya
+ * yolu oradan gelir, istekten gelen metin dosya yoluna cevrilmez.
+ *
+ * @param {string} name uzantisiz kisa ad ya da dosya adi
+ * @returns {Promise<{ path: string, size: number, contentType: string }>}
+ */
+export async function getAmbientAsset(name, { ambientDir = DEFAULT_AMBIENT_DIR } = {}) {
+  let available;
+  try {
+    available = await listAmbients(ambientDir);
+  } catch (cause) {
+    if (!(cause instanceof AmbientError)) throw cause;
+    throw new ApiError(409, cause.message);
+  }
+
+  const found = findAmbient(available, name);
+  if (found === null) throw new ApiError(404, `Ambiance bulunamadi: ${name}`);
+
+  const contentType = AMBIENT_MIMES[extname(found.path).toLowerCase()];
+  if (!contentType) throw new ApiError(400, 'Desteklenmeyen ses turu');
+
+  const real = await realPathInside(resolve(ambientDir), found.path);
+  if (!real) throw new ApiError(404, `Ambiance bulunamadi: ${name}`);
+
+  const info = await stat(real).catch(() => null);
+  if (!info?.isFile()) throw new ApiError(404, `Ambiance bulunamadi: ${name}`);
+
+  return { path: real, size: info.size, contentType };
+}
+
+/**
+ * Ortak klasordeki bir Ambiance'i Geri Donusum Kutusu'na yollar.
+ *
+ * Kalici silme yok: ses baska projelerin project.json'unda yazili olabilir,
+ * yanlislikla silinirse geri alinabilsin.
+ *
+ * @param {string} name uzantisiz kisa ad ya da dosya adi
+ */
+export async function deleteAmbient(name, { ambientDir = DEFAULT_AMBIENT_DIR } = {}) {
+  let available;
+  try {
+    available = await listAmbients(ambientDir);
+  } catch (cause) {
+    if (!(cause instanceof AmbientError)) throw cause;
+    throw new ApiError(409, cause.message);
+  }
+
+  const found = findAmbient(available, name);
+  if (found === null) {
+    throw new ApiError(404, `Ambiance bulunamadi: ${name}`, {
+      available: available.map((a) => a.name),
+    });
+  }
+
+  await moveFileToTrash(found.path);
+  return getLibrary({ ambientDir });
+}
+
+/**
+ * Ambiance secim ekraninin verisi: ortak klasordeki butun sesler, bu projede
+ * secili olanlar (secim sirasiyla) ve dongu ayarlari.
+ *
+ * Secili olan ama artik klasorde bulunmayan ses `missing: true` ile listede
+ * kalir — kullanici dosyayi tasidiysa secim sessizce silinmesin.
+ *
+ * @param {{ videosDir?: string, ambientDir?: string }} [options]
+ */
+export async function getAmbient(
+  id, { videosDir = DEFAULT_VIDEOS_DIR, ambientDir = DEFAULT_AMBIENT_DIR } = {},
+) {
+  const projectDir = await resolveProjectDir(id, videosDir);
+  const status = await inspectProject(projectDir);
+
+  let available = [];
+  let error = null;
+  try {
+    available = await listAmbients(ambientDir);
+  } catch (cause) {
+    if (!(cause instanceof AmbientError)) throw cause;
+    error = cause.message;
+  }
+
+  const json = await readJsonFile(status.projectPath).catch(() => null);
+  const { plan, problems } = normalizeAmbientSelection(
+    json !== null && typeof json === 'object' ? json.ambient : undefined,
+  );
+
+  const byName = new Map(available.map((a) => [a.name.toLowerCase(), a]));
+  const selected = (plan?.tracks ?? []).map((track) => {
+    const name = basename(track.path, extname(track.path));
+    return {
+      name,
+      volumeDb: track.volumeDb,
+      missing: !byName.has(name.toLowerCase()),
+    };
+  });
+
+  return {
+    dir: ambientDir,
+    available: available.map((a) => ({ name: a.name })),
+    selected,
+    mode: plan?.mode ?? DEFAULT_AMBIENT_MODE,
+    modes: AMBIENT_MODES,
+    crossfade: plan?.crossfade ?? DEFAULT_CROSSFADE_SECONDS,
+    volumeDb: plan?.volumeDb ?? null,
+    defaultVolumeDb: CONFIG_DEFAULTS.audio.ambientOffsetDb,
+    error,
+    // project.json elle bozulmussa secim ekrani sessiz kalmasin.
+    problems,
+  };
+}
+
+/**
+ * Ambiance secimini yazar — montaj oncesi her an degistirilebilir.
+ *
+ * Istemci ADLARLA konusur (kutuphanede gorundugu gibi); mutlak yola cevirmek
+ * sunucunun isi, boylece istemci ortak klasorun yerini bilmek zorunda kalmaz.
+ * Bos `tracks` secimi kaldirir.
+ *
+ * @param {unknown} body
+ *   `{ tracks: (string | { name, volumeDb? })[], mode?, crossfade?, volumeDb? }`
+ */
+export async function updateAmbient(
+  id, body, { videosDir = DEFAULT_VIDEOS_DIR, ambientDir = DEFAULT_AMBIENT_DIR } = {},
+) {
+  const projectDir = await resolveProjectDir(id, videosDir);
+  const input = parseBody(body, {
+    tracks: 'array', mode: 'string', crossfade: 'number', volumeDb: 'number',
+  }, ['tracks']);
+
+  if (input.mode !== undefined && !AMBIENT_MODES.includes(input.mode)) {
+    throw new ApiError(400, `mode must be one of: ${AMBIENT_MODES.join(', ')}`);
+  }
+
+  const status = await inspectProject(projectDir);
+  if (!status.projectJson.ok) {
+    throw new ApiError(409, 'project.json is invalid', { problem: status.projectJson.error });
+  }
+
+  let available;
+  try {
+    available = await listAmbients(ambientDir);
+  } catch (cause) {
+    if (!(cause instanceof AmbientError)) throw cause;
+    // Secim bir dosyaya isaret ediyor; klasor okunamiyorsa yolu uyduramayiz.
+    throw new ApiError(409, cause.message);
+  }
+
+  const tracks = [];
+  for (const [index, item] of input.tracks.entries()) {
+    const name = typeof item === 'string' ? item : item?.name;
+    if (typeof name !== 'string' || name.trim() === '') {
+      throw new ApiError(400, `tracks[${index}] must be a name or { name, volumeDb }`);
+    }
+    const found = findAmbient(available, name);
+    if (found === null) {
+      throw new ApiError(422, `Unknown ambient: ${name}`, {
+        available: available.map((a) => a.name),
+      });
+    }
+    const volumeDb = typeof item === 'string' ? null : item.volumeDb ?? null;
+    if (volumeDb !== null && typeof volumeDb !== 'number') {
+      throw new ApiError(400, `tracks[${index}].volumeDb must be a number`);
+    }
+    tracks.push({ path: found.path, volumeDb });
+  }
+
+  try {
+    await setProjectAmbient(status.projectPath, tracks, {
+      mode: input.mode,
+      crossfade: input.crossfade,
+      volumeDb: input.volumeDb,
+    });
+  } catch (error) {
+    if (!(error instanceof ProjectFileError)) throw error;
+    throw new ApiError(422, error.message);
+  }
+
+  return getAmbient(id, { videosDir, ambientDir });
+}
+
+/**
+ * Pomodoro ayari + MONTAJ ONCESI dogrulama.
+ *
+ * Ayni dogrulama build icinde de calisiyor (steps/02-audio-concat.js, parcalar
+ * olculduk ten hemen sonra). Bu uc onu kullanicinin Baslat'a basmasindan ONCE
+ * gosteriyor: sayilar (timeline / muzik toplami / fazla-eksik) ve kirpmanin ne
+ * yapacagi montaj baslamadan ekranda.
+ *
+ * Kucuk bir fark var ve bilerek: burada sureler ffprobe basligindan geliyor,
+ * build'de cozulen ornek sayisindan. Fark dosya basina 13-27 ms; tolerans parca
+ * sayisiyla buyutuluyor ki onizleme "eksik" derken build "tam" demesin.
+ */
+export async function getPomodoro(id, { videosDir = DEFAULT_VIDEOS_DIR, probeFn = probe } = {}) {
+  const projectDir = await resolveProjectDir(id, videosDir);
+  const status = await inspectProject(projectDir);
+
+  const { plan, problems } = normalizePomodoroSelection(status.projectJson.data?.pomodoro);
+  const tracks = await orderedAudioTracks(status, { probeFn });
+  const validation = validatePomodoro({
+    plan,
+    tracks,
+    tolerance: Math.max(1, tracks.length * 0.05),
+  });
+
+  return {
+    enabled: validation.enabled,
+    presets: POMODORO_PRESETS,
+    defaults: POMODORO_DEFAULTS,
+    settings: plan,
+    // project.json elle bozulmussa ayar ekrani sessiz kalmasin.
+    problems,
+    music: {
+      trackCount: tracks.length,
+      totalSeconds: tracks.reduce((sum, track) => sum + (track.duration ?? 0), 0),
+      unmeasuredCount: tracks.filter((track) => track.duration === null).length,
+    },
+    validation: {
+      ok: validation.ok,
+      message: validation.message,
+      problems: validation.problems,
+      warnings: validation.warnings,
+      needsTrimConfirmation: validation.needsTrimConfirmation,
+      comparison: validation.comparison,
+      trim: validation.trim,
+      timeline: validation.timeline,
+      cueCount: validation.cues?.events.length ?? 0,
+    },
+  };
+}
+
+/**
+ * Pomodoro ayarini yazar — montaj oncesi her an degistirilebilir.
+ *
+ * Istemci sade alanlarla konusur; sekli `project.json`'a cevirmek sunucunun
+ * isi (setProjectPomodoro → serializePomodoroPlan). `enabled: false` ayari
+ * kaldirir ve sistem bugunku gibi calisir.
+ *
+ * @param {unknown} body `{ enabled, preset?, workMinutes?, breakMinutes?, rounds?,
+ *   countdownSeconds?, countdownBeep?, workStartSound?, breakStartSound?, trimExcess? }`
+ */
+export async function updatePomodoro(id, body, { videosDir = DEFAULT_VIDEOS_DIR, probeFn = probe } = {}) {
+  const projectDir = await resolveProjectDir(id, videosDir);
+  const input = parseBody(body, {
+    enabled: 'boolean',
+    preset: 'string',
+    workMinutes: 'number',
+    breakMinutes: 'number',
+    rounds: 'number',
+    countdownSeconds: 'number',
+    countdownBeep: 'boolean',
+    workStartSound: 'boolean',
+    breakStartSound: 'boolean',
+    trimExcess: 'boolean',
+  }, ['enabled']);
+
+  const status = await inspectProject(projectDir);
+  if (!status.projectJson.ok) {
+    throw new ApiError(409, 'project.json is invalid', { problem: status.projectJson.error });
+  }
+
+  try {
+    await setProjectPomodoro(status.projectPath, input.enabled ? input : null);
+  } catch (error) {
+    if (!(error instanceof ProjectFileError)) throw error;
+    throw new ApiError(422, error.message);
+  }
+
+  return getPomodoro(id, { videosDir, probeFn });
 }
 
 /**
@@ -468,15 +826,19 @@ export async function getMusic(id, { videosDir = DEFAULT_VIDEOS_DIR, probeFn = p
  */
 export async function updateCrop(id, body, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
   const projectDir = await resolveProjectDir(id, videosDir);
-  const { watermark, cropBottom, cropTop, cropLeft, cropRight } = parseBody(body, {
+  const { watermark, cropBottom, cropTop, cropLeft, cropRight, aspect } = parseBody(body, {
     watermark: 'boolean',
     cropBottom: 'number',
     cropTop: 'number',
     cropLeft: 'number',
     cropRight: 'number',
+    aspect: 'string',
   });
-  if (watermark === undefined && cropBottom === undefined && cropTop === undefined && cropLeft === undefined && cropRight === undefined) {
-    throw new ApiError(400, 'Missing field: watermark or cropBottom');
+  if (watermark === undefined && cropBottom === undefined && cropTop === undefined && cropLeft === undefined && cropRight === undefined && aspect === undefined) {
+    throw new ApiError(400, 'Missing field: watermark, crop, or aspect');
+  }
+  if (aspect !== undefined && !['16:9', '9:16'].includes(aspect)) {
+    throw new ApiError(400, `Geçersiz aspect: "${aspect}" (desteklenen: 16:9, 9:16)`);
   }
   if (cropBottom !== undefined && !isCropBottom(cropBottom)) {
     throw new ApiError(400, 'cropBottom must be a non-negative integer');
@@ -523,6 +885,7 @@ export async function updateCrop(id, body, { videosDir = DEFAULT_VIDEOS_DIR } = 
       cropTop: effectiveTop > 0 ? effectiveTop : (cropTop !== undefined || (watermark === false && currentTop > 0) ? 0 : undefined),
       cropLeft: effectiveLeft > 0 ? effectiveLeft : (cropLeft !== undefined || (watermark === false && currentLeft > 0) ? 0 : undefined),
       cropRight: effectiveRight > 0 ? effectiveRight : (cropRight !== undefined || (watermark === false && currentRight > 0) ? 0 : undefined),
+      aspect,
     });
   } catch (error) {
     if (!(error instanceof ProjectFileError)) throw error;
@@ -595,7 +958,7 @@ export async function deleteProject(id, { videosDir = DEFAULT_VIDEOS_DIR, buildJ
  * @param {unknown} body `{ overwrite? }`
  * @param {{ videosDir?: string, buildJobs: ReturnType<typeof import('./build-jobs.js').createBuildJobs> }} options
  */
-export async function startBuild(id, body, { videosDir = DEFAULT_VIDEOS_DIR, buildJobs }) {
+export async function startBuild(id, body, { videosDir = DEFAULT_VIDEOS_DIR, buildJobs, probeFn = probe }) {
   const projectDir = await resolveProjectDir(id, videosDir);
   const { overwrite = false } = parseBody(body ?? {}, { overwrite: 'boolean' });
 
@@ -615,6 +978,17 @@ export async function startBuild(id, body, { videosDir = DEFAULT_VIDEOS_DIR, bui
   ];
   if (existing.length > 0 && !overwrite) {
     throw new ApiError(409, 'Output already exists', { output: status.output.path, existing });
+  }
+
+  // Pomodoro dogrulamasi gecmeden montaj baslatilmaz (spec bolum 8). build.js
+  // ayni denetimi kendi icinde de yapiyor; buradaki amac kullaniciyi bos yere
+  // calisan bir montajla bekletmemek ve hatayi hemen gostermek.
+  const pomodoro = await getPomodoro(id, { videosDir, probeFn });
+  if (!pomodoro.validation.ok) {
+    throw new ApiError(409, 'Pomodoro validation failed', {
+      pomodoro: pomodoro.validation,
+      message: pomodoro.validation.message,
+    });
   }
 
   return buildJobs.start(id, { projectPath: status.projectPath, overwrite });
@@ -674,7 +1048,10 @@ export function describeReadiness(status) {
   const cropTop = videoData.cropTop ?? 0;
   const cropLeft = videoData.cropLeft ?? 0;
   const cropRight = videoData.cropRight ?? 0;
-  const cropReady = isCropBottom(cropBottom);
+  // Tek resim modunda watermark kararı yok (görselde watermark olmaz), o yüzden
+  // cropBottom yazılmamış olması montajı engellemez — 0 sayılır.
+  const cropReady = isCropBottom(cropBottom) || status.videoSource === 'image';
+  const { plan: pomodoroPlan } = normalizePomodoroSelection(status.projectJson.data?.pomodoro);
 
   const missing = [];
   if (!status.projectJson.ok) missing.push('projectJson');
@@ -683,8 +1060,6 @@ export function describeReadiness(status) {
   if (status.projectJson.ok && !cropReady) missing.push('cropBottom');
 
   return {
-    style: { name: status.style },
-    master: { ready: status.master !== null },
     clip: {
       ready: clipReady,
       selected: status.clip.value || null,
@@ -699,10 +1074,23 @@ export function describeReadiness(status) {
     },
     video: {
       ready: cropReady,
-      cropBottom: cropReady ? cropBottom : null,
-      watermark: cropReady ? cropBottom > 0 : null,
+      cropBottom: isCropBottom(cropBottom) ? cropBottom : null,
+      watermark: isCropBottom(cropBottom) ? cropBottom > 0 : null,
       defaultCropBottom: DEFAULT_CROP_BOTTOM,
     },
+    // Pomodoro burada yalnizca "acik mi, hangi duzen" diyor. Muzigin timeline'i
+    // doldurup doldurmadigi parcalarin olculmesini gerektiriyor (async), o yuzden
+    // `missing` listesine girmez — onu GET /api/projects/:id/pomodoro soyler.
+    pomodoro: pomodoroPlan === null
+      ? { enabled: false }
+      : {
+        enabled: true,
+        preset: pomodoroPlan.preset,
+        workMinutes: pomodoroPlan.workMinutes,
+        breakMinutes: pomodoroPlan.breakMinutes,
+        rounds: pomodoroPlan.rounds,
+        totalMinutes: buildTimeline(pomodoroPlan).totalMinutes,
+      },
     build: { ready: missing.length === 0, missing },
     output: { exists: status.output.exists },
   };
@@ -777,72 +1165,12 @@ async function durationOf(probeFn, path) {
   }
 }
 
-/** Kütüphane stil girdisi (GET /api/library ve POST /api/styles aynı biçim). */
-async function describeLibraryStyle(name, { stylesDir, ambients }) {
-  try {
-    const { style, warnings } = await loadStyle(name, { dir: stylesDir, ambients });
-    return {
-      name,
-      valid: true,
-      music: style.music ?? null,
-      hasMusicProfile: hasMusicProfile(style),
-      suggestedAmbient: style.suggestedAmbient ?? null,
-      warnings,
-    };
-  } catch (error) {
-    if (!(error instanceof StyleError)) throw error;
-    return { name, valid: false, problems: error.problems };
-  }
-}
-
-/** Kebab-case stil adı; değilse 400. */
-function styleNameOf(value) {
-  const name = value.trim();
-  if (!STYLE_NAME_PATTERN.test(name)) throw new ApiError(400, 'name must be lowercase kebab-case (e.g. neo-tokyo)');
-  return name;
-}
-
-/**
- * İstek alanlarını var olan stile uygular. Boş suggestedAmbient ve null music
- * alanı siler; diğer anahtarlar olduğu gibi kalır.
- */
-function styleFrom(existing, name, input) {
-  const style = { ...existing, name };
-  if (input.music !== undefined) {
-    if (input.music === null) delete style.music;
-    else style.music = input.music;
-  }
-  if (input.suggestedAmbient !== undefined) {
-    if (input.suggestedAmbient.trim() === '') delete style.suggestedAmbient;
-    else style.suggestedAmbient = input.suggestedAmbient.trim();
-  }
-  return style;
-}
-
-/** Doğrular ve yazar; geçersizse 422 (problemlerle). */
-async function writeStyle(path, style, { ambients }) {
-  const { problems } = validateStyle(style, { expectedName: style.name, ambients });
-  if (problems.length > 0) throw new ApiError(422, 'Style validation failed', { problems });
-  await writeTextFile(path, JSON.stringify(style, null, 2) + '\n');
-}
-
 async function ambientsOrEmpty(ambientDir) {
   try {
     return await listAmbients(ambientDir);
   } catch (error) {
     if (error instanceof AmbientError) return [];
     throw error;
-  }
-}
-
-/** Ayni anahtarla suren is varken 409; anahtar is bitince (hata dahil) birakilir. */
-async function exclusive(key, fn) {
-  if (runningStyleWrites.has(key)) throw new ApiError(409, 'Style is being updated');
-  runningStyleWrites.add(key);
-  try {
-    return await fn();
-  } finally {
-    runningStyleWrites.delete(key);
   }
 }
 
@@ -870,7 +1198,7 @@ async function exists(path) {
 function parseCreateBody(body) {
   const input = parseBody(
     body,
-    { name: 'string', style: 'string', ambient: 'array', videoSource: 'string', concept: 'string', totalTracks: 'number' },
+    { name: 'string', ambient: 'array', videoSource: 'string', concept: 'string', totalTracks: 'number', parentId: 'string', selectedTracks: 'array', aspect: 'string' },
     ['name'],
   );
 
@@ -881,6 +1209,9 @@ function parseCreateBody(body) {
   if (input.videoSource !== undefined && !VIDEO_SOURCES.includes(input.videoSource)) {
     throw new ApiError(400, `videoSource must be one of: ${VIDEO_SOURCES.join(', ')}`);
   }
+  if (input.aspect !== undefined && input.aspect !== '16:9' && input.aspect !== '9:16') {
+    throw new ApiError(400, 'aspect must be one of: 16:9, 9:16');
+  }
   if (input.concept !== undefined && input.concept.length > MAX_CONCEPT_LENGTH) {
     throw new ApiError(400, `concept must be at most ${MAX_CONCEPT_LENGTH} characters`);
   }
@@ -889,14 +1220,23 @@ function parseCreateBody(body) {
     throw new ApiError(400, `totalTracks must be an integer between 1 and ${MAX_TRACKS}`);
   }
 
+  const selectedTracks = Array.isArray(input.selectedTracks)
+    ? input.selectedTracks.filter((t) => typeof t === 'string' && t.trim() !== '')
+    : undefined;
+  const parentId = typeof input.parentId === 'string' && input.parentId.trim() !== ''
+    ? input.parentId.trim()
+    : undefined;
+
   const concept = input.concept?.trim();
   return {
     name: input.name,
-    style: input.style,
     ambient,
     videoSource: input.videoSource,
     concept: concept || undefined,
     totalTracks: input.totalTracks,
+    parentId,
+    selectedTracks,
+    aspect: input.aspect,
   };
 }
 
@@ -907,7 +1247,7 @@ function parseCreateBody(body) {
  * @param {Record<string, 'string'|'number'|'boolean'|'array'>} schema
  * @param {string[]} [required]
  */
-function parseBody(body, schema, required = []) {
+export function parseBody(body, schema, required = []) {
   if (body === null || typeof body !== 'object' || Array.isArray(body)) {
     throw new ApiError(400, 'Request body must be a JSON object');
   }
@@ -1013,45 +1353,27 @@ function workflowOf(status) {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
-const MAX_ANGLES = 5;
 const MAX_CLIP_UPLOAD_BYTES = 200 * 1024 * 1024;
 const MAX_AUDIO_UPLOAD_BYTES = 100 * 1024 * 1024;
 
 /**
- * Master ve kamera açısı görsel yüklemesi → resimler/. Dosya adı yuvaya göre
- * sabittir (inspectProject bu adlarla bulur): MASTER.*, Master<N>.*.
- * Aynı yuvadaki başka uzantılı eski dosya kaldırılır — iki MASTER olmasın.
+ * Görsel yüklemesi → resimler/. Dosya kullanıcının verdiği adla yazılır; ad
+ * zaten varsa benzersizleştirilir (yüklenen görsel sessizce ezilmesin).
  *
- * @param {unknown} body `{ slot: 'master'|'angle', index?, name, data }`
+ * Yuva (master/açı) kavramı yok: `inspectProject` resimler\ altındaki BÜTÜN
+ * görselleri aday sayıyor, hangisinin kullanılacağına Video adımında seçimle
+ * karar veriliyor.
+ *
+ * @param {unknown} body `{ name, data }`
  */
 export async function uploadProjectImage(id, body, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
   const projectDir = await resolveProjectDir(id, videosDir);
-  const { data, ext } = uploadName(body, IMAGE_EXTENSIONS, 'image', { slot: 'string', index: 'number' });
-  const { slot, index } = body;
-
-  let base;
-  let sameSlot;
-  if (slot === 'master') {
-    base = 'MASTER';
-    sameSlot = (file) => MASTER_PATTERN.test(file);
-  } else if (slot === 'angle') {
-    if (!Number.isInteger(index) || index < 1 || index > MAX_ANGLES) {
-      throw new ApiError(400, `index must be an integer between 1 and ${MAX_ANGLES}`);
-    }
-    base = `Master${index}`;
-    sameSlot = (file) => ANGLE_PATTERN.exec(file)?.[1] === String(index);
-  } else {
-    throw new ApiError(400, 'slot must be master or angle');
-  }
+  const { name, data } = uploadName(body, IMAGE_EXTENSIONS, 'image');
   const buffer = decodeUpload(data, MAX_IMAGE_SIZE_BYTES, 'Image');
 
   const imagesDir = join(projectDir, 'resimler');
   await mkdir(imagesDir, { recursive: true });
-  const target = `${base}${ext}`;
-  for (const existing of await readdir(imagesDir)) {
-    if (existing !== target && sameSlot(existing)) await unlink(join(imagesDir, existing));
-  }
-  await writeFile(join(imagesDir, target), buffer);
+  await writeFile(join(imagesDir, await uniqueFileName(imagesDir, name)), buffer);
   return getProject(id, { videosDir });
 }
 
@@ -1088,33 +1410,6 @@ export async function uploadProjectAudio(id, body, { videosDir = DEFAULT_VIDEOS_
   if (!(await realPathInside(projectDir, status.audioDir))) throw outside;
   await writeFile(join(status.audioDir, name), buffer);
   await recordAudioAdded(status.projectPath, [name]);
-  return getProject(id, { videosDir });
-}
-
-/**
- * Adım 5 kararı → project.json `workflow.angles`. Build bu alanı okumaz.
- *
- * @param {unknown} body `{ angles: { wanted: boolean, count?: number } }`
- */
-export async function updateWorkflow(id, body, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
-  const projectDir = await resolveProjectDir(id, videosDir);
-  const { angles } = parseBody(body ?? {}, { angles: 'object' }, ['angles']);
-  if (angles === null || Array.isArray(angles) || typeof angles.wanted !== 'boolean') {
-    throw new ApiError(400, 'angles.wanted must be a boolean');
-  }
-  let next = { wanted: false };
-  if (angles.wanted) {
-    if (!Number.isInteger(angles.count) || angles.count < 1 || angles.count > MAX_ANGLES) {
-      throw new ApiError(400, `angles.count must be an integer between 1 and ${MAX_ANGLES}`);
-    }
-    next = { wanted: true, count: angles.count };
-  }
-
-  const status = await inspectProject(projectDir);
-  if (!status.projectJson.ok) {
-    throw new ApiError(409, 'project.json is invalid', { problem: status.projectJson.error });
-  }
-  await setProjectField(status.projectPath, 'workflow', { ...workflowOf(status), angles: next });
   return getProject(id, { videosDir });
 }
 
@@ -1166,20 +1461,3 @@ export async function updateTrackOrder(id, body, { videosDir = DEFAULT_VIDEOS_DI
   return getProject(id, { videosDir });
 }
 
-/**
- * Kopyalanacak kamera açısı promptları — yalnızca kod blokları (başlık/not
- * metni değil), başlıklarıyla.
- */
-export async function getProjectPrompts(id, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
-  await resolveProjectDir(id, videosDir);
-  const firstBlock = (md) => codeBlocks(md).blocks[0]?.trim() || null;
-  const angles = (await getAnglePrompts())
-    .split(/^### /m)
-    .slice(1)
-    .map((section) => ({
-      title: section.split('\n')[0].replace(/^\d+\s*[—-]\s*/, '').trim(),
-      prompt: firstBlock(section),
-    }))
-    .filter((angle) => angle.prompt);
-  return { angles };
-}

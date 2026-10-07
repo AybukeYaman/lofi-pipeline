@@ -1,0 +1,9 @@
+{
+  "title": "Müzik ambiyans tanımı",
+  "text": "Tamam, bu ambiyansla ilgili 50 tane müzik üreteceğim. Ancak bu ambiyansı tanımlayan, bana rahatlatıcı, arkada kod yazılabilecek cinsten, öyle düşün, ders çalışıyormuş gibi müzikler lazım. Ama bu ambiyansı tanımlayan müzik aleti, notası, hızı, işte efendime söyleyeyim hangi tarzda olacağı, kaçıncı döneme ait olduğu, artık ne varsa tüm detayıyla tanımlamanız gerekiyor. Böylelikle her bir 50 şarkının bana promptunu verdiğinde onlar da içinde olacak. Bana sırayla 50 promptu, ben sana devam et dedikçe vereceksin ikili olarak. Ama önce bu ambiyansı tanımlayan müzikler nasıldır? Sana en başta bahsettiğim detaylar nedir? Onu ver. Ondan sonra ben sana diyeceğim ki, tamam sırayla bana her bir müziğin unique, özel, farklı olan isimlerini de prompta yazdığın ikili promptları, şarkı promptlarını ver diyeceğim.",
+  "note": "Görseli AI müzik aracına verdikten sonra ambiyansı tanımlatmak için. 50 parçalık albüm akışı.",
+  "tags": [
+    "music"
+  ],
+  "updatedAt": "2026-09-27T13:43:39.208Z"
+}

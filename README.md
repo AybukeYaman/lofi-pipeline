@@ -4,7 +4,7 @@ Lofi müzik videoları üretimi için otomatik prep (hazırlık) ve ffmpeg taban
 
 Bu proje iki ana katmandan oluşur:
 1. **Montaj Otomasyonu (Katman 1 - `build.js`):** Suno müzik parçalarını, Hailuo video klip döngüsünü ve ambient ses efektlerini otomatik olarak birleştirir, YouTube uyumlu tracklist ve rapor üretir.
-2. **Hazırlık Otomasyonu (Aşama 7 / `prep`):** Proje iskeleti oluşturma, kamera açısı promptları (`prompts.md`) ve Gemini API ile albüm müzik planı. Görseller elle üretilir; stil yalnızca müzik profilidir (`styles/<ad>.json` → `music`).
+2. **Hazırlık Otomasyonu (`prep`):** Proje iskeleti oluşturma ve Gemini API ile albüm müzik planı. Görseller elle üretilir.
 3. **Panel (Aşama 8–9 / `npm start`):** Üç komutu ok tuşlu bir menüden çalıştırır; istenirse proje klasörüne bakıp kaldığı yerden devam eder, birden fazla projeyi sırayla derler.
 
 ---
@@ -76,19 +76,18 @@ Onay soruları "Evet / Hayır" seçimidir (yazarak değil).
 | `clip` dolu ve dosyası var, `audio\` klasöründe parça var | Montaj (onayla → `build.js`) |
 | `clip` dolu ve dosyası var, `audio\` boş | Elle: Suno parçalarını `audio\` altına koy |
 | `videolar\` altında `.mp4` var, `clip` boş (ya da dosyası yok) | Klibi seç → panel `clip` alanını yazar |
-| `resimler\MASTER.*` var | Elle: Faz 3 (`prompts.md`) |
-| Hiçbiri | Elle: Faz 1 (`prompts.md`) |
+| Hiçbiri | Elle: döngü klibini `videolar\` altına koy |
 
-  Elle yapılan adımlarda "Tekrar kontrol et" seçeneği var. Yalnızca Faz 1 ve Faz 3'te "Bu oturumda atla" da çıkar; atlama panel kapanınca unutulur.
+  Elle yapılan adımlarda "Tekrar kontrol et" seçeneği var. Yalnızca klip adımında (`faz3`) "Bu oturumda atla" da çıkar; atlama panel kapanınca unutulur.
 - **Klip seçimi:** project.json'da yalnızca `clip` değişir (`./videolar/in.mp4` biçiminde). Dosya 2 boşluk girintiyle yeniden yazılır.
 - Panel etkileşimli terminal ister; çıktı dosyaya ya da boruya yönlendirilirse (ör. Git Bash) çıkış kodu 2 ile kapanır.
 - **Terminal kontrolü:** Ok tuşlarının bir terminalde güvenilir çalıştığını doğrulamak için `npm run tty-check`. Betik; seçim, kaydırma, çoklu seçim, Türkçe giriş, Esc, alt süreç devri ve Ctrl+C adımlarını tek tek sınar ve sonuç satırı basar.
 
 ### 1. Yeni Video Projesi İskeleti Oluşturma (`new-video.js`)
-İsteğe bağlı müzik stili ve ambient ses efekti ile proje iskeletini (`project.json`, `prompts.md`) açar:
+İsteğe bağlı ambient ses efekti ile proje iskeletini (`project.json`) açar:
 
 ```bash
-node new-video.js "video3-Neo Tokyo Night" --style cozy-realistic --ambient heavyRain
+node new-video.js "video3-Neo Tokyo Night" --ambient heavyRain
 ```
 
 ### 2. Video Montajını Başlatma (`build.js`)
@@ -120,12 +119,11 @@ lofi/
 ├── lofi.js                # Panel (npm start)
 ├── new-video.js           # Proje iskeleti oluşturma CLI
 ├── core/                  # Çekirdek yardımcılar (ffmpeg, workspace, config, vb.)
-├── prep/                  # Hazırlık modülleri (gemini, scaffold, prompts, styles, ambients, project-status, project-file)
+├── prep/                  # Hazırlık modülleri (gemini, scaffold, ambients, project-status, project-file)
 ├── ui/                    # Panel: prompt (enquirer adaptörü), runner (komutu ayrı süreçte çalıştırma), actions (menü akışları)
 ├── scripts/               # tty-check (terminal doğrulaması, elle çalıştırılır)
-├── prompts/               # Faz 1-3 prompt şablonları (faz1-master, faz2-angles, faz3-motion)
+├── prompts/library/       # Kullanıcının kendi prompt kütüphanesi
 ├── steps/                 # Build adımları (concat, video-loop, mix, vb.)
-├── styles/                # Tanımlı stiller ve referans görselleri (styles/refs/)
 └── test/                  # Unit ve branch testleri
 ```
 
@@ -133,5 +131,5 @@ lofi/
 
 ## ⚙️ Manuel ve Otomatik İş Bölümü
 
-- **Otomatik (Pipeline):** Proje iskelet kurulumu, açı promptları, Gemini ile müzik planı, ffmpeg montajı, crossfade loop, ambient miksajı, tracklist ve rapor üretimi. Panel ayrıca sıradaki adımı bulur, `clip` alanını yazar ve birden fazla projeyi sırayla derler.
-- **Manuel (Kullanıcı Yargısı):** Suno'da müzik üretimi, Google AI Studio / Gemini Image ile master frame üretimi, Hailuo ile video klip üretimi. Donanım VRAM kısıtları nedeniyle medya üretimi bulut/manuel araçlarda kalmaktadır.
+- **Otomatik (Pipeline):** Proje iskelet kurulumu, Gemini ile müzik planı, 24/7 yayın paketi (`background.mp4` + `music/`), ffmpeg montajı, crossfade loop, ambient miksajı, tracklist ve rapor üretimi. Panel ayrıca sıradaki adımı bulur, `clip` alanını yazar ve birden fazla projeyi sırayla derler.
+- **Manuel (Kullanıcı Yargısı):** Suno'da müzik üretimi, Hailuo ile video klip üretimi. Donanım VRAM kısıtları nedeniyle medya üretimi bulut/manuel araçlarda kalmaktadır.

@@ -1,6 +1,6 @@
 /**
  * Panel akışları — sahte prompter (değer yanıtları), komutları kaydeden sahte
- * run, geçici videolar/ambient/styles klasörleri. Gerçek komut çalıştırılmaz;
+ * run, geçici videolar/ambient klasörleri. Gerçek komut çalıştırılmaz;
  * new-video gerektiğinde sahte run projeyi runNewVideo ile kurar.
  * Prompter uygulamasından (readline/enquirer) bağımsızdır.
  */
@@ -13,9 +13,8 @@ import { after, beforeEach, describe, test } from 'node:test';
 import { runPanel } from '../../lofi.js';
 import { parseCli as parseNewVideoCli, runNewVideo } from '../../new-video.js';
 import { createDownloadWatcher } from '../../prep/download-watch.js';
-import { STYLES_DIR } from '../../prep/styles.js';
 import {
-  batchBuild, buildProject, chooseClip, continueProject, createSession, newProject,
+  batchBuild, buildProject, chooseClip, continueProject, createSession, newProject, switchVideoSource,
 } from '../../ui/actions.js';
 import { inspectProject, nextStep } from '../../prep/project-status.js';
 import { BACK, createFakePrompter, pick, picks } from '../helpers/fake-prompter.js';
@@ -32,17 +31,13 @@ let fakeDownloads;
 beforeEach(async () => {
   root ??= await tempDir('ui-actions');
   const base = root.path(`t${n++}`);
-  env = { base, videosDir: join(base, 'videolar'), ambientDir: join(base, 'ambient'), stylesDir: join(base, 'styles') };
+  env = { base, videosDir: join(base, 'videolar'), ambientDir: join(base, 'ambient') };
   await mkdir(env.videosDir, { recursive: true });
   await mkdir(env.ambientDir);
-  await mkdir(env.stylesDir);
   // Auto Watch gerçek İndirilenler'e düşmesin: her testin kendi boş klasörü.
   fakeDownloads = join(base, 'downloads');
   await mkdir(fakeDownloads);
   for (const file of ['campfire.mp3', 'gentleRain.mp3', 'heavyRain.mp3']) await writeFile(join(env.ambientDir, file), '');
-  for (const style of ['anime-cel', 'cozy-realistic']) {
-    await copyFile(join(STYLES_DIR, `${style}.json`), join(env.stylesDir, `${style}.json`));
-  }
 });
 after(() => root?.cleanup());
 
@@ -76,7 +71,7 @@ function makeCtx(answers = [], { code = 0, codes = [], closeWhenEmpty = false } 
   return { ctx, calls, prompter, openedFolders, out: () => prompter.output() };
 }
 
-const project = (name = 'v') => runNewVideo({ videoName: name, styleName: 'anime-cel', ...env });
+const project = (name = 'v') => runNewVideo({ videoName: name, ...env });
 const readProject = async (dir) => JSON.parse(await readFile(join(dir, 'project.json'), 'utf8'));
 const itemsOf = (prompter, questionPart) =>
   prompter.questions.find((q) => q.question.includes(questionPart))?.items.map((i) => i.label);
@@ -94,15 +89,15 @@ const watcherWith = ({ afterStart, onPoll }) => (options) => {
 
 describe('newProject', () => {
   test('geçersiz isim tekrar sorulur; öneri başta → --ambient gentleRain; devam etme', async () => {
-    const { ctx, calls, prompter, out } = makeCtx(['video:3', 'video3-Test', pick('anime-cel'), picks('gentleRain'), '2:17 AM', '17', pick('default'), false]);
+    const { ctx, calls, prompter, out } = makeCtx(['video:3', 'video3-Test', picks('gentleRain'), '2:17 AM', '17', pick('default'), false]);
     assert.equal(await newProject(ctx), false);
     assert.ok(out().includes('geçersiz karakter'));
-    assert.deepEqual(itemsOf(prompter, 'Select Ambient'), ['gentleRain (öneri)', 'campfire', 'heavyRain', 'Ambient yok']);
+    assert.deepEqual(itemsOf(prompter, 'Select Ambient'), ['campfire', 'gentleRain', 'heavyRain', 'Ambient yok']);
   });
 
   test('"Ambient yok" → --ambient yok; var olan isim reddedilir', async () => {
     await project('var-olan');
-    const { ctx, calls, out } = makeCtx(['var-olan', 'yeni', pick('cozy-realistic'), pick('Ambient yok'), '2:17 AM', '17', pick('default'), false]);
+    const { ctx, calls, out } = makeCtx(['var-olan', 'yeni', pick('Ambient yok'), '2:17 AM', '17', pick('default'), false]);
     assert.equal(await newProject(ctx), false);
     assert.ok(out().includes('bu isimde klasör zaten var'));
   });
@@ -114,24 +109,17 @@ describe('newProject', () => {
   });
 
   test('komut başarısızsa proje seçilmez, devam sorulmaz', async () => {
-    const { ctx, out } = makeCtx(['v', pick('anime-cel'), pick('Ambient yok'), '2:17 AM', '17', pick('default'), true], { code: 2 });
+    const { ctx, out } = makeCtx(['v', pick('Ambient yok'), '2:17 AM', '17', pick('default'), true], { code: 2 });
     assert.equal(await newProject(ctx), false);
     assert.ok(out().includes('Proje oluşturulamadı (çıkış kodu 2).'));
   });
 
-  test('müzik stili seçilmezse (varsayılan) --style gönderilmez', async () => {
-    const { ctx, calls } = makeCtx(['v', pick('Varsayılan'), pick('Ambient yok'), '2:17 AM', '17', pick('default'), true], { code: 2 });
+  test('stil adımı yok: akış isimden doğrudan Ambiance seçimine geçer', async () => {
+    const { ctx, calls, prompter } = makeCtx(['v', pick('Ambient yok'), '2:17 AM', '17', pick('default'), true], { code: 2 });
     assert.equal(await newProject(ctx), false);
     assert.equal(calls[0][0], 'new-video.js');
     assert.ok(!calls[0].includes('--style'), calls[0].join(' '));
-  });
-
-  test('geçersiz stil dosyası listede devre dışı; seçilemez', async () => {
-    await writeFile(join(env.stylesDir, 'bozuk.json'), '{}');
-    const { ctx, prompter } = makeCtx(['v', pick('bozuk')]);
-    await assert.rejects(newProject(ctx), /devre dışı seçeneği gösteriyor: bozuk \(geçersiz stil dosyası\)/);
-    const style = prompter.questions.find((q) => q.question === 'Music Style:');
-    assert.equal(style.items.find((i) => i.label.startsWith('bozuk')).disabled, true);
+    assert.equal(prompter.questions.some((q) => q.question === 'Music Style:'), false);
   });
 });
 
@@ -157,6 +145,59 @@ describe('chooseClip ve buildProject', () => {
     assert.equal((await readProject(dir)).clip, './videolar/in.mp4');
   });
 
+  test('switchVideoSource: image→clip seçimi boşaltır, uyarı basar, aday sayısını gösterir', async () => {
+    const { dir } = await project();
+    await writeFile(join(dir, 'resimler', 'MASTER.png'), '');
+    await writeFile(join(dir, 'videolar', 'loop.mp4'), '');
+    // Tek resim moduna geç ve görseli seç.
+    const toImage = makeCtx();
+    assert.equal(await switchVideoSource(toImage.ctx, dir, 'image'), true);
+    assert.equal(await chooseClip(makeCtx().ctx, dir), true);
+    assert.equal((await readProject(dir)).clip, './resimler/MASTER.png');
+
+    // Fikir değişti: videodan yapılsın.
+    const { ctx, out } = makeCtx();
+    assert.equal(await switchVideoSource(ctx, dir, 'clip'), true);
+    const json = await readProject(dir);
+    assert.equal(json.video.source, 'clip');
+    assert.equal(json.clip, '', 'uymayan görsel seçimi boşaltılmalı');
+    assert.match(out(), /video\.source: image → clip/);
+    assert.match(out(), /tek resim, klip modunda kullanılamaz/);
+
+    // Boşalan seçim klip modunda videolar\ altından doldurulur.
+    assert.equal(await chooseClip(makeCtx().ctx, dir), true);
+    assert.equal((await readProject(dir)).clip, './videolar/loop.mp4');
+  });
+
+  test('switchVideoSource: aday sayıları sorulur, aynı kaynak seçilirse yazma yok', async () => {
+    const { dir } = await project();
+    await writeFile(join(dir, 'resimler', 'MASTER.png'), '');
+    await writeFile(join(dir, 'videolar', 'a.mp4'), '');
+    await writeFile(join(dir, 'videolar', 'b.mp4'), '');
+
+    const { ctx, prompter, out } = makeCtx([pick('Tek resim')]);
+    assert.equal(await switchVideoSource(ctx, dir), true);
+    assert.deepEqual(itemsOf(prompter, 'Görsel kaynağı'), [
+      'Döngü videosu — videolar\\ altında 2 aday (şu anki)',
+      'Tek resim — resimler\\ altında 1 aday',
+      'Geri',
+    ]);
+    assert.equal((await readProject(dir)).video.source, 'image');
+
+    const same = makeCtx();
+    assert.equal(await switchVideoSource(same.ctx, dir, 'image'), false);
+    assert.match(same.out(), /Kaynak zaten "image"/);
+    assert.doesNotMatch(out(), /boş/);
+  });
+
+  test('switchVideoSource: hedef klasör boşsa dosya koyma talimatı verilir', async () => {
+    const { dir } = await project();
+    await writeFile(join(dir, 'videolar', 'loop.mp4'), '');
+    const { ctx, out } = makeCtx();
+    assert.equal(await switchVideoSource(ctx, dir, 'image'), true);
+    assert.match(out(), new RegExp(`${join(dir, 'resimler').replace(/[\\\\]/g, '\\\\')} boş`));
+  });
+
   test('çıktı varsa: hayır → komut yok; evet → --overwrite', async () => {
     const { dir } = await project();
     await mkdir(join(dir, 'out'));
@@ -180,11 +221,6 @@ describe('continueProject', () => {
     await writeFile(join(dir, 'project.json'), JSON.stringify(data, null, 2));
 
     const { ctx, openedFolders } = makeCtx([
-      async () => {
-        await writeFile(join(dir, 'resimler', 'MASTER.png'), '');
-        return pick('⏳ [ Auto Watch ]');
-      },
-      pick('Son 15 dakika'),
       // Adım 6: Video klip
       async () => {
         await writeFile(join(dir, 'videolar', 'in.mp4'), '');
@@ -212,16 +248,6 @@ describe('continueProject', () => {
   test('Klasörü Aç (dosya yok) → bekleme ekranında kalır, Yenile (dosya var) → otomatik ilerler', async () => {
     const { dir } = await project('bekleme-testi');
     const { ctx, out, openedFolders } = makeCtx([
-      // FAZ 1: Klasörü Aç seçilir ama dosya eklenmez
-      pick('open'),
-      // FAZ 1: Dosya eklendikten sonra Yenile seçilir
-      async () => {
-        await writeFile(join(dir, 'resimler', 'MASTER.png'), '');
-        const data = await readProject(dir);
-        delete data.music;
-        await writeFile(join(dir, 'project.json'), JSON.stringify(data, null, 2));
-        return pick('refresh');
-      },
       // FAZ 3 (Video): Klasörü Aç seçilir ama dosya eklenmez
       pick('open'),
       // FAZ 3 (Video): Klip eklendikten sonra Yenile seçilir
@@ -245,12 +271,11 @@ describe('continueProject', () => {
 
     const outputText = out();
     assert.ok(outputText.includes('[📂 Klasör Açıldı]'));
-    assert.ok(outputText.includes('[✓ Master Görseli Algılandı]'));
     assert.ok(outputText.includes('Müzik') || outputText.includes('audio') || outputText.includes('Default music'));
     assert.ok(outputText.includes('[✓ Video Klip Algılandı & Bağlandı]'));
 
     // "Klasörü Aç" her adımda doğru klasörü açar.
-    assert.deepEqual(openedFolders, [join(dir, 'resimler'), join(dir, 'videolar'), join(dir, 'audio')]);
+    assert.deepEqual(openedFolders, [join(dir, 'videolar'), join(dir, 'audio')]);
   });
 
   test('proje yoksa seçim yapılamaz ve akış biter', async () => {
@@ -265,7 +290,7 @@ describe('continueProject', () => {
     await project('yeni');
     const { ctx, prompter } = makeCtx([pick('yeni'), pick('🏠 Ana Menüye Dön')]);
     await continueProject(ctx);
-    assert.deepEqual(itemsOf(prompter, 'Proje seç'), ['yeni — Master görseli', 'eski — Master görseli', 'Geri']);
+    assert.deepEqual(itemsOf(prompter, 'Proje seç'), ['yeni — Klip', 'eski — Klip', 'Geri']);
     assert.equal(ctx.session.project, join(env.videosDir, 'yeni'));
   });
 });
@@ -330,7 +355,6 @@ describe('runPanel', () => {
     const { ctx, out } = makeCtx([pick('Settings'), pick('Quit')]);
     assert.equal(await runPanel(ctx), 0);
     assert.ok(out().includes('lofi — üretim paneli'));
-    assert.ok(out().includes('anime-cel — müzik profili var · ambient önerisi: gentleRain'));
     assert.ok(out().includes("Ambient'ler: campfire, gentleRain, heavyRain"));
   });
 
@@ -443,7 +467,6 @@ describe('multi-track music workflow in continueProject', () => {
     }
 
     let inspected = await inspectProject(dir);
-    assert.ok(inspected.master);
     assert.equal(nextStep(inspected).id, 'faz3'); // Music is recognized as completed, step moves to faz3!
 
     // Call continueProject and immediately choose menu when it reaches faz3
@@ -692,7 +715,6 @@ describe('multi-track music workflow in continueProject', () => {
   test('newProject: Müzik dosyası seçiminde Cancel yapıldığında START PRODUCTION? ekranına geçilmez, Müzik Kaynağı menüsünde kalınır', async () => {
     const { ctx, prompter } = makeCtx([
       'video-cancel-test',
-      pick('anime-cel'),
       picks('gentleRain'),
       '2:17 AM',
       '17',
@@ -977,43 +999,6 @@ describe('Auto Watch (İndirilenler → resimler/ ve videolar/)', () => {
     return dir;
   }
 
-  test('faz1: İndirilenler\'e inen görsel resimler/MASTER.png olarak taşınır ve adım ilerler', async () => {
-    const dir = await visualProject('watch-master');
-    const { ctx, out } = makeCtx([
-      pick('⏳ [ Auto Watch ]'),
-      pick('Son 15 dakika'),
-      // Sıra Master → Klip → Müzik: master'dan sonra klip menüsü gelir.
-      async () => {
-        await writeFile(join(dir, 'videolar', 'in.mp4'), '');
-        await writeFile(join(dir, 'audio', 'a.m4a'), '');
-        return pick('refresh');
-      },
-      pick('no'),
-      // audio/ zaten dolu → müzik adımı tamam sayılır, montaj çalışır.
-      pick('Ana Menüye Dön'),
-    ]);
-    // Görsel yalnızca ilk izleyici başlatıldığında insin.
-    let dropped = false;
-    Object.assign(ctx, {
-      downloadPollMs: 1,
-      createDownloadWatcherFn: watcherWith({
-        afterStart: async () => {
-          if (dropped) return;
-          dropped = true;
-          await writeFile(join(fakeDownloads, 'sahne [midjourney] (1).png'), 'görsel');
-        },
-      }),
-    });
-    ctx.session.project = dir;
-    await continueProject(ctx, null, { pollMs: 1 });
-
-    assert.equal(await readFile(join(dir, 'resimler', 'MASTER.png'), 'utf8'), 'görsel');
-    assert.deepEqual(await readdir(fakeDownloads), [], 'dosya taşınır, İndirilenler\'de kalmaz');
-    assert.ok(out().includes('[✓ İndirilen Dosya Alındı]'));
-    assert.equal(ctx.store.getState().onKey, null);
-    assert.equal(ctx.store.getState().actionHint, null);
-  });
-
   test('faz3: İndirilenler\'e inen mp4 videolar/ altına taşınır, ad temizlenir ve klip bağlanır', async () => {
     const dir = await visualProject('watch-clip');
     await writeFile(join(dir, 'resimler', 'MASTER.png'), '');
@@ -1035,35 +1020,5 @@ describe('Auto Watch (İndirilenler → resimler/ ve videolar/)', () => {
 
     assert.equal(await readFile(join(dir, 'videolar', 'Kamera-Klip.mp4'), 'utf8'), 'klip');
     assert.equal((await readProject(dir)).clip, './videolar/Kamera-Klip.mp4');
-  });
-
-  test('faz1: iki Esc izlemeyi durdurur, menüye dönülür (tek Esc durdurmaz)', async () => {
-    const dir = await visualProject('watch-escape');
-    const { ctx, out, prompter } = makeCtx([
-      pick('⏳ [ Auto Watch ]'),
-      pick('Son 15 dakika'),
-      pick('Ana Menüye Dön'),
-    ]);
-    Object.assign(ctx, {
-      downloadPollMs: 1,
-      createDownloadWatcherFn: watcherWith({
-        onPoll: async (n) => {
-          if (n === 2) {
-            assert.equal(ctx.store.getState().actionHint.key, 'Esc Esc', 'kısayol ekranda görünür');
-            assert.equal(ctx.store.getState().onKey('', { escape: true }), true);
-            assert.ok(out().includes('Esc\'e tekrar bas'));
-            assert.ok(ctx.store.getState().footer.includes('Auto Watch'), 'tek Esc\'te izleme sürüyor');
-          }
-          if (n === 3) ctx.store.getState().onKey('', { escape: true });
-        },
-      }),
-    });
-    ctx.session.project = dir;
-    await continueProject(ctx, null, { pollMs: 1 });
-
-    assert.ok(out().includes('[Auto Watch Durdu]'));
-    assert.equal(ctx.store.getState().onKey, null);
-    assert.equal(ctx.store.getState().footer, '');
-    assert.equal(prompter.questions.filter((q) => q.question.startsWith('MASTER FRAME READY')).length, 2);
   });
 });

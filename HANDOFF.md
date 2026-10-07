@@ -1,4 +1,16 @@
 # Lofi Video Pipeline — Devir ve Mimari Dokümanı (Aşama 7–11)
+
+> **GÜNCEL DURUM İÇİN `CLAUDE.md`'YE BAK.**
+>
+> Bu dosya bir TARİHÇE (devir dosyası): yazıldığı andaki kararları ve tuzakları
+> anlatır, bugünkü yapıyı değil. Aşağıda geçen ama ARTIK OLMAYAN kavramlar:
+> müzik stili kütüphanesi (`styles/`), Music Hub ve Music Styles sayfaları,
+> master görseli adımı (`faz1`, `resimler/MASTER.png`), kamera açısı promptları
+> (`prompts.md`, `prep/prompts.js`).
+>
+> Ayrıca uzun video artık VARSAYILAN ÇIKTI DEĞİL: `node build.js` 24/7 yayın
+> paketini üretir, render `--render` ile istenir.
+
 > **Durum (2026-09-16):** Aşama 11f (albüm üretim zinciri: yay, DNA/varyant prompt, orkestratör) commit'li — bölüm 14.6. Paralel oturumların toparlaması ve açık işler — bölüm 15. apiframe provider (11e) yazıldı — bölüm 14.7. `npm test` 457/457.
 > **Durum (2026-09-15):** Aşama 11 (Suno prompt motoru + ingest: 11a, 11b, 11c, 11d) tamamlandı — bölüm 14. `npm test` 310/310 geçiyor.
 > **Durum (2026-09-14):** Pipeline Katman 1 (Montaj Otomasyonu: Aşama 1–6) ve Katman 2 (Hazırlık Otomasyonu: Aşama 7a, 7b, 7c, 7d-1, 7d-2) başarıyla tamamlandı. `npm test` 164/164 test geçiyor. Gerçek Gemini API kabul testi doğrulandı.

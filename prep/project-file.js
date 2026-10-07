@@ -1,5 +1,6 @@
 /**
- * project.json'a hedefli yazım — `clip`, müzik durumu, watermark kırpması.
+ * project.json'a hedefli yazım — `clip`, görsel kaynağı, Ambiance seçimi,
+ * Pomodoro ayarı, müzik durumu, watermark kırpması.
  *
  * build.js konfigi hiç değiştirmez (Aşama 5 kararı 2); clip'i yazan panel.
  * Diğer anahtarların değeri ve sırası korunur, dosya 2 boşluk girintiyle
@@ -9,6 +10,10 @@
 import { stat } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
+import { normalizeAmbientSelection, serializeAmbientPlan } from '../core/ambient-plan.js';
+import { CONFIG_DEFAULTS, VIDEO_SOURCES } from '../core/config.js';
+import { isImagePath } from '../core/files.js';
+import { normalizePomodoroSelection, serializePomodoroPlan } from '../core/pomodoro-plan.js';
 import { readJsonFile, writeTextFile } from '../core/workspace.js';
 
 /** Watermark kırpması — Hailuo'da ölçülen değer (HANDOFF bölüm 4). */
@@ -23,8 +28,44 @@ export class ProjectFileError extends Error {
 }
 
 /**
+ * Bir dosyanın hangi görsel kaynağı moduna denk geldiği: görsel uzantısı →
+ * `image`, gerisi → `clip`. Modun `clip` alanıyla ayrı düşmemesi bu tek
+ * kurala bağlı — core/config.js ikisi uyuşmazsa build'i reddediyor.
+ *
+ * @param {string} clipPath
+ * @returns {'clip'|'image'}
+ */
+export function videoSourceForClip(clipPath) {
+  return isImagePath(clipPath) ? 'image' : 'clip';
+}
+
+/** project.json'daki etkin `video.source` — anahtar yoksa/geçersizse varsayılan. */
+function currentVideoSource(json) {
+  const video = json.video;
+  const source = video !== null && typeof video === 'object' && !Array.isArray(video)
+    ? video.source
+    : undefined;
+  return VIDEO_SOURCES.includes(source) ? source : CONFIG_DEFAULTS.video.source;
+}
+
+/** `video` bloğunu nesne olarak verir; başka türse hata. */
+function videoBlock(json) {
+  const video = json.video === undefined ? {} : json.video;
+  if (video === null || typeof video !== 'object' || Array.isArray(video)) {
+    throw new ProjectFileError('project.json "video" bir nesne olmalı');
+  }
+  return video;
+}
+
+/**
  * `clip` alanını yazar. Klip proje klasörünün içinde ve var olmalı; göreli
  * `./videolar/in.mp4` biçiminde yazılır (proje klasörü taşınsa da çalışır).
+ *
+ * `video.source` seçilen dosyanın türünden TÜRETİLİR: görsel seçilince `image`,
+ * video seçilince `clip` yazılır. Kullanıcı fikrini değiştirip resimden videoya
+ * (ya da tersine) geçtiğinde iki alanın ayrı düşüp build'i kilitlemesi böyle
+ * engelleniyor. Etkin kaynak zaten doğruysa anahtar EKLENMEZ — varsayılana
+ * güvenen konfigler olduğu gibi kalır.
  *
  * @param {string} projectPath
  * @param {string} clipPath mutlak ya da proje klasörüne göre göreli
@@ -43,8 +84,176 @@ export async function setProjectClip(projectPath, clipPath) {
 
   const json = await readProjectObject(projectPath);
   json.clip = `./${rel.split(sep).join('/')}`;
+
+  const source = videoSourceForClip(target);
+  if (source !== currentVideoSource(json)) {
+    json.video = { ...videoBlock(json), source };
+  }
+
   await writeTextFile(projectPath, JSON.stringify(json, null, 2) + '\n');
   return json.clip;
+}
+
+/**
+ * `video.source` yazar — "fikrimi değiştirdim, bu videoyu resimden değil
+ * klipten kurmak istiyorum" işlemi.
+ *
+ * Yeni moda uymayan `clip` değeri boşaltılır (silinmez, `""` olur: seçim
+ * ekranları o alanı bekliyor). Kırpma değerlerine DOKUNULMAZ — watermark payı
+ * kullanıcının ölçümü, mod değişti diye sıfırlanmaz; gözden geçirilmesi
+ * gerekiyorsa uyarı döner. Montaj çıktısı da silinmez: build zaten base.mp4'ü
+ * her çalışmada baştan üretiyor.
+ *
+ * @param {string} projectPath
+ * @param {'clip'|'image'} source
+ * @returns {Promise<{
+ *   source: 'clip'|'image', previous: 'clip'|'image', changed: boolean,
+ *   clearedClip: string|null, warnings: string[],
+ * }>}
+ */
+export async function setVideoSource(projectPath, source) {
+  if (!VIDEO_SOURCES.includes(source)) {
+    throw new ProjectFileError(
+      `video.source ${VIDEO_SOURCES.map((v) => `"${v}"`).join(' ya da ')} olmalı: ${JSON.stringify(source)}`,
+    );
+  }
+
+  const json = await readProjectObject(projectPath);
+  const previous = currentVideoSource(json);
+  const video = videoBlock(json);
+
+  if (previous === source) {
+    return { source, previous, changed: false, clearedClip: null, warnings: [] };
+  }
+
+  const warnings = [];
+  let clearedClip = null;
+
+  // Seçili dosya yeni moda uymuyorsa alanı boşalt: bırakılsa core/config.js
+  // "clip: video.source ... olmalı" diyip build'i reddederdi ve kullanıcı
+  // project.json'u elle düzeltmek zorunda kalırdı — çözülen şey tam buydu.
+  const clip = typeof json.clip === 'string' ? json.clip.trim() : '';
+  if (clip !== '' && videoSourceForClip(clip) !== source) {
+    clearedClip = json.clip;
+    json.clip = '';
+    warnings.push(
+      source === 'image'
+        ? `Seçili klip (${clearedClip}) bir video, tek resim modunda kullanılamaz — seçim boşaltıldı, resimler\\ altından görsel seç.`
+        : `Seçili görsel (${clearedClip}) tek resim, klip modunda kullanılamaz — seçim boşaltıldı, videolar\\ altından .mp4 seç.`,
+    );
+  }
+
+  const cropBottom = video.cropBottom;
+  if (Number.isSafeInteger(cropBottom) && cropBottom > 0) {
+    warnings.push(
+      source === 'image'
+        ? `video.cropBottom ${cropBottom} olarak kaldı: görselde watermark olmaz, alttan kırpma istemiyorsan 0 yap.`
+        : `video.cropBottom ${cropBottom} olarak kaldı: yeni klibin watermark payı farklıysa kırpmayı yeniden ölç.`,
+    );
+  } else if (source === 'clip') {
+    warnings.push(
+      `video.cropBottom ayarlı değil: klipte watermark varsa alttan ~${DEFAULT_CROP_BOTTOM} px kırpma gerekir.`,
+    );
+  }
+
+  json.video = { ...video, source };
+  await writeTextFile(projectPath, JSON.stringify(json, null, 2) + '\n');
+  return { source, previous, changed: true, clearedClip, warnings };
+}
+
+/**
+ * Ambiance seçimini yazar — "arka planda hangi ortam sesleri çalsın".
+ *
+ * Proje kurulurken verilen seçim artık her an değişebiliyor: `new-video.js`
+ * ilk seçimi yazıyor, bu fonksiyon sonrasını. Dosyaya yazılan şekil
+ * `core/ambient-plan.js` `serializeAmbientPlan`'den gelir — tek parça +
+ * varsayılan ayar yine `"ambient": "..."` olarak kalır, eski projelerin
+ * dosyası şişmez.
+ *
+ * Yollar proje klasörüne göre DEĞİL mutlak yazılır: Ambiance'lar albümlerin
+ * paylaştığı ortak klasörde duruyor (`prep/ambients.js` DEFAULT_AMBIENT_DIR),
+ * proje klasörünün içinde değil.
+ *
+ * @param {string} projectPath
+ * @param {{ path: string, volumeDb?: number|null }[]} tracks
+ *   seçilen Ambiance'lar, çalma/katman sırasıyla; boş dizi seçimi kaldırır
+ * @param {{ mode?: string, crossfade?: number, volumeDb?: number|null }} [settings]
+ * @returns {Promise<{ ambient: unknown, plan: object|null, warnings: string[] }>}
+ */
+export async function setProjectAmbient(projectPath, tracks, settings = {}) {
+  const selection = tracks.length === 0
+    ? undefined
+    : {
+      ...(settings.mode === undefined ? {} : { mode: settings.mode }),
+      ...(settings.crossfade === undefined ? {} : { crossfade: settings.crossfade }),
+      ...(settings.volumeDb === undefined || settings.volumeDb === null
+        ? {} : { volumeDb: settings.volumeDb }),
+      tracks: tracks.map((track) =>
+        track.volumeDb === undefined || track.volumeDb === null
+          ? track.path
+          : { path: track.path, volumeDb: track.volumeDb }),
+    };
+
+  const { plan, problems } = normalizeAmbientSelection(selection);
+  if (problems.length > 0) {
+    throw new ProjectFileError(`Ambiance seçimi geçersiz:\n  - ${problems.join('\n  - ')}`);
+  }
+
+  const json = await readProjectObject(projectPath);
+  const ambient = serializeAmbientPlan(plan);
+
+  // Seçim kaldırıldıysa anahtar tamamen silinir: `"ambient": null` bırakılsa
+  // core/config.js onu "ambient yok" saysa da dosyada anlamsız bir artık
+  // kalırdı ve kullanıcı seçim var mı yok mu ayırt edemezdi.
+  if (ambient === undefined) delete json.ambient;
+  else json.ambient = ambient;
+
+  await writeTextFile(projectPath, JSON.stringify(json, null, 2) + '\n');
+
+  const warnings = [];
+  if (plan === null) {
+    warnings.push('Ambiance seçimi kaldırıldı — montajda arka plan sesi olmayacak.');
+  }
+
+  return { ambient: ambient ?? null, plan, warnings };
+}
+
+/**
+ * Pomodoro ayarını yazar — "bu video Pomodoro oturumları olarak kurulsun".
+ *
+ * Ambiance ile aynı kural: yazılan şekil `core/pomodoro-plan.js`
+ * `serializePomodoroPlan`'den gelir, varsayılandan sapmayan alan dosyaya
+ * yazılmaz. Mod kapatıldığında anahtar tamamen silinir — `"enabled": false`
+ * bırakmak, kullanıcının dosyada "açık mı kapalı mı" diye bakacağı anlamsız
+ * bir artık olurdu; kapalı Pomodoro bugünkü sistemin ta kendisi.
+ *
+ * @param {string} projectPath
+ * @param {object|null} settings `{ enabled, preset?, workMinutes?, breakMinutes?,
+ *   rounds?, countdownSeconds?, countdownBeep?, workStartSound?, breakStartSound?,
+ *   trimExcess?, cue? }` — null ya da `enabled: false` seçimi kaldırır
+ * @returns {Promise<{ pomodoro: object|null, plan: object|null, warnings: string[] }>}
+ */
+export async function setProjectPomodoro(projectPath, settings) {
+  const { plan, problems } = normalizePomodoroSelection(
+    settings === null ? undefined : settings,
+  );
+  if (problems.length > 0) {
+    throw new ProjectFileError(`Pomodoro ayarı geçersiz:\n  - ${problems.join('\n  - ')}`);
+  }
+
+  const json = await readProjectObject(projectPath);
+  const written = serializePomodoroPlan(plan);
+  if (written === undefined) delete json.pomodoro;
+  else json.pomodoro = written;
+
+  await writeTextFile(projectPath, JSON.stringify(json, null, 2) + '\n');
+
+  const warnings = [];
+  if (plan === null) {
+    warnings.push('Pomodoro kapatıldı — montaj bugünkü düz akışla çalışacak.');
+  }
+
+  return { pomodoro: written ?? null, plan, warnings };
 }
 
 /**
@@ -125,11 +334,7 @@ export async function setProjectCropBottom(projectPath, cropBottom) {
     throw new ProjectFileError(`video.cropBottom sıfır ya da pozitif tam sayı olmalı: ${JSON.stringify(cropBottom)}`);
   }
   const json = await readProjectObject(projectPath);
-  const video = json.video === undefined ? {} : json.video;
-  if (video === null || typeof video !== 'object' || Array.isArray(video)) {
-    throw new ProjectFileError('project.json "video" bir nesne olmalı');
-  }
-  json.video = { ...video, cropBottom };
+  json.video = { ...videoBlock(json), cropBottom };
   await writeTextFile(projectPath, JSON.stringify(json, null, 2) + '\n');
   return cropBottom;
 }
@@ -141,18 +346,14 @@ export async function setProjectCropBottom(projectPath, cropBottom) {
  * @param {{ cropTop?: number, cropBottom?: number, cropLeft?: number, cropRight?: number, watermark?: boolean }} options
  * @returns {Promise<object>}
  */
-export async function setProjectCrop(projectPath, { cropTop, cropBottom = 0, cropLeft, cropRight } = {}) {
+export async function setProjectCrop(projectPath, { cropTop, cropBottom = 0, cropLeft, cropRight, aspect } = {}) {
   for (const [key, val] of Object.entries({ cropTop, cropBottom, cropLeft, cropRight })) {
     if (val !== undefined && (!Number.isSafeInteger(val) || val < 0)) {
       throw new ProjectFileError(`video.${key} sıfır ya da pozitif tam sayı olmalı: ${JSON.stringify(val)}`);
     }
   }
   const json = await readProjectObject(projectPath);
-  const video = json.video === undefined ? {} : json.video;
-  if (video === null || typeof video !== 'object' || Array.isArray(video)) {
-    throw new ProjectFileError('project.json "video" bir nesne olmalı');
-  }
-  const nextVideo = { ...video, cropBottom };
+  const nextVideo = { ...videoBlock(json), cropBottom };
   if (cropTop !== undefined) {
     if (cropTop > 0) nextVideo.cropTop = cropTop;
     else delete nextVideo.cropTop;
@@ -164,6 +365,10 @@ export async function setProjectCrop(projectPath, { cropTop, cropBottom = 0, cro
   if (cropRight !== undefined) {
     if (cropRight > 0) nextVideo.cropRight = cropRight;
     else delete nextVideo.cropRight;
+  }
+  if (aspect !== undefined) {
+    if (aspect) nextVideo.aspect = aspect;
+    else delete nextVideo.aspect;
   }
   json.video = nextVideo;
   await writeTextFile(projectPath, JSON.stringify(json, null, 2) + '\n');

@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { after, afterEach, before, beforeEach, describe, test } from 'node:test';
 
-import { generateAlbum } from '../../prep/album-chain.js';
 import { SunoGenerateError } from '../../prep/suno-generate-errors.js';
 import { generateSong, waitForSong } from '../../prep/suno-generate.js';
 import {
@@ -469,35 +468,5 @@ describe('checkStatus / waitForSong / close', () => {
     assert.equal(fake.state.closed, true);
     await bot.checkStatus({ jobId: ID_A }, CTX);
     assert.equal(fake.launches(), 2);
-  });
-});
-
-describe('albüm zinciri + downloadAudio', () => {
-  let dir;
-  before(async () => { dir = await mkdtemp(join(tmpdir(), 'suno-bot-')); });
-  after(async () => { await rm(dir, { recursive: true, force: true }); });
-
-  test('bot ile üretilen ilk varyant suno-ingest downloadAudio ile indirilir', async () => {
-    const fake = createFakeBrowser({
-      elements: createPage(),
-      hrefs: [[], [song(ID_A), song(ID_B)]],
-      rows: [[{ id: ID_A, found: true, text: '2:00' }, { id: ID_B, found: true, text: '2:10' }]],
-    });
-    const { bot, clock } = makeBot(fake);
-    const fetched = [];
-    const fetchFn = async (url) => {
-      fetched.push(url);
-      return { ok: true, status: 200, arrayBuffer: async () => new TextEncoder().encode('MP3').buffer };
-    };
-
-    const summary = await generateAlbum(
-      [{ index: 1, title: 'Rain', styleString: 'lofi', negativeTags: 'vocals' }],
-      { outputDir: join(dir, 'audio'), provider: bot, apiKey: COOKIE, env: {}, fetchFn, sleepFn: clock.sleepFn, manifestPath: null },
-    );
-
-    assert.equal(summary.ok.length, 1, JSON.stringify(summary.failed));
-    assert.deepEqual(fetched, [SUNO_AUDIO_URL(ID_A)]);
-    assert.deepEqual(summary.ok[0].alternateUrls, [SUNO_AUDIO_URL(ID_B)]);
-    assert.equal(await readFile(summary.ok[0].file, 'utf8'), 'MP3');
   });
 });

@@ -2,7 +2,7 @@
  * Video proje klasörü — plan (saf) ve yazım.
  *
  * Tek sorumluluk: videolar/<isim>/ altındaki iskeleti kurmak. Stil ve ambient
- * seçimini doğrulamaz (çağıran loadStyle / findAmbient ile verir), medya
+ * seçimini doğrulamaz (çağıran findAmbient ile verir), medya
  * üretmez. Var olan klasöre asla yazmaz.
  */
 
@@ -13,8 +13,6 @@ import { VIDEO_SOURCES } from '../core/config.js';
 import { writeTextFile } from '../core/workspace.js';
 import { DEFAULT_CROP_BOTTOM } from './project-file.js';
 import { generateMusicPlan, generateMusicPlanAsync } from './music-planner.js';
-import { buildPromptsMd } from './prompts.js';
-import { musicStyleText } from './styles.js';
 
 /** Albüm klasörlerinin kökü. `--videos-dir` ezer. */
 export const DEFAULT_VIDEOS_DIR = 'C:\\Users\\Aybuke Yeni\\Desktop\\Youtube\\videolar';
@@ -57,15 +55,12 @@ export function validateVideoName(name) {
  * @param {{
  *   videosDir: string,
  *   videoName: string,
- *   style?: object | null,
  *   ambient: { name: string, path: string } | null,
- *   templates: { file: string, text: string }[],
  *   concept?: string,
  *   totalTracks?: number,
  *   musicPlan?: object,
  *   videoSource?: 'clip'|'image',
- * }} input style: müzik stili, isteğe bağlı (loadStyle ile doğrulanmış);
- *   videoSource: 'image' → tüm video boyunca tek resim (watermark yok, kırpma 0);
+ * }} input videoSource: 'image' → tüm video boyunca tek resim (watermark yok, kırpma 0);
  *   isim doğrulanmış (validateVideoName)
  * @returns {{
  *   dir: string,
@@ -73,7 +68,7 @@ export function validateVideoName(name) {
  *   files: { name: string, path: string, content: string, bom: boolean }[],
  * }}
  */
-export function planProject({ videosDir, videoName, style = null, ambient, templates, concept, totalTracks, musicPlan, videoSource = 'clip' }) {
+export function planProject({ videosDir, videoName, ambient, concept, totalTracks, musicPlan, videoSource = 'clip', parentId = null, aspect = '16:9' }) {
   if (!VIDEO_SOURCES.includes(videoSource)) {
     throw new Error(`videoSource: ${VIDEO_SOURCES.join(' | ')} olmalı (verilen: ${JSON.stringify(videoSource)})`);
   }
@@ -83,24 +78,25 @@ export function planProject({ videosDir, videoName, style = null, ambient, templ
     ? ambient.map((a) => a.path)
     : (ambient ? ambient.path : null);
 
-  const plan = musicPlan || generateMusicPlan(musicPlanInput({ videoName, style, concept, totalTracks }));
+  const plan = musicPlan || generateMusicPlan(musicPlanInput({ videoName, concept, totalTracks }));
+
+  const validAspect = aspect === '9:16' ? '9:16' : '16:9';
 
   const project = {
     clip: '',
     audioDir: './audio',
+    ...(parentId ? { parentId } : {}),
     ...(ambientVal ? { ambient: ambientVal } : {}),
     // Tek resim AI görseli: kırpılacak watermark yok. Klip modu varsayılan olduğu için alan yazılmaz.
     video: videoSource === 'image'
-      ? { source: 'image', cropBottom: 0, aspect: '16:9' }
-      : { cropBottom: DEFAULT_CROP_BOTTOM, aspect: '16:9' },
+      ? { source: 'image', cropBottom: 0, aspect: validAspect }
+      : { cropBottom: DEFAULT_CROP_BOTTOM, aspect: validAspect },
     output: { dir: './out' },
     music: plan,
-    ...(style ? { style: style.name } : {}),
   };
 
   const files = [
     { name: 'project.json', content: JSON.stringify(project, null, 2) + '\n', bom: false },
-    { name: 'prompts.md', content: buildPromptsMd({ videoName, templates }), bom: true },
   ];
 
   return {
@@ -115,11 +111,10 @@ export async function planProjectAsync(options) {
   return planProject({ ...options, musicPlan });
 }
 
-/** Müzik planlayıcısının girdisi: stil seçilmediyse ya da profili boşsa planlayıcı varsayılanı. */
-function musicPlanInput({ videoName, style, concept, totalTracks }) {
+/** Müzik planlayıcısının girdisi; müzik tarifi planlayıcının kendi varsayılanından gelir. */
+function musicPlanInput({ videoName, concept, totalTracks }) {
   return {
     concept: concept || `${videoName} Album Concept`,
-    ...(musicStyleText(style) ? { style: musicStyleText(style) } : {}),
     totalTracks: totalTracks || 17,
   };
 }

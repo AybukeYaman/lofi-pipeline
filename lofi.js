@@ -17,7 +17,6 @@ import { render } from 'ink';
 import { DEFAULT_AMBIENT_DIR } from './prep/ambients.js';
 import { inspectProject, listProjects, nextStep } from './prep/project-status.js';
 import { DEFAULT_VIDEOS_DIR } from './prep/scaffold.js';
-import { STYLES_DIR } from './prep/styles.js';
 import {
   batchBuild, buildProject, chooseClip, continueProject, createSession, newProject,
   selectProject, showLibrary, showStatus,
@@ -50,7 +49,7 @@ const MENU = [
  * Menü döngüsü. Akış hatası paneli düşürmez; giriş kapanınca (EOF, menüde
  * Ctrl+C) 0 döner.
  *
- * @param {object} ctx { prompter, run, videosDir, ambientDir, stylesDir, session }
+ * @param {object} ctx { prompter, run, videosDir, ambientDir, session }
  * @param {{ menu?: typeof MENU }} [options]
  * @returns {Promise<number>}
  */
@@ -164,7 +163,6 @@ export async function main() {
     },
     videosDir: DEFAULT_VIDEOS_DIR,
     ambientDir: DEFAULT_AMBIENT_DIR,
-    stylesDir: STYLES_DIR,
     session,
     store,
   };

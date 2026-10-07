@@ -28,6 +28,8 @@ describe('onaylanmayan kırpma', () => {
       clip: './clip.mp4',
       audioDir: './audio',
       video: { cropBottom: 150 },
+      // Testler canlı yayın klasörüne albüm yazmasın.
+      stream: { dir: null },
     }));
     config = await loadProject(dir.path('project.json'), { verifyCrop: true });
   });
@@ -38,6 +40,7 @@ describe('onaylanmayan kırpma', () => {
     const logs = [];
     try {
       await runBuild(config, {
+        render: true,
         overwrite: true,
         loggerFor: () => ({ info: (m) => logs.push(m), warn: (m) => logs.push(m) }),
         ...options,
