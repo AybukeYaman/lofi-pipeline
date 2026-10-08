@@ -1,36 +1,25 @@
 import { useEffect, useState, type FormEvent } from 'react';
 
-import {
-  assignAlbumToProject,
-  createProject,
-  fetchLibrary,
-  fetchMusicLibrary,
-  fetchProjectMusic,
-  fetchProjects,
-  ApiError,
-} from '../api';
+import { validateVideoName } from '../../../core/project-name.js';
+import { createProject, fetchProjects, ApiError } from '../api';
 import { PageHeader } from '../components/PageHeader';
 import { showError, showSuccess } from '../toast';
-import type { LoadState, ProjectMusicAudio, ProjectSummary, VideoSource } from '../types';
+import type { LoadState, ProjectSummary, VideoSource } from '../types';
 
 type FormErrors = Partial<Record<'name' | 'form', string>>;
 
-const INVALID_NAME_CHARS = /[<>:"/\\|?* - ]/;
-
+/**
+ * Görsel kaynağı burada kalır (workspace'te de var) çünkü yalnızca kuruluş
+ * anında seçilirse doğru kırpma varsayılanı yazılır: prep/scaffold.js tek resim
+ * için cropBottom 0, klip için 150 verir. Sonradan kaynağı değiştirmek
+ * (prep/project-file.js) kırpmayı bilerek korur, yani 0'a dönmez.
+ */
 const VIDEO_SOURCE_OPTIONS: Array<{ id: VideoSource; name: string; description: string }> = [
-  { id: 'clip', name: 'Video loop (.mp4)', description: 'Master frame is animated into a short looping clip.' },
-  { id: 'image', name: 'Single image', description: 'One still image stays on screen for the whole video — no clip needed.' },
+  { id: 'clip', name: 'Döngü videosu (.mp4)', description: 'Watermark payı için alttan 150 px kırpma ile başlar.' },
+  { id: 'image', name: 'Tek resim', description: 'Tek görsel video boyunca ekranda kalır; kırpma 0 ile başlar.' },
 ];
 
 const PROJECT_DRAFT_KEY = 'lofi_new_project_draft';
-
-function formatDuration(seconds: number | null | undefined): string {
-  if (typeof seconds !== 'number' || isNaN(seconds) || seconds < 0) return '';
-  const total = Math.round(seconds);
-  const mins = Math.floor(total / 60);
-  const secs = total % 60;
-  return `${mins}:${String(secs).padStart(2, '0')}`;
-}
 
 export function NewProject({
   initialParentId,
@@ -41,15 +30,16 @@ export function NewProject({
   onCancel: () => void;
   onCreated?: (id: string) => void;
 }) {
+  // "+ Alt Proje" ile gelindiyse üst proje kararı önceki ekranda verilmiştir:
+  // tekrar sormak yerine onaylatıp değiştirme imkânı bırakılır. Değer rotadan
+  // gelir (router.parseRoute `?parent=`i çözer); burada adres çubuğu okunmaz.
+  const presetParentId = initialParentId || '';
+
   const [name, setName] = useState('');
   const [concept, setConcept] = useState('');
-  const [parentId, setParentId] = useState<string>(() => {
-    if (initialParentId) return initialParentId;
-    const params = new URLSearchParams(window.location.search);
-    return params.get('parent') || '';
-  });
+  const [parentId, setParentId] = useState<string>(presetParentId);
+  const [isEditingParent, setIsEditingParent] = useState(!presetParentId);
   const [videoSource, setVideoSource] = useState<VideoSource>('clip');
-  const [aspect, setAspect] = useState<'16:9' | '9:16'>('16:9');
   const [errors, setErrors] = useState<FormErrors>({});
   const [existingNames, setExistingNames] = useState<string[]>([]);
   const [namesState, setNamesState] = useState<LoadState>('loading');
@@ -57,73 +47,31 @@ export function NewProject({
   const [serverProblems, setServerProblems] = useState<string[]>([]);
   const [restoredDraftTime, setRestoredDraftTime] = useState<string | null>(null);
 
-  const [availableAlbums, setAvailableAlbums] = useState<Array<{ id: string; name: string; trackCount: number }>>([]);
-  const [selectedAlbumId, setSelectedAlbumId] = useState<string>('');
-
   const [availableProjects, setAvailableProjects] = useState<ProjectSummary[]>([]);
-  const [parentMusicTracks, setParentMusicTracks] = useState<ProjectMusicAudio[]>([]);
-  const [loadingParentMusic, setLoadingParentMusic] = useState<boolean>(false);
-  const [selectedTracks, setSelectedTracks] = useState<string[]>([]);
 
   useEffect(() => {
     try {
       const raw = localStorage.getItem(PROJECT_DRAFT_KEY);
-      if (raw) {
-        const draft = JSON.parse(raw);
-        if (draft) {
-          if (draft.name) setName(draft.name);
-          if (draft.concept) setConcept(draft.concept);
-          if (draft.parentId && !initialParentId) setParentId(draft.parentId);
-          if (draft.videoSource === 'clip' || draft.videoSource === 'image') setVideoSource(draft.videoSource);
-          if (draft.aspect === '16:9' || draft.aspect === '9:16') setAspect(draft.aspect);
-          if (draft.selectedAlbumId) setSelectedAlbumId(draft.selectedAlbumId);
-          setRestoredDraftTime(draft.savedAt || 'Önceki oturum');
-        }
+      if (!raw) return;
+      const draft = JSON.parse(raw);
+      if (!draft) return;
+      if (draft.name) setName(draft.name);
+      if (draft.concept) setConcept(draft.concept);
+      if (draft.parentId && !presetParentId) {
+        setParentId(draft.parentId);
+        setIsEditingParent(true);
       }
+      if (draft.videoSource === 'clip' || draft.videoSource === 'image') setVideoSource(draft.videoSource);
+      setRestoredDraftTime(draft.savedAt || 'Önceki oturum');
     } catch {}
   }, []);
 
   useEffect(() => {
-    if (initialParentId) {
-      setParentId(initialParentId);
-    } else {
-      const params = new URLSearchParams(window.location.search);
-      const urlParent = params.get('parent');
-      if (urlParent) {
-        setParentId(urlParent);
-      }
+    if (presetParentId) {
+      setParentId(presetParentId);
+      setIsEditingParent(false);
     }
-  }, [initialParentId]);
-
-  // Üst proje seçildiğinde onun müziklerini çek
-  useEffect(() => {
-    if (!parentId) {
-      setParentMusicTracks([]);
-      setSelectedTracks([]);
-      return;
-    }
-    let isActive = true;
-    setLoadingParentMusic(true);
-    fetchProjectMusic(parentId)
-      .then((musicInfo) => {
-        if (!isActive) return;
-        const tracks = musicInfo.audioFiles || [];
-        setParentMusicTracks(tracks);
-        // Varsayılan olarak tüm parçaları seçili getir
-        setSelectedTracks(tracks.map((t) => t.file));
-        setLoadingParentMusic(false);
-      })
-      .catch(() => {
-        if (!isActive) return;
-        setParentMusicTracks([]);
-        setSelectedTracks([]);
-        setLoadingParentMusic(false);
-      });
-
-    return () => {
-      isActive = false;
-    };
-  }, [parentId]);
+  }, [presetParentId]);
 
   useEffect(() => {
     let isActive = true;
@@ -138,15 +86,6 @@ export function NewProject({
         if (isActive) setNamesState('error');
       });
 
-    fetchMusicLibrary()
-      .then((musicLib) => {
-        if (!isActive) return;
-        if (Array.isArray(musicLib.albums)) {
-          setAvailableAlbums(musicLib.albums.map((a) => ({ id: a.id, name: a.name, trackCount: a.trackCount })));
-        }
-      })
-      .catch(() => {});
-
     return () => {
       isActive = false;
     };
@@ -160,7 +99,7 @@ export function NewProject({
 
   const saveDraft = () => {
     try {
-      if (name || concept || selectedAlbumId || parentId) {
+      if (name || concept || parentId) {
         localStorage.setItem(
           PROJECT_DRAFT_KEY,
           JSON.stringify({
@@ -168,8 +107,6 @@ export function NewProject({
             concept,
             parentId,
             videoSource,
-            aspect,
-            selectedAlbumId,
             savedAt: new Date().toLocaleTimeString(),
           }),
         );
@@ -184,12 +121,9 @@ export function NewProject({
     setRestoredDraftTime(null);
     setName('');
     setConcept('');
-    setParentId('');
-    setParentMusicTracks([]);
-    setSelectedTracks([]);
+    setParentId(presetParentId);
+    setIsEditingParent(!presetParentId);
     setVideoSource('clip');
-    setAspect('16:9');
-    setSelectedAlbumId('');
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -207,19 +141,13 @@ export function NewProject({
       const response = await createProject({
         name: name.trim(),
         videoSource,
-        aspect,
         concept: concept.trim() || undefined,
         parentId: parentId || undefined,
-        selectedTracks: parentId && selectedTracks.length > 0 ? selectedTracks : undefined,
       });
 
       try {
         localStorage.removeItem(PROJECT_DRAFT_KEY);
       } catch {}
-
-      if (selectedAlbumId) {
-        await assignAlbumToProject({ albumId: selectedAlbumId, projectId: response.project.id }).catch(() => {});
-      }
 
       showSuccess(`"${response.project.name || name}" projesi başarıyla oluşturuldu!`, 'Proje Başlatıldı');
 
@@ -240,30 +168,32 @@ export function NewProject({
           setErrors({ form: err.message });
         }
       } else {
-        setErrors({ form: err instanceof Error ? err.message : 'Project could not be created.' });
+        setErrors({ form: err instanceof Error ? err.message : 'Proje oluşturulamadı.' });
       }
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  // Vazgeçmek taslağı sessizce saklar: "sakla mı, sil mi" kararı burada
+  // sorulmaz, geri dönünce bildirim şeridinden sıfırlanabilir.
   const handleCancelWithDraft = () => {
     saveDraft();
     onCancel();
   };
 
-  const handleDiscard = () => {
-    clearDraft();
-    onCancel();
-  };
+  const parentName =
+    availableProjects.find((project) => project.id === parentId)?.name || parentId;
 
+  const selectedVideoSource =
+    VIDEO_SOURCE_OPTIONS.find((option) => option.id === videoSource) ?? VIDEO_SOURCE_OPTIONS[0];
 
   return (
     <section className="page narrow">
       <PageHeader
-        eyebrow="NEW PROJECT"
-        title="New Project"
-        description="Set up the album and visual for a new video."
+        eyebrow="YENİ PROJE"
+        title="Yeni Proje"
+        description="Klasörü kur ve albüm konseptini ver." 
       />
 
       {restoredDraftTime ? (
@@ -308,7 +238,7 @@ export function NewProject({
         ) : null}
 
         <div className="field">
-          <label htmlFor="project-name">Project name</label>
+          <label htmlFor="project-name">Proje adı</label>
           <input
             id="project-name"
             value={name}
@@ -322,173 +252,52 @@ export function NewProject({
           <p id="project-name-hint" className={errors.name ? 'field-error' : 'field-hint'}>
             {errors.name ??
               (namesState === 'loading'
-                ? 'Checking existing project names...'
+                ? 'Mevcut proje adları kontrol ediliyor...'
                 : namesState === 'error'
-                  ? 'Existing names could not be checked.'
-                  : 'Used as the folder name under videolar\\.')}
+                  ? 'Mevcut adlar kontrol edilemedi.'
+                  : 'videolar\\ altındaki klasör adı olarak kullanılır.')}
           </p>
         </div>
 
         <div className="field">
-          <label htmlFor="project-parent">
-            📁 Üst Proje (Alt Proje Oluşturmak İçin Opsiyonel)
-          </label>
-          <select
-            id="project-parent"
-            value={parentId}
-            onChange={(event) => edit(setParentId)(event.target.value)}
-            disabled={isSubmitting}
-          >
-            <option value="">(Yok — Bağımsız Ana Proje)</option>
-            {availableProjects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.parentId ? `  ↳ ${p.name} (Alt: ${p.parentId})` : `📁 ${p.name}`}
-              </option>
-            ))}
-          </select>
-          <p className="field-hint">
-            Bir ana proje seçerseniz bu proje onun alt projesi olur ve ana projenin müziklerini aşağıdan seçebilirsiniz.
-          </p>
-        </div>
-
-        {parentId ? (
-          <div
-            className="field"
-            style={{
-              background: '#fdfbf7',
-              border: '1px solid #e2dac9',
-              borderRadius: 8,
-              padding: 14,
-              marginBottom: 16,
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                marginBottom: 10,
-                flexWrap: 'wrap',
-                gap: 8,
-              }}
-            >
-              <div>
-                <strong style={{ fontSize: 14, color: '#333' }}>🎵 Ana Projeden Müzik Seç</strong>
-                <span className="muted" style={{ marginLeft: 8, fontSize: 13 }}>
-                  ({selectedTracks.length} / {parentMusicTracks.length} seçildi)
-                </span>
-              </div>
-              {parentMusicTracks.length > 0 ? (
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button
-                    type="button"
-                    className="button"
-                    style={{ fontSize: 12, padding: '3px 8px' }}
-                    onClick={() => setSelectedTracks(parentMusicTracks.map((t) => t.file))}
-                  >
-                    ✓ Tümünü Seç
-                  </button>
-                  <button
-                    type="button"
-                    className="button"
-                    style={{ fontSize: 12, padding: '3px 8px' }}
-                    onClick={() => setSelectedTracks([])}
-                  >
-                    ✕ Temizle
-                  </button>
-                </div>
-              ) : null}
-            </div>
-
-            {loadingParentMusic ? (
-              <div style={{ padding: '12px 0', color: '#888', fontSize: 13 }}>
-                Ana projenin müzikleri yükleniyor...
-              </div>
-            ) : parentMusicTracks.length === 0 ? (
-              <div style={{ padding: '8px 0', color: '#8c7d6b', fontSize: 13 }}>
-                "{parentId}" projesinin <code>audio/</code> klasöründe henüz ses dosyası yok.
-              </div>
-            ) : (
-              <div
-                style={{
-                  maxHeight: 220,
-                  overflowY: 'auto',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 6,
-                  paddingRight: 4,
-                }}
+          <label htmlFor={isEditingParent ? 'project-parent' : undefined}>Üst proje</label>
+          {isEditingParent ? (
+            <>
+              <select
+                id="project-parent"
+                value={parentId}
+                onChange={(event) => edit(setParentId)(event.target.value)}
+                disabled={isSubmitting}
               >
-                {parentMusicTracks.map((track) => {
-                  const isChecked = selectedTracks.includes(track.file);
-                  return (
-                    <label
-                      key={track.file}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '6px 10px',
-                        borderRadius: 6,
-                        background: isChecked ? '#f3eee3' : '#ffffff',
-                        border: `1px solid ${isChecked ? '#bfae91' : '#e5ddcc'}`,
-                        cursor: 'pointer',
-                        fontSize: 13,
-                        gap: 10,
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedTracks((prev) => [...prev, track.file]);
-                            } else {
-                              setSelectedTracks((prev) => prev.filter((f) => f !== track.file));
-                            }
-                          }}
-                        />
-                        <span
-                          style={{
-                            fontWeight: 500,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          {track.file}
-                        </span>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                        {track.duration ? (
-                          <span className="muted" style={{ fontSize: 12 }}>
-                            {formatDuration(track.duration)}
-                          </span>
-                        ) : null}
-                        {track.previewUrl ? (
-                          <audio
-                            controls
-                            src={track.previewUrl}
-                            preload="none"
-                            style={{ height: 26, width: 150 }}
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                        ) : null}
-                      </div>
-                    </label>
-                  );
-                })}
-              </div>
-            )}
-            <p className="field-hint" style={{ marginTop: 8, marginBottom: 0 }}>
-              Seçtiğiniz müzikler bu alt projenin <code>audio/</code> klasörüne kopyalanacaktır.
+                <option value="">(Yok — bağımsız ana proje)</option>
+                {availableProjects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.parentId ? `   ↳ ${p.name}` : `📁 ${p.name}`}
+                  </option>
+                ))}
+              </select>
+              <p className="field-hint">Boş bırakılabilir</p>
+            </>
+          ) : (
+            <p className="field-hint" style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
+              <span>
+                📁 <strong>{parentName}</strong> altında alt proje olarak oluşturulacak.
+              </span>
+              <button
+                type="button"
+                className="button"
+                style={{ fontSize: 12, padding: '2px 8px' }}
+                disabled={isSubmitting}
+                onClick={() => setIsEditingParent(true)}
+              >
+                Değiştir
+              </button>
             </p>
-          </div>
-        ) : null}
+          )}
+        </div>
 
         <div className="field">
-          <label htmlFor="project-concept">Concept / Album</label>
+          <label htmlFor="project-concept">Albüm konsepti</label>
           <textarea
             id="project-concept"
             value={concept}
@@ -497,115 +306,48 @@ export function NewProject({
             placeholder="Late night rain over a quiet Tokyo apartment"
             disabled={isSubmitting}
           />
-          <p className="field-hint">Optional.</p>
+          <p className="field-hint">
+            Opsiyonel · parça başlıkları ve Suno prompt'ları buradan üretilir
+          </p>
         </div>
 
-        <fieldset className="field">
-          <legend>Video visual</legend>
-          <div className="option-list option-card-list" role="radiogroup">
-            {VIDEO_SOURCE_OPTIONS.map((option) => {
-              const isSelected = videoSource === option.id;
-              return (
-                <label key={option.id} className={isSelected ? 'option option-card selected' : 'option option-card'}>
-                  <input
-                    type="radio"
-                    name="video-source"
-                    value={option.id}
-                    checked={isSelected}
-                    onChange={() => edit(setVideoSource)(option.id)}
-                    disabled={isSubmitting}
-                  />
-                  <span className="option-card-text">
-                    <span className="option-card-title">{option.name}</span>
-                    <span className="option-card-description">{option.description}</span>
-                  </span>
-                </label>
-              );
-            })}
-          </div>
-        </fieldset>
-
-        <fieldset className="field">
-          <legend>📐 Video Boyut Formatı (Aspect Ratio)</legend>
-          <div className="option-list option-card-list" role="radiogroup">
-            <label className={aspect === '16:9' ? 'option option-card selected' : 'option option-card'}>
-              <input
-                type="radio"
-                name="video-aspect"
-                value="16:9"
-                checked={aspect === '16:9'}
-                onChange={() => edit(setAspect)('16:9')}
-                disabled={isSubmitting}
-              />
-              <span className="option-card-text">
-                <span className="option-card-title">🖥️ 16:9 Yatay (Landscape)</span>
-                <span className="option-card-description">YouTube Standart / TV Ekran (1920×1080)</span>
-              </span>
-            </label>
-            <label className={aspect === '9:16' ? 'option option-card selected' : 'option option-card'}>
-              <input
-                type="radio"
-                name="video-aspect"
-                value="9:16"
-                checked={aspect === '9:16'}
-                onChange={() => edit(setAspect)('9:16')}
-                disabled={isSubmitting}
-              />
-              <span className="option-card-text">
-                <span className="option-card-title">📱 9:16 Dikey (Portrait)</span>
-                <span className="option-card-description">YouTube Shorts, Reels, TikTok (1080×1920)</span>
-              </span>
-            </label>
-          </div>
-        </fieldset>
-
-        {availableAlbums.length > 0 ? (
-          <div className="field">
-            <label htmlFor="music-album-select">
-              🎵 Müzik Albümü (Opsiyonel — Kütüphaneden Doğrudan Bağla)
-            </label>
-            <select
-              id="music-album-select"
-              value={selectedAlbumId}
-              onChange={(e) => setSelectedAlbumId(e.target.value)}
-              disabled={isSubmitting}
-            >
-              <option value="">(Yok — Müzik planı veya manuel ses eklenecek)</option>
-              {availableAlbums.map((album) => (
-                <option key={album.id} value={album.id}>
-                  📁 {album.name} ({album.trackCount} parça)
-                </option>
-              ))}
-            </select>
-            <p className="field-hint">
-              Seçilen albümdeki tüm ses dosyaları otomatik olarak bu projenin <code>audio/</code> klasörüne kopyalanacaktır.
-            </p>
-          </div>
-        ) : null}
+        {/* Dropdown: iki seçenek iki büyük kart yerine tek satır. Seçilenin
+            kırpma etkisi altta tek satır olarak görünür. */}
+        <div className="field">
+          <label htmlFor="project-video-source">Görsel kaynağı</label>
+          <select
+            id="project-video-source"
+            value={videoSource}
+            onChange={(event) => edit(setVideoSource)(event.target.value as VideoSource)}
+            disabled={isSubmitting}
+          >
+            {VIDEO_SOURCE_OPTIONS.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.name}
+              </option>
+            ))}
+          </select>
+          <p className="field-hint">{selectedVideoSource.description}</p>
+        </div>
 
         <div className="form-actions" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <button className="button" type="button" onClick={handleCancelWithDraft} disabled={isSubmitting}>
-            💾 Taslağı Sakla & Kapat
-          </button>
-          <button
-            className="button"
-            type="button"
-            style={{ color: '#a63a2b' }}
-            onClick={handleDiscard}
-            disabled={isSubmitting}
-          >
-            ✕ Vazgeç
+            Vazgeç
           </button>
           <button className="button button-primary" type="submit" disabled={isSubmitting} style={{ marginLeft: 'auto' }}>
-            {isSubmitting ? 'Creating Project...' : 'Create Project'}
+            {isSubmitting ? 'Proje oluşturuluyor...' : 'Projeyi Oluştur'}
           </button>
         </div>
+        <p className="field-hint" style={{ marginTop: 8, marginBottom: 0 }}>
+          Vazgeçsen de taslak saklanır
+        </p>
       </form>
     </section>
   );
 }
 
-function validate({
+/** Testlerden de çağrılıyor (web/src/pages/NewProject.validate.test.ts). */
+export function validate({
   name,
   existingNames,
 }: {
@@ -615,21 +357,20 @@ function validate({
   const errors: FormErrors = {};
   const trimmed = name.trim();
 
-  if (!trimmed) {
-    errors.name = 'Project name is required.';
+  // Klasör adı kuralları sunucuyla tek kaynaktan (core/project-name.js).
+  // Form eskiden kendi regex'ini taşıyordu ve sapmıştı: boşluğu yasaklıyordu
+  // (projenin kendi düzeni "video3-Neo Tokyo Night" reddediliyordu), ayrılmış
+  // adları (CON, NUL...) ise kaçırıp sunucudan 422 almaya bırakıyordu.
+  const problems = validateVideoName(trimmed);
+
+  if (problems.length > 0) {
+    errors.name = problems.join(' · ');
   } else if (trimmed.length > 80) {
-    errors.name = 'Use 80 characters or fewer.';
-  } else if (
-    INVALID_NAME_CHARS.test(trimmed) ||
-    trimmed === '.' ||
-    trimmed === '..' ||
-    trimmed.endsWith('.')
-  ) {
-    errors.name = 'Use a valid folder name (no < > : " / \\ | ? * and no trailing dot).';
+    // Yalnızca formda: Windows yol uzunluğu için pratik sınır.
+    errors.name = 'En fazla 80 karakter kullan.';
   } else if (existingNames.includes(trimmed.toLowerCase())) {
-    errors.name = 'A project with this name already exists.';
+    errors.name = 'Bu adda bir proje zaten var.';
   }
 
   return errors;
 }
-

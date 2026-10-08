@@ -5,29 +5,24 @@ export type LayoutCols = 1 | 3;
 type LayoutSwitcherProps = {
   value: number;
   onChange: (cols: LayoutCols) => void;
-  storageKey?: string;
   ariaLabel?: string;
 };
 
+/**
+ * Kalıcılık burada DEĞİL: değeri `useCardLayout` tutuyor ve localStorage'a
+ * kendi yazıyor. Düğme eskiden ayrıca kendi `storageKey`'ine yazıyordu —
+ * aynı anahtara iki yerden yazılan çift kayıttı.
+ */
 export function LayoutSwitcher({
   value,
   onChange,
-  storageKey,
   ariaLabel = 'Görünüm düzeni: 1x liste veya 3x grid',
 }: LayoutSwitcherProps) {
   const currentCols: LayoutCols = value === 1 ? 1 : 3;
   const is3x = currentCols === 3;
 
   const handleToggle = () => {
-    const nextCols: LayoutCols = is3x ? 1 : 3;
-    onChange(nextCols);
-    if (storageKey) {
-      try {
-        localStorage.setItem(storageKey, String(nextCols));
-      } catch {
-        // ignore storage error
-      }
-    }
+    onChange(is3x ? 1 : 3);
   };
 
   return (

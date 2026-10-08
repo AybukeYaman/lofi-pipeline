@@ -264,6 +264,9 @@ describe('POST /api/projects', () => {
       [[], 'Request body must be a JSON object'],
       [{}, 'Missing field: name'],
       [{ name: 'x', extra: 1 }, 'Unknown field: extra'],
+      // Shorts YALNIZCA alt proje olarak açılır (POST …/shorts-subprojects):
+      // normal proje ucu `kind` kabul etmez, bağımsız Shorts projesi olamaz.
+      [{ name: 'x', kind: 'shorts' }, 'Unknown field: kind'],
       [{ name: 5 }, 'Field name must be a string'],
       [{ name: 'x', ambient: 'gentleRain' }, 'Field ambient must be an array'],
       [{ name: 'x', ambient: [''] }, 'ambient must be an array of names'],
@@ -495,7 +498,11 @@ describe('build — arka planda build.js', () => {
     assert.equal(spawned.length, 1);
     const [{ command, args, options, child }] = spawned;
     assert.equal(command, process.execPath);
-    assert.deepEqual(args, ['X:\\repo\\build.js', '--project', join(videosDir, 'ready', 'project.json')]);
+    // --render varsayılan: "5. Montaj" adımı çıktı videosunu bekliyor; build.js
+    // CLI tarafında render'ı kapalı başlatıyor (yalnızca yayın paketi).
+    assert.deepEqual(args, [
+      'X:\\repo\\build.js', '--project', join(videosDir, 'ready', 'project.json'), '--render',
+    ]);
     assert.equal(options.cwd, 'X:\\repo');
 
     const second = await send('POST', '/api/projects/done/build', { body: { overwrite: true } });
@@ -867,6 +874,21 @@ describe('build sonucu — çıktı, hata ve yeniden montaj', () => {
     assert.deepEqual(cancelled.errorLog, []); // yeni iş eski logu taşımaz
   });
 
+  test('render: varsayılan --render, render:false ile yalnızca yayın paketi', async () => {
+    // Arayüzdeki Montaj adımı `out/<çıktı>.mp4` görünce tamamlanıyor; build.js
+    // ise CLI'da render'ı kapalı başlatıyor. Bayrak geçmezse adım hiç bitmiyordu.
+    spawned.length = 0;
+    assert.equal((await startBuildRequest('ready', { render: false })).status, 202);
+    assert.ok(!spawned[0].args.includes('--render'));
+    lastChild().emit('close', 0, null);
+
+    spawned.length = 0;
+    assert.equal((await startBuildRequest('ready', { overwrite: true })).status, 202);
+    assert.ok(spawned[0].args.includes('--render'));
+    lastChild().emit('close', 0, null);
+
+    assert.equal((await send('POST', '/api/projects/ready/build', { body: { render: 'yes' } })).status, 400);
+  });
   test('yalnızca tracklist kalmışsa da overwrite gerekir (build.js ile aynı kural)', async () => {
     const dir = await writeProjectFolder('build-tracklist', {
       project: { clip: './videolar/in.mp4' },

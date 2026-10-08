@@ -10,6 +10,7 @@
 import { useEffect, useState } from 'react';
 
 import { copyTextToClipboard, fetchPromptLibrary } from '../api';
+import { PickerPanel } from './PickerPanel';
 import type { LibraryPrompt, PromptTag } from '../types';
 
 type PromptPickerProps = {
@@ -53,32 +54,20 @@ export function PromptPicker({ tag, label = 'Kayıtlı promptlarım', onManage }
     !tag || !onlyTagged || prompt.tags.includes(tag));
 
   return (
-    <div style={{ border: '1px solid var(--border, #333)', borderRadius: 6, padding: '8px 12px', margin: '12px 0' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <button
-          type="button"
-          className="button"
-          style={{ fontSize: 12, minHeight: 26, padding: '2px 10px' }}
-          aria-expanded={open}
-          onClick={() => setOpen(!open)}
-        >
-          {open ? '▾' : '▸'} {label}
-          {prompts ? <span className="count"> ({visible.length})</span> : null}
-        </button>
-        {onManage ? (
-          <button
-            type="button"
-            className="button"
-            style={{ fontSize: 12, minHeight: 26, padding: '2px 10px' }}
-            onClick={onManage}
-          >
+    <PickerPanel
+      label={label}
+      badge={prompts ? `(${visible.length})` : undefined}
+      open={open}
+      onOpenChange={setOpen}
+      actions={
+        onManage ? (
+          <button type="button" className="button" onClick={onManage}>
             Promptları yönet
           </button>
-        ) : null}
-      </div>
-
-      {open ? (
-        <div style={{ marginTop: 8 }}>
+        ) : null
+      }
+    >
+        <>
           {error ? <p className="form-error">{error}</p> : null}
           {prompts === null && !error ? <p className="field-hint">Yükleniyor...</p> : null}
 
@@ -116,8 +105,7 @@ export function PromptPicker({ tag, label = 'Kayıtlı promptlarım', onManage }
               </div>
             ))}
           </div>
-        </div>
-      ) : null}
-    </div>
+        </>
+    </PickerPanel>
   );
 }

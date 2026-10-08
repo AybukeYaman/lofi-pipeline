@@ -15,8 +15,14 @@ export type WorkflowStepId =
   | 'build'
   | 'publish';
 
+/**
+ * Shorts alt projesinin adımları (`prep/project-status.js`
+ * SHORTS_WORKFLOW_STEPS aynası) — canonical 6 adımın yerine geçer.
+ */
+export type ShortsStepId = 'source' | 'clips' | 'export';
+
 export type WorkflowStepInfo = {
-  id: WorkflowStepId;
+  id: WorkflowStepId | ShortsStepId;
   number: number;
   title: string;
   kind: 'manual' | 'auto' | 'done';
@@ -26,15 +32,19 @@ export type WorkflowStepInfo = {
 };
 
 export type ProjectWorkflow = {
-  current: WorkflowStepId;
+  current: WorkflowStepId | ShortsStepId;
   currentTitle: string;
   steps: WorkflowStepInfo[];
 };
+
+/** Proje türü: normal montaj projesi ya da 9:16 Shorts alt projesi. */
+export type ProjectKind = 'video' | 'shorts';
 
 export type ProjectSummary = {
   id: string;
   name: string;
   parentId?: string | null;
+  kind?: ProjectKind;
   mtimeMs: number;
   /** Sunucunun seçtiği küçük resim: videodaki görsel, yoksa resimler/ altındaki ilk görsel. */
   thumbnailUrl?: string | null;
@@ -146,6 +156,7 @@ export type ProjectDetail = {
   id: string;
   name: string;
   parentId?: string | null;
+  kind?: ProjectKind;
   dir?: string;
   projectJson?: ProjectJsonState;
   /** 'image': tüm video boyunca tek resim; clips o zaman resimler/ altındaki görseller. */
@@ -389,9 +400,10 @@ export type BuildJob = {
 
 export type Route =
   | { name: 'dashboard' }
-  | { name: 'newProject' }
+  | { name: 'newProject'; parentId?: string }
   | { name: 'project'; id: string }
   | { name: 'ambient' }
+  | { name: 'mimi' }
   | { name: 'prompts' }
   | { name: 'settings' };
 
@@ -475,4 +487,147 @@ export type PromptPayload = {
   text?: string;
   note?: string | null;
   tags?: PromptTag[];
+};
+
+// ------------------------------------------------------------- Mimi galerisi
+
+/**
+ * Dosyanın galerideki rolü: elle atılmış resim, o resimden üretilmiş loop
+ * video (`<ad>.loop.mp4`) ya da elle atılmış bağımsız video.
+ */
+export type MimiRole = 'image' | 'loop' | 'video';
+
+/** Mimi için üretilip indirilen tek bir dosya (ortak klasörden okunur). */
+export type MimiAsset = {
+  /** Uzantılı dosya adı — API'de kimlik olarak kullanılır. */
+  file: string;
+  /** Uzantısız ad (ekranda görünen). */
+  name: string;
+  kind: 'image' | 'video';
+  ext: string;
+  size: number;
+  mtimeMs: number;
+  /** <img src> / <video src> olarak doğrudan kullanılır. */
+  previewUrl: string;
+  role: MimiRole;
+  /** Resim için: bu resimden üretilmiş loop videonun dosya adı (yoksa null). */
+  loopVideo: string | null;
+  /** Loop video için: üretildiği resmin dosya adı (resim silinmişse null). */
+  sourceImage: string | null;
+  /** Resim ve henüz loop videosu yok — "videoya çevrilmesi gerekiyor". */
+  needsVideo: boolean;
+};
+
+/** GET /api/mimi yanıtı — en yeni dosya başta. */
+export type MimiGalleryResponse = {
+  /** Ortak klasörün tam yolu — kullanıcıya nereye dosya atacağını söyler. */
+  dir: string;
+  items: MimiAsset[];
+  /** Klasör okunamadıysa açıklama. */
+  error?: string | null;
+  /** Yükleme/dönüştürme yanıtında yazılan dosyanın son adı. */
+  file?: string;
+  /** Dönüştürme yanıtında: kaynak resim ve loop süresi. */
+  source?: string;
+  seconds?: number;
+};
+
+// -------------------------------------------------------------- Shorts (9:16)
+
+/** Kaynak videodaki 9:16 kadraj — oranlar (0–1) ve yakınlaştırma. */
+export type ShortsFrame = {
+  /** 1 = kaynağa sığan en büyük 9:16 kutu; büyüdükçe yakınlaşır. */
+  zoom: number;
+  /** Kutunun yatay konumu: 0 sol, 0.5 orta, 1 sağ. */
+  x: number;
+  /** Kutunun dikey konumu: 0 üst, 0.5 orta, 1 alt. */
+  y: number;
+};
+
+/** Kadrajın kaynak videodaki piksel karşılığı (sunucu hesaplar). */
+export type ShortsCrop = {
+  width: number;
+  height: number;
+  x: number;
+  y: number;
+};
+
+/** Bir Shorts kesiti: kaynak videonun bir zaman aralığı + kadrajı. */
+export type ShortsClip = {
+  id: string;
+  title: string;
+  start: number;
+  end: number;
+  duration: number;
+  startLabel: string;
+  endLabel: string;
+  durationLabel: string;
+  frame: ShortsFrame;
+  crop: ShortsCrop | null;
+  /** Çıktı dosya adı (`out/shorts/` altında). */
+  output: string;
+  outputPath: string;
+  /** Dosya diskte var mı — render edilmiş mi. */
+  rendered: boolean;
+  outputSize: number | null;
+  renderedAt: string | null;
+  /** Render edilmişse oynatma adresi. */
+  videoUrl: string | null;
+  /** Süre YouTube Shorts sınırını aşıyor. */
+  overLimit: boolean;
+};
+
+/** Kesitlerin alındığı kaynak video — KOPYALANMAZ, yol tutulur. */
+export type ShortsSource = {
+  value: string | null;
+  path: string | null;
+  exists: boolean;
+  name: string | null;
+  duration: number | null;
+  width: number | null;
+  height: number | null;
+  fps: number | null;
+  hasAudio: boolean | null;
+  /** <video src> — Range destekli akış. */
+  url: string | null;
+};
+
+/** Arka planda süren render işi. */
+export type ShortsRenderJob = {
+  projectId: string;
+  clipId: string;
+  state: 'running' | 'succeeded' | 'failed';
+  startedAt: string;
+  finishedAt: string | null;
+  progressSeconds: number;
+  duration: number;
+  output: string;
+  error: string | null;
+};
+
+/** GET /api/projects/:id/shorts yanıtı. */
+export type ShortsState = {
+  id: string;
+  name: string;
+  parentId?: string | null;
+  kind: ProjectKind;
+  dir: string;
+  outputDir: string;
+  target: { width: number; height: number; aspect: string };
+  limits: { minSeconds: number; maxSeconds: number; minZoom: number; maxZoom: number };
+  source: ShortsSource;
+  clips: ShortsClip[];
+  problems: string[];
+  warnings: string[];
+  renders: ShortsRenderJob[];
+  step?: ProjectStep;
+  workflow?: ProjectWorkflow;
+};
+
+/** POST /api/projects/:id/shorts/clips gövdesi. */
+export type ShortsClipPayload = {
+  start: number;
+  end: number;
+  title?: string;
+  frame?: Partial<ShortsFrame>;
 };

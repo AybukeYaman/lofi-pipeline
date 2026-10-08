@@ -14,6 +14,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { fetchProjectAmbient, getAmbientAudioUrl, updateProjectAmbient } from '../api';
+import { PickerPanel } from './PickerPanel';
 import type { ProjectAmbient } from '../types';
 
 type AmbientPickerProps = {
@@ -101,32 +102,27 @@ export function AmbientPicker({ projectId, label = 'Arka plan sesi (Ambiance)', 
   const missing = (data?.selected ?? []).filter((track) => track.missing);
 
   return (
-    <div style={{ border: '1px solid var(--border, #333)', borderRadius: 6, padding: '8px 12px', margin: '12px 0' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <button
-          type="button"
-          className="button"
-          style={{ fontSize: 12, minHeight: 26, padding: '2px 10px' }}
-          aria-expanded={open}
-          onClick={() => setOpen(!open)}
-        >
-          {open ? '▾' : '▸'} {label}
-          {data ? <span className="count"> ({data.selected.length} seçili)</span> : null}
-        </button>
-        {onManage ? (
-          <button
-            type="button"
-            className="button"
-            style={{ fontSize: 12, minHeight: 26, padding: '2px 10px' }}
-            onClick={onManage}
-          >
+    <PickerPanel
+      label={label}
+      /* Seçili sesler kapalıyken de okunsun — "ne seçtim?" için açmaya gerek yok. */
+      badge={
+        data
+          ? data.selected.length === 0
+            ? '(yok)'
+            : `(${data.selected.map((track) => track.name).join(', ')})`
+          : undefined
+      }
+      open={open}
+      onOpenChange={setOpen}
+      actions={
+        onManage ? (
+          <button type="button" className="button" onClick={onManage}>
             Ambiance klasörü
           </button>
-        ) : null}
-      </div>
-
-      {open ? (
-        <div style={{ marginTop: 8 }}>
+        ) : null
+      }
+    >
+      <>
           {error ? <p className="form-error">{error}</p> : null}
           {data === null && !error ? <p className="field-hint">Yükleniyor...</p> : null}
           {data?.error ? <p className="form-error">{data.error}</p> : null}
@@ -134,18 +130,9 @@ export function AmbientPicker({ projectId, label = 'Arka plan sesi (Ambiance)', 
           {data ? (
             <>
               <p className="field-hint">
-                Seçtiğin sesler videonun <strong>tamamı boyunca</strong> arka planda çalar.
-                {saved ? <strong> ✓ Kaydedildi</strong> : null}
-              </p>
-              {/* Seviye sorusu kullanıcıya bırakılmıyor: montaj müziği ölçüp
-                  ambiance'ı ona göre ayarlıyor (steps/03-ambient-mix.js). Kaç
-                  ses seçilirse seçilsin TOPLAM aynı kalıyor, bu yüzden "hangisi
-                  baskın" diye karar vermek gerekmiyor. */}
-              <p className="field-hint">
-                Ses seviyesini sen ayarlamıyorsun: montaj önce müziğin seviyesini
-                ölçüyor, ambiance'ı <strong>{Math.abs(data.volumeDb ?? data.defaultVolumeDb)} LU
-                daha sessiz</strong> olacak şekilde ayarlıyor. Kaç ses seçersen seç
-                toplamı aynı kalır — müziğin önüne geçmez.
+                Video boyunca arka planda çalar · müzikten{' '}
+                {Math.abs(data.volumeDb ?? data.defaultVolumeDb)} LU sessiz
+                {saved ? <strong> · ✓ Kaydedildi</strong> : null}
               </p>
 
               {data.available.length === 0 ? (
@@ -153,48 +140,42 @@ export function AmbientPicker({ projectId, label = 'Arka plan sesi (Ambiance)', 
                   Ortak klasörde ses yok: <code>{data.dir}</code>
                 </p>
               ) : (
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                /* Dropdown listesi: her ses tek satır, satıra basmak seçer.
+                   Yan yana dizili ▶/+ düğme çiftleri yerine okunur bir liste —
+                   seçili olanlar kapalı başlıkta da yazdığı için kutuyu açmaya
+                   gerek kalmıyor. */
+                <ul className="ambient-options" role="group" aria-label="Arka plan sesleri">
                   {data.available.map((item) => {
                     const isSelected = selectedNames.has(item.name);
                     const isPlaying = playing === item.name;
                     return (
-                      <span
-                        key={item.name}
-                        style={{ display: 'inline-flex', alignItems: 'center' }}
-                      >
-                        {/* Dinleme seçimden ayrı: sesi seçmeden de duyabilsin */}
+                      <li key={item.name}>
+                        {/* Dinleme seçimden ayrı: sesi seçmeden de duyabilsin. */}
                         <button
                           type="button"
-                          className="button"
+                          className="button ambient-play"
                           aria-label={`${item.name} sesini ${isPlaying ? 'durdur' : 'dinle'}`}
                           aria-pressed={isPlaying}
                           title={isPlaying ? 'Durdur' : 'Dinle'}
-                          style={{
-                            fontSize: 12, minHeight: 28, padding: '2px 8px',
-                            borderTopRightRadius: 0, borderBottomRightRadius: 0,
-                          }}
                           onClick={() => togglePlay(item.name)}
                         >
                           {isPlaying ? '■' : '▶'}
                         </button>
                         <button
                           type="button"
-                          className={isSelected ? 'button button-selected' : 'button'}
-                          aria-pressed={isSelected}
-                          style={{
-                            fontSize: 12, minHeight: 28, padding: '2px 10px',
-                            borderTopLeftRadius: 0, borderBottomLeftRadius: 0,
-                            marginLeft: -1,
-                          }}
-                          onClick={() => void toggle(item.name)}
+                          className="ambient-option"
+                          role="checkbox"
+                          aria-checked={isSelected}
                           disabled={saving}
+                          onClick={() => void toggle(item.name)}
                         >
-                          {isSelected ? '✓' : '+'} {item.name}
+                          <span className="ambient-check" aria-hidden="true">{isSelected ? '✓' : ''}</span>
+                          <span className="ambient-name">{item.name}</span>
                         </button>
-                      </span>
+                      </li>
                     );
                   })}
-                </div>
+                </ul>
               )}
 
               {missing.length > 0 ? (
@@ -214,8 +195,7 @@ export function AmbientPicker({ projectId, label = 'Arka plan sesi (Ambiance)', 
               />
             </>
           ) : null}
-        </div>
-      ) : null}
-    </div>
+      </>
+    </PickerPanel>
   );
 }

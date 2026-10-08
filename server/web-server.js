@@ -51,8 +51,26 @@ import {
   uploadProjectImage,
 } from './project-api.js';
 import {
+  convertMimiImageToLoop,
+  deleteMimiAsset,
+  getMimiAsset,
+  getMimiGallery,
+  openMimiFolder,
+  uploadMimiAsset,
+} from './mimi-api.js';
+import {
   createPrompt, getPrompt, getPrompts, removePrompt, updatePrompt,
 } from './prompt-api.js';
+import {
+  createShortsClip,
+  createShortsSubproject,
+  deleteShortsClip,
+  getShorts,
+  getShortsClipAsset,
+  getShortsSourceAsset,
+  patchShortsClip,
+  startShortsRender,
+} from './shorts-api.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_UPLOAD_BODY_BYTES = 25 * 1024 * 1024;
@@ -105,6 +123,20 @@ export function createDefaultProjectApi({ buildJobs = createBuildJobs() } = {}) 
     ingestSuno: (body) => ingestSuno(body),
     assignAlbumToProject: (body) => assignAlbumToProject(body),
     getMusicAsset: (albumId, filename) => getMusicAsset(albumId, filename),
+    getMimiGallery: () => getMimiGallery(),
+    uploadMimiAsset: (body) => uploadMimiAsset(body),
+    deleteMimiAsset: (file) => deleteMimiAsset(file),
+    getMimiAsset: (file) => getMimiAsset(file),
+    openMimiFolder: (body) => openMimiFolder(body),
+    convertMimiImageToLoop: (body) => convertMimiImageToLoop(body),
+    getShorts: (id) => getShorts(id),
+    createShortsSubproject: (parentId, body) => createShortsSubproject(parentId, body),
+    createShortsClip: (id, body) => createShortsClip(id, body),
+    patchShortsClip: (id, clipId, body) => patchShortsClip(id, clipId, body),
+    deleteShortsClip: (id, clipId) => deleteShortsClip(id, clipId),
+    startShortsRender: (id, clipId) => startShortsRender(id, clipId),
+    getShortsSourceAsset: (id) => getShortsSourceAsset(id),
+    getShortsClipAsset: (id, clipId) => getShortsClipAsset(id, clipId),
   };
 }
 
@@ -275,6 +307,50 @@ export const ROUTES = [
     pattern: /^\/api\/projects\/([^/]*)\/music\/ingest-suno$/,
     handle: async (api, { id, body }) => [200, await api.ingestSuno({ ...body, targetType: 'project', targetId: id })],
   },
+  // Shorts alt projesi — 9:16 kesitler. Kaynak video kopyalanmaz, zaman
+  // aralığı referansıyla çalışılır; render yalnızca istenince olur.
+  {
+    method: 'GET',
+    pattern: /^\/api\/projects\/([^/]*)\/shorts$/,
+    handle: async (api, { id }) => [200, await api.getShorts(id)],
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/projects\/([^/]*)\/shorts-subprojects$/,
+    handle: async (api, { id, body }) => [201, await api.createShortsSubproject(id, body)],
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/projects\/([^/]*)\/shorts\/clips$/,
+    handle: async (api, { id, body }) => [201, await api.createShortsClip(id, body)],
+  },
+  {
+    method: 'PUT',
+    pattern: /^\/api\/projects\/([^/]*)\/shorts\/clips\/([^/]+)$/,
+    handle: async (api, { id, params, body }) => [200, await api.patchShortsClip(id, params[0], body)],
+  },
+  {
+    method: 'DELETE',
+    pattern: /^\/api\/projects\/([^/]*)\/shorts\/clips\/([^/]+)$/,
+    handle: async (api, { id, params }) => [200, await api.deleteShortsClip(id, params[0])],
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/projects\/([^/]*)\/shorts\/clips\/([^/]+)\/render$/,
+    handle: async (api, { id, params }) => [202, await api.startShortsRender(id, params[0])],
+  },
+  {
+    method: 'GET',
+    pattern: /^\/api\/projects\/([^/]*)\/shorts\/source$/,
+    file: true,
+    handle: async (api, { id }) => [200, await api.getShortsSourceAsset(id)],
+  },
+  {
+    method: 'GET',
+    pattern: /^\/api\/projects\/([^/]*)\/shorts\/clips\/([^/]+)\/video$/,
+    file: true,
+    handle: async (api, { id, params }) => [200, await api.getShortsClipAsset(id, params[0])],
+  },
   {
     method: 'GET',
     pattern: /^\/api\/music-library$/,
@@ -321,6 +397,35 @@ export const ROUTES = [
     pattern: /^\/api\/music-library\/assets\/([^/]*)\/([^/]*)$/,
     file: true,
     handle: async (api, { params }) => [200, await api.getMusicAsset(params[0], params[1])],
+  },
+  // Mimi galerisi — projelerden bağımsız ortak resim/video deposu.
+  { method: 'GET', pattern: /^\/api\/mimi$/, handle: async (api) => [200, await api.getMimiGallery()] },
+  {
+    method: 'POST',
+    pattern: /^\/api\/mimi\/upload$/,
+    maxBodyBytes: MAX_CLIP_UPLOAD_BODY_BYTES,
+    handle: async (api, { body }) => [201, await api.uploadMimiAsset(body)],
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/mimi\/convert-to-loop$/,
+    handle: async (api, { body }) => [200, await api.convertMimiImageToLoop(body)],
+  },
+  {
+    method: 'POST',
+    pattern: /^\/api\/mimi\/open-folder$/,
+    handle: async (api, { body }) => [200, await api.openMimiFolder(body)],
+  },
+  {
+    method: 'GET',
+    pattern: /^\/api\/mimi\/assets\/([^/]+)$/,
+    file: true,
+    handle: async (api, { id }) => [200, await api.getMimiAsset(id)],
+  },
+  {
+    method: 'DELETE',
+    pattern: /^\/api\/mimi\/([^/]+)$/,
+    handle: async (api, { id }) => [200, await api.deleteMimiAsset(id)],
   },
 ];
 

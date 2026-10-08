@@ -2,10 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { deleteProject, fetchProjects } from '../api';
 import { EmptyState } from '../components/Feedback';
+import { formatDateTime } from '../format';
 import { LayoutSwitcher, useCardLayout } from '../components/LayoutSwitcher';
 import { PageHeader } from '../components/PageHeader';
+import { ProjectTabs } from '../components/ProjectTabs';
 import { showError, showSuccess } from '../toast';
 import type { LoadState, ProjectSummary } from '../types';
+import { useCreateShorts } from '../useCreateShorts';
 
 type DashboardProps = {
   onOpenProject: (id: string) => void;
@@ -17,6 +20,8 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
   const [loadState, setLoadState] = useState<LoadState>('idle');
   const [layoutCols, setLayoutCols] = useCardLayout('lofi-layout-projects', 1);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  /** Shorts alt projesi açılırken o ana projenin düğmesi kilitlenir. */
+  const { busyId: shortsBusyId, createShorts } = useCreateShorts(onOpenProject);
 
   // Her ana proje için o an hangi sekmenin seçili olduğu: { [mainProjectId]: activeProjectId }
   const [activeTabMap, setActiveTabMap] = useState<Record<string, string>>({});
@@ -116,7 +121,7 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           {loadState === 'loading' ? <span>Loading projects...</span> : null}
           {mainProjects.length > 0 ? (
-            <LayoutSwitcher value={layoutCols} onChange={setLayoutCols} storageKey="lofi-layout-projects" />
+            <LayoutSwitcher value={layoutCols} onChange={setLayoutCols} />
           ) : null}
         </div>
       </div>
@@ -159,45 +164,13 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
                 {/* Alt proje sekmeleri. Tek satırda kalır (sarmaz): sarınca
                     yan yana duran kartların başlık yüksekliği birbirini
                     tutmuyor ve ızgara kayık görünüyordu. Taşarsa yatay kayar. */}
-                <div className="project-tabs" role="tablist" aria-label={`${mainProject.name} projeleri`}>
-                  <button
-                    type="button"
-                    role="tab"
-                    className="project-tab"
-                    aria-selected={activeId === mainProject.id}
-                    title={mainProject.name}
-                    onClick={() => handleSelectTab(mainProject.id, mainProject.id)}
-                  >
-                    {mainProject.thumbnailUrl ? (
-                      <img className="project-tab-thumb" src={mainProject.thumbnailUrl} alt="" loading="lazy" />
-                    ) : (
-                      <span className="project-tab-thumb is-empty" aria-hidden="true">🏠</span>
-                    )}
-                    <span className="project-tab-name">{mainProject.name}</span>
-                    {subprojects.length > 0 ? (
-                      <span className="project-tab-count">{subprojects.length}</span>
-                    ) : null}
-                  </button>
-
-                  {subprojects.map((sub) => (
-                    <button
-                      key={sub.id}
-                      type="button"
-                      role="tab"
-                      className="project-tab"
-                      aria-selected={activeId === sub.id}
-                      title={sub.name}
-                      onClick={() => handleSelectTab(mainProject.id, sub.id)}
-                    >
-                      {sub.thumbnailUrl ? (
-                        <img className="project-tab-thumb" src={sub.thumbnailUrl} alt="" loading="lazy" />
-                      ) : (
-                        <span className="project-tab-thumb is-empty" aria-hidden="true">📄</span>
-                      )}
-                      <span className="project-tab-name">{sub.name}</span>
-                    </button>
-                  ))}
-                </div>
+                <ProjectTabs
+                  main={mainProject}
+                  subprojects={subprojects}
+                  activeId={activeId}
+                  onSelect={(targetId) => handleSelectTab(mainProject.id, targetId)}
+                  showCount
+                />
 
                 {/* Seçili projenin gövdesi */}
                 <button
@@ -215,11 +188,15 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
                     <div className="project-card-text">
                       <div className="project-card-title">
                         <h2>{currentProject.name}</h2>
-                        {isViewingSub ? <span className="project-badge">Alt Proje</span> : null}
+                        {isViewingSub ? (
+                          <span className="project-badge">
+                            {currentProject.kind === 'shorts' ? 'Shorts (9:16)' : 'Alt Proje'}
+                          </span>
+                        ) : null}
                       </div>
                       <p>Adım: {stepLabel}</p>
                       <time dateTime={new Date(currentProject.mtimeMs).toISOString()}>
-                        Updated: {formatUpdatedAt(currentProject.mtimeMs)}
+                        Updated: {formatDateTime(currentProject.mtimeMs)}
                       </time>
                     </div>
                   </div>
@@ -244,6 +221,15 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
                     + Alt Proje
                   </button>
                   <button
+                    className="button"
+                    type="button"
+                    disabled={shortsBusyId !== null}
+                    title={`"${mainProject.name}" videosundan 9:16 Shorts kesitleri al`}
+                    onClick={() => void createShorts(mainProject.id)}
+                  >
+                    {shortsBusyId === mainProject.id ? 'Açılıyor...' : '🎬 + Shorts'}
+                  </button>
+                  <button
                     className="button project-delete"
                     type="button"
                     onClick={() => handleDelete(currentProject)}
@@ -261,11 +247,4 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
       ) : null}
     </section>
   );
-}
-
-function formatUpdatedAt(mtimeMs: number) {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(new Date(mtimeMs));
 }

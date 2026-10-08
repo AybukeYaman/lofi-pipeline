@@ -4,6 +4,10 @@ import type {
   CreateProjectPayload,
   CreateProjectResponse,
   LibraryResponse,
+  MimiGalleryResponse,
+  ShortsClipPayload,
+  ShortsRenderJob,
+  ShortsState,
   ProjectAmbient,
   ProjectPomodoro,
   ProjectDetail,
@@ -153,9 +157,13 @@ export async function completeProjectMusic(id: string): Promise<ProjectDetail> {
   return handleResponse<ProjectDetail>(response, 'Music could not be completed.');
 }
 
+/**
+ * Montajı başlatır. `render` verilmezse sunucu uzun videoyu da üretir —
+ * "5. Montaj" adımı çıktı dosyasını görünce tamamlanıyor.
+ */
 export async function startBuild(
   id: string,
-  options: { overwrite?: boolean } = {},
+  options: { overwrite?: boolean; render?: boolean } = {},
 ): Promise<BuildJob> {
   const response = await fetch(`/api/projects/${encodeURIComponent(id)}/build`, {
     method: 'POST',
@@ -337,79 +345,14 @@ export async function deleteProject(id: string): Promise<{ deleted: string }> {
 }
 
 // ---------------------------------------------------------------- Music Library & Suno Ingest
+// Yalnızca ekranların kullandığı uçlar: kütüphaneyi okumak, bir albümü
+// projeye atamak ve Suno bağlantısını doğrudan projeye indirmek. Albüm/parça
+// yönetimi (oluştur/sil/yükle/klasör aç) web'de hiçbir yerden çağrılmıyordu —
+// o iş TUI'de (ui/actions.js, prep/) yapılıyor; sunucu uçları yerinde duruyor.
 
 export async function fetchMusicLibrary(): Promise<import('./types').MusicLibraryResponse> {
   const response = await fetch('/api/music-library');
   return handleResponse<import('./types').MusicLibraryResponse>(response, 'Music library could not be loaded.');
-}
-
-export async function createMusicAlbum(name: string): Promise<{ id: string; name: string }> {
-  const response = await fetch('/api/music-library/albums', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
-  });
-  return handleResponse<{ id: string; name: string }>(response, 'Album could not be created.');
-}
-
-export async function deleteMusicAlbum(albumId: string): Promise<{ ok: boolean; id: string }> {
-  const response = await fetch(`/api/music-library/albums/${encodeURIComponent(albumId)}`, {
-    method: 'DELETE',
-  });
-  return handleResponse<{ ok: boolean; id: string }>(response, 'Album could not be deleted.');
-}
-
-export async function deleteMusicTrack(
-  albumId: string,
-  filename: string,
-): Promise<{ ok: boolean; albumId: string; filename: string }> {
-  const response = await fetch(
-    `/api/music-library/tracks/${encodeURIComponent(albumId)}/${encodeURIComponent(filename)}`,
-    {
-      method: 'DELETE',
-    },
-  );
-  return handleResponse<{ ok: boolean; albumId: string; filename: string }>(
-    response,
-    'Track could not be deleted.',
-  );
-}
-
-export async function uploadMusicTrack(
-  albumId: string,
-  file: File,
-): Promise<{ ok: boolean; albumId: string; file: string }> {
-  const base64Data = await readAsDataUrl(file);
-
-  const response = await fetch('/api/music-library/upload', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ albumId, name: file.name, data: base64Data }),
-  });
-  return handleResponse<{ ok: boolean; albumId: string; file: string }>(
-    response,
-    'Track could not be uploaded.',
-  );
-}
-
-export async function openMusicLibraryFolder(albumId?: string): Promise<{ ok: boolean; path: string }> {
-  const response = await fetch('/api/music-library/open-folder', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(albumId ? { albumId } : {}),
-  });
-  return handleResponse<{ ok: boolean; path: string }>(response, 'Folder could not be opened.');
-}
-
-export async function ingestSuno(
-  payload: import('./types').SunoIngestPayload,
-): Promise<import('./types').SunoIngestResponse> {
-  const response = await fetch('/api/music-library/ingest-suno', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  return handleResponse<import('./types').SunoIngestResponse>(response, 'Suno tracks could not be downloaded.');
 }
 
 export async function ingestSunoToProject(
@@ -439,13 +382,6 @@ export async function assignAlbumToProject(payload: {
     'Tracks could not be assigned to project.',
   );
 }
-
-export function getMusicAssetUrl(albumId: string, filename: string): string {
-  return `/api/music-library/assets/${encodeURIComponent(albumId)}/${encodeURIComponent(filename)}`;
-}
-
-
-
 
 // ---------------------------------------------------------------- Canonical workflow steps
 
@@ -530,5 +466,122 @@ export async function copyProjectTracks(
     projectUrl(targetId, 'copy-tracks'),
     payload,
     'Tracks could not be copied from source project.',
+  );
+}
+
+// ------------------------------------------------------------- Mimi galerisi
+
+/** Mimi klasörünün güncel içeriği. */
+export async function fetchMimiGallery(): Promise<MimiGalleryResponse> {
+  const response = await fetch('/api/mimi');
+  return handleResponse<MimiGalleryResponse>(response, 'Mimi galerisi yüklenemedi.');
+}
+
+/** Resim/video dosyasını ortak Mimi klasörüne yükler; yanıt galerinin yeni hali. */
+export async function uploadMimiAsset(file: File): Promise<MimiGalleryResponse> {
+  const data = await readAsDataUrl(file);
+  return sendJson<MimiGalleryResponse>(
+    'POST',
+    '/api/mimi/upload',
+    { name: file.name, data },
+    'Dosya yüklenemedi.',
+  );
+}
+
+/** Mimi klasöründeki bir dosyayı Geri Dönüşüm Kutusu'na yollar. */
+export async function deleteMimiAsset(file: string): Promise<MimiGalleryResponse> {
+  return sendJson<MimiGalleryResponse>(
+    'DELETE',
+    `/api/mimi/${encodeURIComponent(file)}`,
+    undefined,
+    'Dosya silinemedi.',
+  );
+}
+
+/**
+ * Bir resmi loop videoya çevirir (sunucuda ffmpeg; `<ad>.loop.mp4`).
+ * Video zaten varsa sunucu 409 döner — `overwrite` ile yeniden üretilir.
+ */
+export async function convertMimiImageToLoop(
+  file: string,
+  seconds: number,
+  overwrite = false,
+): Promise<MimiGalleryResponse> {
+  return sendJson<MimiGalleryResponse>(
+    'POST',
+    '/api/mimi/convert-to-loop',
+    { file, seconds, overwrite },
+    'Loop video üretilemedi.',
+  );
+}
+
+/** Ortak Mimi klasörünü Explorer'da açar — dosya sürükleyip bırakmak için. */
+export async function openMimiFolder(): Promise<{ ok: boolean; path: string }> {
+  return sendJson<{ ok: boolean; path: string }>('POST', '/api/mimi/open-folder', {}, 'Klasör açılamadı.');
+}
+
+// -------------------------------------------------------------- Shorts (9:16)
+
+const shortsUrl = (id: string, suffix = '') =>
+  `/api/projects/${encodeURIComponent(id)}/shorts${suffix}`;
+
+/** Shorts alt projesinin tam durumu (kaynak ölçümü + kesitler + render işleri). */
+export async function fetchShorts(id: string): Promise<ShortsState> {
+  const response = await fetch(shortsUrl(id));
+  return handleResponse<ShortsState>(response, 'Shorts projesi yüklenemedi.');
+}
+
+/**
+ * Ana projeden Shorts alt projesi açar. Kaynak video kopyalanmaz; alt proje
+ * ana projedeki dosyaya yol tutar.
+ */
+export async function createShortsSubproject(
+  parentId: string,
+  body: { name?: string; source?: string } = {},
+): Promise<ShortsState> {
+  return sendJson<ShortsState>(
+    'POST',
+    `/api/projects/${encodeURIComponent(parentId)}/shorts-subprojects`,
+    body,
+    'Shorts alt projesi oluşturulamadı.',
+  );
+}
+
+/** "Bu Aralığı Al" — seçili aralığı yeni kesit olarak ekler. */
+export async function addShortsClip(id: string, payload: ShortsClipPayload): Promise<ShortsState> {
+  return sendJson<ShortsState>('POST', shortsUrl(id, '/clips'), payload, 'Kesit eklenemedi.');
+}
+
+/** Kesidin aralığını/kadrajını/başlığını güncelle. */
+export async function updateShortsClip(
+  id: string,
+  clipId: string,
+  payload: Partial<ShortsClipPayload>,
+): Promise<ShortsState> {
+  return sendJson<ShortsState>(
+    'PUT',
+    shortsUrl(id, `/clips/${encodeURIComponent(clipId)}`),
+    payload,
+    'Kesit güncellenemedi.',
+  );
+}
+
+/** Kesidi siler; render edilmiş dosya Geri Dönüşüm Kutusu'na gider. */
+export async function deleteShortsClip(id: string, clipId: string): Promise<ShortsState> {
+  return sendJson<ShortsState>(
+    'DELETE',
+    shortsUrl(id, `/clips/${encodeURIComponent(clipId)}`),
+    undefined,
+    'Kesit silinemedi.',
+  );
+}
+
+/** Render başlatır (arka planda sürer; durum fetchShorts → renders'tan okunur). */
+export async function renderShortsClip(id: string, clipId: string): Promise<ShortsRenderJob> {
+  return sendJson<ShortsRenderJob>(
+    'POST',
+    shortsUrl(id, `/clips/${encodeURIComponent(clipId)}/render`),
+    {},
+    'Render başlatılamadı.',
   );
 }

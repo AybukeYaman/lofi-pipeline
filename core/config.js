@@ -159,7 +159,11 @@ async function resolveProject(json, { projectPath, overrides = {} }) {
     problems.push(`stream.enabled: true ya da false olmalı (verilen: ${JSON.stringify(streamBlock.enabled)})`);
   }
   // null → paket yalnızca out/ altına yazılır (yayın tarafına kopyalanmaz).
-  const streamDir = streamBlock.dir === undefined ? DEFAULT_STREAM_DIR : streamBlock.dir;
+  // `--stream-dir off` konfigi ezer: paket üretilir ama yayına VERİLMEZ —
+  // yayın tarafı hazır değilken albüm canlı dizine düşmesin.
+  const streamDir = overrides.streamDir !== undefined
+    ? overrides.streamDir
+    : (streamBlock.dir === undefined ? DEFAULT_STREAM_DIR : streamBlock.dir);
   if (streamDir !== null && typeof streamDir !== 'string') {
     problems.push(`stream.dir: klasör yolu ya da null olmalı (verilen: ${JSON.stringify(streamDir)})`);
   }

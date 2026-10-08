@@ -30,6 +30,9 @@ describe('inspectProject — taze projeden montaja', () => {
       ambientName: 'campfire',
       videosDir: root.path('videolar'),
       ambientDir: root.path('ambient'),
+      // Bu senaryo plan tabanlı müzik akışını izliyor; plan artık yalnızca
+      // açıkça istenince yazılıyor.
+      totalTracks: 17,
     }));
   });
   after(() => root?.cleanup());

@@ -135,6 +135,11 @@ export async function assembleVideo(options) {
       '-map', audioArgs.map,
       '-c:v', 'copy',
       ...audioArgs.codec,
+      // moov atomu başa alınır: bu dosyayı Shorts ekranı `<video>` ile
+      // AKITIYOR — moov sonda kalırsa tarayıcı metadata için 500+ MB'ı
+      // indirmek zorunda kalıyor ve oynatıcı/timeline hiç açılmıyor
+      // (07 ve 08 zaten faststart yazıyordu, 04 atlanmıştı).
+      '-movflags', '+faststart',
       '-t', String(audio.duration),
       '-y', outputPath,
     ], { onProgress });
@@ -154,6 +159,7 @@ export async function assembleVideo(options) {
       '-c:v', 'libx264', '-crf', String(crf), '-preset', preset,
       '-pix_fmt', 'yuv420p',
       ...audioArgs.codec,
+      '-movflags', '+faststart',
       '-t', String(audio.duration),
       '-y', outputPath,
     ], { onProgress });

@@ -16,6 +16,7 @@ import {
   updateLibraryPrompt,
 } from '../api';
 import { EmptyState } from '../components/Feedback';
+import { matchesQuery } from './libraryFilter';
 import { PageHeader } from '../components/PageHeader';
 import type { LibraryPrompt, LoadState, PromptTag } from '../types';
 
@@ -66,16 +67,14 @@ export function PromptLibrary() {
 
   useEffect(() => { void load(); }, []);
 
-  const visible = useMemo(() => {
-    const needle = search.trim().toLocaleLowerCase('tr');
-    return prompts.filter((prompt) => {
-      if (filter !== 'all' && !prompt.tags.includes(filter)) return false;
-      if (needle === '') return true;
-      return `${prompt.title} ${prompt.text} ${prompt.note ?? ''}`
-        .toLocaleLowerCase('tr')
-        .includes(needle);
-    });
-  }, [prompts, filter, search]);
+  const visible = useMemo(
+    () =>
+      prompts.filter((prompt) => {
+        if (filter !== 'all' && !prompt.tags.includes(filter)) return false;
+        return matchesQuery(search, prompt.title, prompt.text, prompt.note);
+      }),
+    [prompts, filter, search],
+  );
 
   const handleCopy = async (prompt: LibraryPrompt) => {
     setError(null);

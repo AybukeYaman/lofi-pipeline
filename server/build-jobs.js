@@ -46,16 +46,21 @@ export function createBuildJobs({ spawnFn = spawn, repoRoot = REPO_ROOT, now = D
 
   /**
    * @param {string} projectId
-   * @param {{ projectPath: string, overwrite: boolean }} input
+   * @param {{ projectPath: string, overwrite: boolean, render?: boolean }} input
+   *   `render`: uzun videoyu da üret. build.js'in varsayılanı `false` (yalnızca
+   *   yayın paketi); arayüzdeki "Montaj" adımı ise çıktı videosunu bekliyor
+   *   (`canonicalWorkflow.build = output.exists`), o yüzden bayrak buradan
+   *   açıkça geçiriliyor — geçirilmezse adım hiç tamamlanmıyordu.
    * @returns {object} işin anlık görüntüsü
    */
-  function start(projectId, { projectPath, overwrite }) {
+  function start(projectId, { projectPath, overwrite, render = false }) {
     if (runningId !== null) throw new BuildAlreadyRunningError(runningId);
 
     const job = {
       projectId,
       state: 'running',
       overwrite,
+      render,
       startedAt: new Date(now()).toISOString(),
       finishedAt: null,
       exitCode: null,
@@ -83,7 +88,12 @@ export function createBuildJobs({ spawnFn = spawn, repoRoot = REPO_ROOT, now = D
     try {
       child = spawnFn(
         process.execPath,
-        [join(repoRoot, 'build.js'), '--project', projectPath, ...(overwrite ? ['--overwrite'] : [])],
+        [
+          join(repoRoot, 'build.js'),
+          '--project', projectPath,
+          ...(render ? ['--render'] : []),
+          ...(overwrite ? ['--overwrite'] : []),
+        ],
         {
           cwd: repoRoot,
           stdio: ['ignore', 'pipe', 'pipe'],

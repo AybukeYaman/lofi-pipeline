@@ -29,7 +29,6 @@ import { PromptPicker } from '../../components/PromptPicker';
 import { paths } from '../../router';
 import { StatusBadge, type AssetStatus } from '../../components/StatusBadge';
 import { TrackList } from '../../components/TrackList';
-import { IMAGE_ACCEPT, IMAGE_FORMATS_LABEL } from '../../imageTypes';
 import type { BuildJob, ProjectDetail, ProjectMusicInfo, ProjectPomodoro, VideoSource, WorkflowStepId } from '../../types';
 import { fileName, musicTracks, type ProjectAssets } from './assetState';
 import { CopyPrompt, UploadButton } from './StepWidgets';
@@ -386,8 +385,7 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
               ))}
             </div>
             <p className="field-hint" style={{ marginBottom: 0 }}>
-              Fikrini sonradan değiştirebilirsin. Kaynağı değiştirince yeni moda uymayan seçim boşaltılır,
-              kırpma değerleri korunur; montaj bir sonraki çalışmada baştan üretilir.
+              Sonradan değiştirilebilir · kırpma korunur
             </p>
           </fieldset>
           {isStill ? (
@@ -1297,15 +1295,20 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
 type BuildOpState = 'pending' | 'running' | 'done' | 'failed';
 
 /**
- * Canonical 9. adımın 7 otomatik işlemi ve build.js'teki karşılığı (tag).
+ * "5. Montaj" adımının otomatik işlemleri ve build.js'teki karşılığı (tag).
  * build.js her adım için "[tag] <ad> başlıyor." / "[tag] <ad> bitti: …"
- * yazar; çalışma sırası 01 → 02 → 04 → 03 → 05 olduğundan durum sıradan
- * bağımsız, satırlardan okunur.
+ * yazar; çalışma sırası 01 → 02 → 07 → 03 → 04 → 05 olduğundan durum
+ * sıradan bağımsız, satırlardan okunur.
+ *
+ * Yayın paketi (07) listede: build.js onu her çalışmada üretiyor ve asıl
+ * 24/7 yayın çıktısı o. Listede olmadığı sürece yüzde, gerçekte yapılan
+ * işin bir bölümünü hiç saymıyordu.
  */
 const BUILD_OPERATIONS = [
   { label: "Watermark'ı kırp", tag: '01' },
   { label: 'Video formatını düzelt (16:9 / 9:16)', tag: '01' },
   { label: 'Sesleri birleştir', tag: '02' },
+  { label: 'Yayın paketi (24/7 albüm)', tag: '07' },
   { label: 'Arka plan sesi (Ambiance) ekle', tag: '03' },
   { label: 'Videoyu ses süresine uzat', tag: '04' },
   { label: 'Fade işlemlerini uygula', tag: '04' },
@@ -1320,8 +1323,12 @@ function buildChecklist(log: string[] = [], state?: string) {
   // iki yazım da aranıyor ki eski build loglarının çetelesi de doğru çıksın.
   const ambientSkipped = log.some((line) =>
     line.includes('Ambiance tanımlı değil') || line.includes('Ambient tanımlı değil'));
+  // Yayın paketi `stream.enabled: false` ile kapatılabiliyor; kapalıyken 07
+  // hiç log basmaz ve satır "atlandı" olarak kalırdı.
+  const streamSkipped = log.some((line) => line.includes('Yayın paketi kapalı'));
   const tagState = (tag: string): BuildOpState => {
     if (state === 'succeeded') return 'done';
+    if (tag === '07' && streamSkipped) return 'done';
     // Ambient birden fazla karışım olabilir: tracklist başladıysa bitmiştir.
     const finished = tag === '03' ? ambientSkipped || has('05', 'başlıyor') : has(tag, 'bitti');
     if (finished) return 'done';
@@ -1504,19 +1511,15 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
           Aynı bileşen, aynı uç — iki yerden de aynı seçimi yazar. */}
       {ambientMissing ? (
         <p className="field-hint" style={{ marginTop: 12 }}>
-          ⚠ Arka plan sesi (Ambiance) seçilmemiş — montajda videonun arkasında
-          ortam sesi olmayacak. Aşağıdan şimdi ekleyebilirsin.
+          ⚠ Ambiance seçilmemiş — aşağıdan ekleyebilirsin
         </p>
       ) : null}
       {/* Pomodoro doğrulaması montajın ÖN KOŞULU: fazla/eksik müzik burada,
           Başlat'a basılmadan görünür. Aynı bileşen, aynı uç — iki yerden de
-          aynı ayarı yazar. Montaj adımında açık başlıyor: asıl soru burada
-          "başlatabilir miyim". */}
-      <PomodoroPicker
-        projectId={project.id}
-        defaultOpen
-        onChange={setPomodoro}
-      />
+          aynı ayarı yazar. Kapalı başlıyor: "başlatabilir miyim" sorusunun
+          cevabı (düzen özeti + ✓/⚠ durumu) kutuyu açmadan başlıkta zaten
+          duruyor, açık başlasa dropdown Başlat düğmesinin üstüne binerdi. */}
+      <PomodoroPicker projectId={project.id} onChange={setPomodoro} />
       <AmbientPicker
         projectId={project.id}
         onManage={() => { window.location.href = paths.ambient; }}

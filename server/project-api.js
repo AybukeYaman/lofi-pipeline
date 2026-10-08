@@ -28,7 +28,7 @@ import {
   setProjectCropBottom, setProjectField, setProjectPomodoro, setVideoSource,
 } from '../prep/project-file.js';
 import {
-  audioAddedOrder, canonicalWorkflow, inspectProject, isMusicCompleted,
+  audioAddedOrder, inspectProject, isMusicCompleted, projectWorkflow,
   listProjects, nextStep, orderedAudioTracks,
 } from '../prep/project-status.js';
 import { DEFAULT_VIDEOS_DIR, ProjectExistsError, validateVideoName } from '../prep/scaffold.js';
@@ -104,10 +104,12 @@ export class ApiError extends Error {
 /** Mevcut proje klasorlerini UI'nin liste gorunumune uyarlar. */
 export async function getProjects({ videosDir = DEFAULT_VIDEOS_DIR } = {}) {
   const projects = await listProjects(videosDir);
-  return projects.map(({ name, parentId, mtimeMs, thumbnail, step, workflow }) => ({
+  return projects.map(({ name, parentId, kind, mtimeMs, thumbnail, step, workflow }) => ({
     id: name,
     name,
     parentId: parentId ?? null,
+    /** 'shorts' alt projesi kendi ekranını açar (web Dashboard/Workspace). */
+    kind: kind ?? 'video',
     mtimeMs,
     thumbnailUrl: thumbnail ? assetUrl(name, 'thumbnail', basename(thumbnail)) : null,
     step,
@@ -125,7 +127,7 @@ export async function getProject(id, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
     id,
     ...status,
     step: nextStep(status),
-    workflow: canonicalWorkflow(status),
+    workflow: projectWorkflow(status),
     readiness,
   };
 }
@@ -180,43 +182,18 @@ export async function createProject(body, {
     throw error;
   }
 
+  // Kopyalama mantığı copyTracksFromProject'te: kopyalama + audioAdded kaydı +
+  // müzik planındaki pending parçaların işaretlenmesi tek yerde kalsın. Hata
+  // yutulur (eskiden de öyleydi): müzik kopyalanamadı diye proje kurulumu bozulmaz.
   if (parentDir && Array.isArray(input.selectedTracks) && input.selectedTracks.length > 0) {
     try {
-      const parentStatus = await inspectProject(parentDir);
-      const parentAudioFiles = await listFiles(parentStatus.audioDir, AUDIO_EXTENSIONS).catch(() => []);
-      const matchingPaths = parentAudioFiles.filter((p) => input.selectedTracks.includes(basename(p)));
-
-      const targetDir = join(videosDir, input.name);
-      const targetStatus = await inspectProject(targetDir);
-      await mkdir(targetStatus.audioDir, { recursive: true });
-
-      const copiedFiles = [];
-      for (const srcPath of matchingPaths) {
-        const originalName = basename(srcPath);
-        const destName = await uniqueFileName(targetStatus.audioDir, originalName);
-        const destPath = join(targetStatus.audioDir, destName);
-        await copyFile(srcPath, destPath);
-        copiedFiles.push(destName);
-      }
-
-      if (copiedFiles.length > 0) {
-        await recordAudioAdded(targetStatus.projectPath, copiedFiles);
-
-        const musicData = targetStatus.projectJson.data?.music;
-        if (musicData && Array.isArray(musicData.tracks) && musicData.tracks.length > 0) {
-          const pendingTracks = musicData.tracks.filter((t) => t.status === 'pending');
-          const count = Math.min(copiedFiles.length, pendingTracks.length);
-          for (let i = 0; i < count; i++) {
-            pendingTracks[i].status = 'completed';
-            pendingTracks[i].file = copiedFiles[i];
-          }
-          musicData.completedCount = musicData.tracks.filter((t) => t.status === 'completed').length;
-          musicData.status = musicData.completedCount === musicData.totalTracks ? 'completed' : 'in_progress';
-          await setProjectField(targetStatus.projectPath, 'music', musicData);
-        }
-      }
+      await copyTracksFromProject(
+        input.name,
+        { sourceProjectId: input.parentId, trackFiles: input.selectedTracks },
+        { videosDir },
+      );
     } catch {
-      // Müzik kopyalama hatası proje oluşturulmasını bozmasın
+      // yoksayılır
     }
   }
 
@@ -960,7 +937,14 @@ export async function deleteProject(id, { videosDir = DEFAULT_VIDEOS_DIR, buildJ
  */
 export async function startBuild(id, body, { videosDir = DEFAULT_VIDEOS_DIR, buildJobs, probeFn = probe }) {
   const projectDir = await resolveProjectDir(id, videosDir);
-  const { overwrite = false } = parseBody(body ?? {}, { overwrite: 'boolean' });
+  // `render`: uzun videoyu da üret. Varsayılan TRUE — bu uç arayüzün "Montaj"
+  // adımı için var ve o adım `out/<çıktı>.mp4` görünce tamamlanıyor. build.js'in
+  // CLI varsayılanı (yalnızca yayın paketi) burada geçerli değil; isteyen
+  // `render: false` ile sadece paket üretebilir.
+  const { overwrite = false, render = true } = parseBody(body ?? {}, {
+    overwrite: 'boolean',
+    render: 'boolean',
+  });
 
   const status = await inspectProject(projectDir);
   const step = nextStep(status);
@@ -991,7 +975,7 @@ export async function startBuild(id, body, { videosDir = DEFAULT_VIDEOS_DIR, bui
     });
   }
 
-  return buildJobs.start(id, { projectPath: status.projectPath, overwrite });
+  return buildJobs.start(id, { projectPath: status.projectPath, overwrite, render });
 }
 
 /**
@@ -1099,7 +1083,12 @@ export function describeReadiness(status) {
 // ---------------------------------------------------------------- yardimcilar
 
 /** Kimligi dogrular; videolar kokunun dogrudan alti ve project.json'lu olmali. */
-async function resolveProjectDir(id, videosDir) {
+/**
+ * Proje klasorunun guvenli cozumu: ad duz olmali, kok klasorun icinde
+ * kalmali, icinde project.json bulunmali. `server/shorts-api.js` de bunu
+ * kullaniyor — ayni dogrulama iki yerde ayri yazilmasin.
+ */
+export async function resolveProjectDir(id, videosDir) {
   if (!isPlainName(id)) throw new InvalidProjectIdError();
 
   const root = resolve(videosDir);

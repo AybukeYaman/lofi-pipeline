@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import { ApiError } from './api';
 
 export type ToastType = 'error' | 'success' | 'warning' | 'info';

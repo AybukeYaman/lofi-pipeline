@@ -15,6 +15,8 @@ import { basename, isAbsolute, join, resolve } from 'node:path';
 import { CONFIG_DEFAULTS } from '../core/config.js';
 import { AUDIO_EXTENSIONS, isImagePath, listFiles, matchOrder } from '../core/files.js';
 import { probe } from '../core/probe.js';
+import { mapWithLimit, probeCached } from '../core/probe-cache.js';
+import { normalizeShortsPlan } from '../core/shorts-plan.js';
 import { readJsonFile } from '../core/workspace.js';
 
 /** Sıralı modda "bu oturumda atla" denebilen adımlar — kanıt gerektirmeyen elle işler. */
@@ -50,17 +52,28 @@ export async function inspectProject(dir) {
   const clipCandidates = await filesOrEmpty(join(dir, 'videolar'), ['.mp4']);
   const clips = videoSource === 'image' ? imageCandidates : clipCandidates;
 
+  // Proje türü: 'shorts' alt projesi kendi ekranını ve adımlarını kullanır
+  // (kaynak videoyu KOPYALAMAZ, ana projedeki dosyaya yol tutar); 'video'
+  // bugünkü montaj projesidir. Bilinmeyen değer 'video' sayılır — eski
+  // projelerde alan hiç yok.
+  const kind = data.kind === 'shorts' ? 'shorts' : 'video';
+
   const audioDir = at(nonEmpty(data.audioDir) ?? './audio');
   const output = data.output !== null && typeof data.output === 'object' ? data.output : {};
   const outputDir = at(nonEmpty(output.dir) ?? CONFIG_DEFAULTS.output.dir);
   const outputPath = resolve(outputDir, nonEmpty(output.name) ?? CONFIG_DEFAULTS.output.name);
   const tracklistPath = resolve(outputDir, nonEmpty(output.tracklist) ?? CONFIG_DEFAULTS.output.tracklist);
 
+  const shorts = kind === 'shorts' ? await inspectShorts({ data, at, outputDir }) : null;
+
   return {
     name: dir.split(/[\\/]/).pop(),
     dir,
     projectPath,
     projectJson,
+    kind,
+    /** Yalnızca `kind: 'shorts'` projelerde dolu (yoksa null). */
+    shorts,
     parentId: typeof data.parentId === 'string' && data.parentId.trim() ? data.parentId.trim() : null,
     /** Müzik stili (styles/<ad>), seçilmediyse null. */
     style: nonEmpty(data.style) ?? null,
@@ -98,6 +111,8 @@ export async function inspectProject(dir) {
  */
 export function nextStep(s, { skipped = new Set() } = {}) {
   const step = (id, kind, title, detail) => ({ id, kind, title, detail, skippable: SKIPPABLE_STEPS.includes(id) });
+
+  if (s.kind === 'shorts') return shortsStep(s, step);
 
   if (!s.projectJson.ok) {
     return step('fix-project', 'manual', 'project.json düzeltilmeli', `${s.projectPath}: ${s.projectJson.error}`);
@@ -199,6 +214,115 @@ export function canonicalWorkflow(s) {
   };
 }
 
+// ------------------------------------------------------------------- Shorts
+
+/**
+ * Shorts alt projesinin durumu: kaynak video + kesitler + render edilmiş
+ * çıktılar. Kaynak KOPYALANMADIĞI için burada yalnızca "yol duruyor mu"
+ * sorusu yanıtlanır — dosya ana projede yaşamaya devam eder.
+ *
+ * @param {{ data: object, at: (p: string) => string, outputDir: string }} input
+ */
+async function inspectShorts({ data, at, outputDir }) {
+  const plan = normalizeShortsPlan(data.shorts);
+  const sourcePath = plan.source ? at(plan.source) : null;
+  const dir = resolve(outputDir, 'shorts');
+
+  const clips = [];
+  for (const clip of plan.clips) {
+    const path = resolve(dir, clip.output);
+    const info = await stat(path).catch(() => null);
+    clips.push({
+      ...clip,
+      outputPath: path,
+      outputExists: info?.isFile() === true,
+      outputSize: info?.isFile() ? info.size : null,
+    });
+  }
+
+  return {
+    source: {
+      value: plan.source,
+      path: sourcePath,
+      exists: sourcePath ? await isFile(sourcePath) : false,
+    },
+    dir,
+    clips,
+    renderedCount: clips.filter((clip) => clip.outputExists).length,
+    problems: plan.problems,
+    warnings: plan.warnings,
+  };
+}
+
+/** Shorts alt projesinin sıradaki adımı (`nextStep`'in shorts dalı). */
+function shortsStep(s, step) {
+  if (!s.projectJson.ok) {
+    return step('fix-project', 'manual', 'project.json düzeltilmeli', `${s.projectPath}: ${s.projectJson.error}`);
+  }
+  const shorts = s.shorts ?? { source: { exists: false }, clips: [], renderedCount: 0 };
+  if (!shorts.source.exists) {
+    return step('shorts-source', 'manual', 'Kaynak video bekleniyor',
+      shorts.source.value
+        ? `shorts.source bulunamadı: ${shorts.source.path}`
+        : 'Ana projedeki videoyu kaynak olarak seç.');
+  }
+  if (shorts.clips.length === 0) {
+    return step('shorts-clips', 'manual', 'Shorts kesiti seç',
+      "Timeline'dan aralığı seç, 9:16 kadrajı ayarla ve \"Bu Aralığı Al\" de.");
+  }
+  if (shorts.renderedCount < shorts.clips.length) {
+    return step('shorts-export', 'auto', 'Shorts render',
+      `${shorts.clips.length} kesit var, ${shorts.renderedCount} tanesi render edildi.`);
+  }
+  return step('done', 'done', 'Shorts hazır', `${shorts.renderedCount} kesit: ${shorts.dir}`);
+}
+
+/**
+ * Shorts alt projesinin 3 adımı. Canonical akışın (6 adım) yerine geçer:
+ * shorts projesinde müzik/sıralama/montaj yok.
+ */
+export const SHORTS_WORKFLOW_STEPS = [
+  { id: 'source', title: 'Kaynak video', kind: 'manual', optional: false },
+  { id: 'clips', title: 'Kesitler', kind: 'manual', optional: false },
+  { id: 'export', title: 'Render', kind: 'auto', optional: false },
+];
+
+/**
+ * @param {Awaited<ReturnType<typeof inspectProject>>} s
+ * @returns {{ current: string, currentTitle: string, steps: object[] }}
+ */
+export function shortsWorkflow(s) {
+  const shorts = s.shorts ?? { source: { exists: false }, clips: [], renderedCount: 0 };
+  const done = {
+    source: shorts.source.exists,
+    clips: shorts.clips.length > 0,
+    export: shorts.clips.length > 0 && shorts.renderedCount === shorts.clips.length,
+  };
+  const firstOpen = SHORTS_WORKFLOW_STEPS.find((step) => !done[step.id]);
+  const current = firstOpen?.id ?? 'export';
+  return {
+    current,
+    currentTitle: SHORTS_WORKFLOW_STEPS.find((step) => step.id === current).title,
+    steps: SHORTS_WORKFLOW_STEPS.map((step, index) => ({
+      ...step,
+      number: index + 1,
+      status: step.id === current ? 'current' : done[step.id] ? 'done' : 'pending',
+      skipped: false,
+    })),
+  };
+}
+
+/**
+ * Projenin türüne göre doğru akış. Web ve proje listesi bunu çağırır ki
+ * shorts alt projesi "2/6 · Video" gibi kendisine ait olmayan bir adım
+ * göstermesin.
+ *
+ * @param {Awaited<ReturnType<typeof inspectProject>>} s
+ */
+export function projectWorkflow(s) {
+  return s.kind === 'shorts' ? shortsWorkflow(s) : canonicalWorkflow(s);
+}
+
 function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -246,17 +370,20 @@ export async function audioAddedOrder(s) {
  * @param {{ probeFn?: typeof probe }} [options]
  * @returns {Promise<{ path: string, file: string, duration: number|null }[]>}
  */
+/** Aynı anda kaç ffprobe: disk ve CPU'yu boğmadan belirgin hızlanma. */
+const PROBE_CONCURRENCY = 8;
+
 export async function orderedAudioTracks(s, { probeFn = probe } = {}) {
   const paths = await filesOrEmpty(s.audioDir, AUDIO_EXTENSIONS);
   const order = s.projectJson.data?.order;
   const ordered = Array.isArray(order) && order.length > 0 ? matchOrder(order, paths).ordered : paths;
 
-  const tracks = [];
-  for (const path of ordered) {
-    const info = await probeFn(path).catch(() => null);
-    tracks.push({ path, file: basename(path), duration: info?.duration ?? null });
-  }
-  return tracks;
+  // Sırayla ölçmek 99 parçalık projede 10 sn sürüyordu; sınırlı paralellik +
+  // dosya kimliğine bağlı önbellek. Sonuç sırası girdiyle aynı kalır.
+  return mapWithLimit(ordered, PROBE_CONCURRENCY, async (path) => {
+    const info = await probeCached(path, probeFn).catch(() => null);
+    return { path, file: basename(path), duration: info?.duration ?? null };
+  });
 }
 
 /**
@@ -306,8 +433,9 @@ export async function listProjects(videosDir) {
       parentId: status.parentId,
       mtimeMs: Math.max(dirInfo.mtimeMs, projectInfo.mtimeMs),
       thumbnail: status.thumbnail,
+      kind: status.kind,
       step: nextStep(status),
-      workflow: canonicalWorkflow(status),
+      workflow: projectWorkflow(status),
     });
   }
   return projects.sort((a, b) => b.mtimeMs - a.mtimeMs);

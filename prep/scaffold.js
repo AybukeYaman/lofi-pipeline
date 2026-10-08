@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { VIDEO_SOURCES } from '../core/config.js';
 import { writeTextFile } from '../core/workspace.js';
 import { DEFAULT_CROP_BOTTOM } from './project-file.js';
-import { generateMusicPlan, generateMusicPlanAsync } from './music-planner.js';
+import { generateMusicPlanAsync } from './music-planner.js';
 
 /** Albüm klasörlerinin kökü. `--videos-dir` ezer. */
 export const DEFAULT_VIDEOS_DIR = 'C:\\Users\\Aybuke Yeni\\Desktop\\Youtube\\videolar';
@@ -32,22 +32,11 @@ export class ProjectExistsError extends Error {
 /**
  * Windows klasör adı kuralları. Boşluk ve `&` serbest (bölüm 9).
  *
- * @param {unknown} name
- * @returns {string[]} problemler
+ * Kural core/project-name.js'te: web formu da aynı kuralı kullanıyor, iki
+ * yerde ayrı yazılınca sapıyordu. Buradan yeniden ihraç ediliyor, mevcut
+ * çağıranlar (server/, ui/, test/) değişmedi.
  */
-export function validateVideoName(name) {
-  if (typeof name !== 'string' || name.trim() === '') return ['isim boş olamaz'];
-
-  const problems = [];
-  const invalid = [...new Set(name.match(/[<>:"/\\|?*\x00-\x1f]/g) ?? [])];
-  if (invalid.length > 0) {
-    problems.push(`isim Windows'ta geçersiz karakter içeriyor: ${invalid.map((c) => JSON.stringify(c)).join(' ')}`);
-  }
-  if (/[. ]$/.test(name)) problems.push('isim nokta ya da boşlukla bitemez (Windows sessizce kırpıyor)');
-  if (/^\s/.test(name)) problems.push('isim boşlukla başlayamaz');
-  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(name)) problems.push(`"${name}" Windows'ta ayrılmış bir ad`);
-  return problems;
-}
+export { validateVideoName } from '../core/project-name.js';
 
 /**
  * Oluşturulacak klasör, dosya ve kopyalar — diske dokunmaz.
@@ -78,8 +67,6 @@ export function planProject({ videosDir, videoName, ambient, concept, totalTrack
     ? ambient.map((a) => a.path)
     : (ambient ? ambient.path : null);
 
-  const plan = musicPlan || generateMusicPlan(musicPlanInput({ videoName, concept, totalTracks }));
-
   const validAspect = aspect === '9:16' ? '9:16' : '16:9';
 
   const project = {
@@ -92,7 +79,12 @@ export function planProject({ videosDir, videoName, ambient, concept, totalTrack
       ? { source: 'image', cropBottom: 0, aspect: validAspect }
       : { cropBottom: DEFAULT_CROP_BOTTOM, aspect: validAspect },
     output: { dir: './out' },
-    music: plan,
+    // Müzik planı ARTIK VARSAYILAN DEĞİL: proje açılırken uydurma başlıklı
+    // (CONCEPT_DICTIONARIES) sabit bir parça listesi yazılıyordu, kullanıcı
+    // kendi koymadığı 17 şarkıyı listede görüyordu. Plan yalnızca açıkça
+    // istenirse (`totalTracks` / `--total-tracks`) üretilir; müzik adımı
+    // bunun dışında audio/ klasöründeki GERÇEK dosyaları gösterir.
+    ...(musicPlan ? { music: musicPlan } : {}),
   };
 
   const files = [
@@ -106,16 +98,23 @@ export function planProject({ videosDir, videoName, ambient, concept, totalTrack
   };
 }
 
+/**
+ * `totalTracks` verilmişse Suno için parça planı üretir; verilmemişse plan
+ * yazılmaz (bkz. planProject'teki not).
+ */
 export async function planProjectAsync(options) {
+  if (options.totalTracks === undefined || options.totalTracks === null) {
+    return planProject(options);
+  }
   const musicPlan = await generateMusicPlanAsync(musicPlanInput(options));
   return planProject({ ...options, musicPlan });
 }
 
-/** Müzik planlayıcısının girdisi; müzik tarifi planlayıcının kendi varsayılanından gelir. */
+/** Müzik planlayıcısının girdisi; yalnızca plan açıkça istendiğinde çağrılır. */
 function musicPlanInput({ videoName, concept, totalTracks }) {
   return {
     concept: concept || `${videoName} Album Concept`,
-    totalTracks: totalTracks || 17,
+    totalTracks,
   };
 }
 

@@ -631,6 +631,11 @@ h1 {
   line-height: 1;
 }
 
+.project-tab-add {
+  border-style: dashed;
+  font-weight: 600;
+}
+
 .project-tab-count {
   flex: none;
   min-width: 18px;
@@ -2054,14 +2059,34 @@ span.project-thumb::after {
   overflow-wrap: anywhere;
 }
 
-.order-buttons {
-  display: flex;
-  gap: 4px;
+/* Elle sıralama: satırlar sürüklenir (eski ↑/↓ düğmeleri kaldırıldı).
+   Klavyeyle taşıma Alt + yön tuşlarıyla, bu yüzden satır odaklanabilir. */
+.order-list.is-sortable li {
+  cursor: grab;
 }
 
-.order-buttons .button {
-  min-height: 26px;
-  padding: 0 8px;
+.order-list.is-sortable li:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+}
+
+.order-list li.is-dragging {
+  opacity: 0.45;
+  cursor: grabbing;
+}
+
+/* Bırakılacak yer: hedef satırın üst kenarında çizgi. */
+.order-list li.is-over {
+  border-color: var(--border-current);
+  box-shadow: inset 0 2px 0 0 var(--border-current);
+}
+
+.order-grip {
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: grab;
+  user-select: none;
 }
 
 .build-ops {
@@ -2343,3 +2368,914 @@ span.project-thumb::after {
   }
 }
 
+
+/* ------------------------------------------------------- Mimi galerisi */
+
+.mimi-filters {
+  display: flex;
+  gap: 6px;
+}
+
+.mimi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mimi-card {
+  /* Kart içeriği değişken sayıda bölümden oluşuyor (dönüşüm şeridi yalnızca
+     resim/loop kartlarında var) — sabit satır tanımı yerine akış. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-surface);
+  box-shadow: var(--shadow);
+}
+
+.mimi-card:hover {
+  border-color: var(--border-hover);
+}
+
+/* Küçük resim düğmesi: tıklayınca büyük önizleme açılır. */
+.mimi-thumb {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 150px;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface-subtle);
+  cursor: zoom-in;
+}
+
+.mimi-thumb img,
+.mimi-thumb video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.mimi-kind {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+}
+
+.mimi-card-body {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding: 10px 12px 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.mimi-card-body strong {
+  overflow-wrap: anywhere;
+  color: var(--text-main);
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.mimi-card-body .muted {
+  font-size: 12px;
+}
+
+.mimi-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px 12px;
+}
+
+.mimi-card-actions .button,
+.mimi-card-actions a.button {
+  flex: 1;
+  text-align: center;
+  text-decoration: none;
+}
+
+/* Büyük önizleme — dışına tıklamak ya da Esc kapatır. */
+.mimi-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.72);
+}
+
+.mimi-lightbox-inner {
+  display: grid;
+  gap: 10px;
+  max-width: min(1100px, 100%);
+  max-height: 100%;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-strong);
+}
+
+.mimi-lightbox-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.mimi-lightbox-bar strong {
+  flex: 1;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+
+.mimi-lightbox-bar a.button {
+  text-decoration: none;
+}
+
+.mimi-lightbox-inner img,
+.mimi-lightbox-inner video {
+  max-width: 100%;
+  max-height: calc(100vh - 160px);
+  border-radius: 6px;
+  object-fit: contain;
+}
+
+/* --------------------------------- Mimi: resim → loop video dönüşümü */
+
+.mimi-seconds {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.mimi-seconds select {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-main);
+  background: var(--bg-surface);
+  font-size: 13px;
+}
+
+.mimi-pending-notice {
+  align-items: center;
+}
+
+.mimi-pending-notice .button {
+  margin-left: auto;
+  flex: none;
+}
+
+.mimi-chip {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px dashed var(--border-hover);
+  font-size: 11.5px;
+}
+
+.mimi-chip.is-missing {
+  border-color: #d97706;
+  color: #b45309;
+}
+
+.mimi-kind-right {
+  left: auto;
+  right: 6px;
+}
+
+.mimi-kind.is-missing {
+  background: rgba(217, 119, 6, 0.92);
+}
+
+.mimi-kind.kind-loop {
+  background: rgba(22, 163, 74, 0.88);
+}
+
+/* Dönüşüm şeridi: resim → video. */
+.mimi-transition {
+  display: grid;
+  gap: 6px;
+  margin: 0 12px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-surface-subtle);
+}
+
+.mimi-transition.is-missing {
+  border-color: #d97706;
+}
+
+.mimi-transition.is-ready {
+  border-color: #16a34a;
+}
+
+.mimi-transition-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.mimi-transition-cell {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  cursor: zoom-in;
+}
+
+.mimi-transition-cell img,
+.mimi-transition-cell video {
+  width: 100%;
+  height: 44px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  object-fit: cover;
+  display: block;
+}
+
+.mimi-transition-cell.is-empty {
+  cursor: default;
+}
+
+.mimi-transition-cell.is-empty .mimi-transition-placeholder {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 44px;
+  border: 1px dashed var(--border-hover);
+  border-radius: 4px;
+  background: var(--bg-surface);
+  font-size: 15px;
+}
+
+.mimi-transition-cell.is-working .mimi-transition-placeholder {
+  border-style: solid;
+  border-color: #2563eb;
+}
+
+.mimi-transition-arrow {
+  color: var(--text-muted);
+  font-size: 16px;
+}
+
+/* Çevirirken ok nefes alır: iş sürüyor sinyali. */
+.mimi-transition.is-converting .mimi-transition-arrow {
+  color: #2563eb;
+  animation: mimiArrowPulse 0.9s ease-in-out infinite;
+}
+
+.mimi-transition-status {
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.mimi-transition.is-missing .mimi-transition-status {
+  color: #b45309;
+}
+
+.mimi-transition.is-ready .mimi-transition-status {
+  color: #15803d;
+}
+
+.mimi-transition.is-converting .mimi-transition-status {
+  color: #1d4ed8;
+}
+
+@keyframes mimiArrowPulse {
+  0%, 100% {
+    opacity: 0.35;
+    transform: translateX(-2px);
+  }
+  50% {
+    opacity: 1;
+    transform: translateX(2px);
+  }
+}
+
+/* ------------------------------------------- Shorts (9:16 kesit) ekranı */
+
+.shorts-editor {
+  display: grid;
+  gap: 12px;
+}
+
+.shorts-editor-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 1.1fr) minmax(300px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.shorts-player video {
+  width: 100%;
+  max-height: 380px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #000;
+}
+
+.shorts-player-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.shorts-range-panel {
+  display: grid;
+  gap: 12px;
+}
+
+/* --- Timeline --- */
+
+.shorts-timeline {
+  display: grid;
+  gap: 8px;
+}
+
+.shorts-timeline-meta,
+.shorts-timeline-range {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.shorts-timeline-meta strong {
+  color: var(--text-main);
+  font-variant-numeric: tabular-nums;
+}
+
+.shorts-range-pill {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-surface);
+  color: var(--text-main);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Zaman cetveli — `00:00 ──── 01:00`. Çizgiler yüzdeyle konumlanır, track
+   ile aynı kutuyu paylaştığı için hizası kendiliğinden tutar. */
+.shorts-ruler {
+  position: relative;
+  height: 18px;
+  margin-bottom: -2px;
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+}
+
+.shorts-tick {
+  position: absolute;
+  bottom: 0;
+  width: 1px;
+  height: 5px;
+  background: var(--border);
+}
+
+.shorts-tick.is-major {
+  height: 9px;
+  background: var(--text-muted);
+}
+
+/* Etiket çizginin üstünde durur; ilk/son etiketin taşmaması için ortalanıp
+   `white-space: nowrap` ile tek satırda tutuluyor. */
+.shorts-tick > i {
+  position: absolute;
+  bottom: 8px;
+  left: 0;
+  transform: translateX(-50%);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Film şeridi — videonun kareleri. Tıklama/sürükleme şeridin değil track'in
+   işi, o yüzden olayları geçirmiyor. */
+.shorts-filmstrip {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  overflow: hidden;
+  border-radius: 7px;
+  pointer-events: none;
+}
+
+.shorts-filmstrip img {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.85;
+}
+
+/* İnce ayar şeridi — ±1 / ±0.1 / ±0.01 sn. */
+.shorts-nudge-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.shorts-nudge-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.shorts-nudge {
+  padding: 2px 7px;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.shorts-track {
+  position: relative;
+  height: 54px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--bg-surface-subtle) 0 18px,
+    var(--bg-surface-hover) 18px 19px
+  );
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.shorts-track.is-dragging {
+  cursor: grabbing;
+}
+
+/* Seçili aralık — oynatılırken de görsel olarak belli olan alan. */
+.shorts-selection {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 2px;
+  border: 1px solid var(--border-current, #a89476);
+  border-radius: 6px;
+  background: rgba(37, 99, 235, 0.22);
+  cursor: grab;
+  touch-action: none;
+}
+
+.shorts-selection:active {
+  cursor: grabbing;
+}
+
+.shorts-selection-label {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.shorts-handle {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 14px;
+  margin-left: -7px;
+  padding: 0;
+  border: 1px solid #1d4ed8;
+  border-radius: 4px;
+  background: #2563eb;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.shorts-handle::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 16px;
+  margin: -8px 0 0 -1px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.shorts-playhead {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--text-muted);
+  pointer-events: none;
+}
+
+.shorts-playhead.in-selection {
+  background: #dc2626;
+}
+
+.shorts-time-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.shorts-duration {
+  display: inline-block;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-surface-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.shorts-duration.over {
+  border-color: #d97706;
+  color: #b45309;
+}
+
+/* --- 9:16 kadraj --- */
+
+.shorts-crop-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 1.4fr) minmax(170px, 0.6fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.shorts-frame-stage {
+  display: grid;
+  gap: 10px;
+}
+
+.shorts-frame-box {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #000;
+}
+
+.shorts-frame-box video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+
+/*
+ * Kadraj penceresi. Dışı TEK gölgeyle karartılıyor: devasa yayılımlı
+ * box-shadow kutunun dışındaki her yeri kaplar, içi dokunulmadan kalır
+ * (ayrı bir karartma katmanı + brightness hilesi gerekmez).
+ */
+.shorts-frame-rect {
+  position: absolute;
+  outline: 2px solid #2563eb;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+}
+
+.shorts-frame-rect.is-dragging {
+  cursor: grabbing;
+}
+
+.shorts-frame-tag {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+}
+
+.shorts-frame-controls {
+  display: grid;
+  gap: 8px;
+}
+
+.shorts-frame-controls label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.shorts-frame-controls input[type='range'] {
+  flex: 1;
+}
+
+.shorts-frame-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.shorts-crop-preview {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+
+/* 9:16 pencere: içindeki video büyütülüp kaydırılıyor, yalnızca kadraj görünür. */
+.shorts-preview {
+  position: relative;
+  width: 100%;
+  max-width: 220px;
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #000;
+}
+
+.shorts-preview video {
+  position: absolute;
+  display: block;
+  object-fit: cover;
+}
+
+/* --- "Bu Aralığı Al" --- */
+
+.shorts-take-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 4px 0 12px;
+  padding: 12px;
+  border: 1px solid var(--border-current, #a89476);
+  border-radius: 8px;
+  background: var(--bg-surface);
+  box-shadow: var(--shadow);
+}
+
+.shorts-take {
+  font-size: 15px;
+  padding: 10px 18px;
+}
+
+/* --- Kesit listesi --- */
+
+.shorts-clip-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.shorts-clip-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-surface);
+  box-shadow: var(--shadow);
+}
+
+.shorts-clip-card.is-editing {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 1px #2563eb, var(--shadow-strong);
+}
+
+.shorts-clip-card .shorts-preview {
+  max-width: 100%;
+}
+
+.shorts-clip-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.shorts-clip-body strong {
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+
+.shorts-clip-body .muted {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.shorts-clip-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.shorts-clip-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.shorts-clip-actions .button,
+.shorts-clip-actions a.button {
+  flex: 1;
+  text-align: center;
+  text-decoration: none;
+  font-size: 12.5px;
+}
+
+@media (max-width: 900px) {
+  .shorts-editor-grid,
+  .shorts-crop-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* --- adım seçicileri (Ambiance / Pomodoro / Promptlar) ------------------
+   Üç seçici de aynı kutuyu satır içi stillerle tekrarlıyordu; stiller buraya
+   alındı ki tema değişkenleri geçerli olsun. Açılan kısım dropdown: sayfayı
+   aşağı itmek yerine üstüne biner, böylece uzun formda adımlar kaymaz. */
+.picker {
+  position: relative;
+  margin: 12px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-surface);
+}
+
+.picker.is-open {
+  border-color: var(--border-current);
+}
+
+.picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.picker-head .button {
+  font-size: 12px;
+  min-height: 26px;
+  padding: 2px 10px;
+}
+
+.picker-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.picker-caret {
+  font-size: 10px;
+  line-height: 1;
+}
+
+.picker-dropdown {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: min(60vh, 540px);
+  overflow-y: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-surface-elevated, var(--bg-surface));
+  box-shadow: var(--shadow-strong, var(--shadow));
+}
+
+/* Dar ekranda dropdown'ı yüzdürmek yerine akışta aç: kısa ekranda üstüne
+   binen panel geri kalanı tamamen kapatıyor. */
+@media (max-width: 720px) {
+  .picker-dropdown {
+    position: static;
+    max-height: none;
+    margin-top: 8px;
+    box-shadow: none;
+  }
+}
+
+/* --- Ambiance seçim listesi (PickerPanel dropdown'ı içinde) --------------
+   Her ses tek satır: satıra basmak seçer, sağdaki düğme dinletir. */
+.ambient-options {
+  display: grid;
+  gap: 2px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ambient-options li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ambient-option {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--text-main);
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ambient-option:hover:not(:disabled) {
+  background: var(--bg-surface-hover);
+}
+
+.ambient-option[aria-checked='true'] {
+  border-color: var(--border-current);
+  background: var(--primary-subtle);
+  font-weight: 600;
+}
+
+.ambient-option:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* Kutucuk her satırda aynı yeri tutsun: seçilince yazılar kaymaz. */
+.ambient-check {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-surface);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.ambient-option[aria-checked='true'] .ambient-check {
+  border-color: var(--border-current);
+  color: var(--primary);
+}
+
+.ambient-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ambient-play {
+  flex: none;
+  min-height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+}

@@ -65,10 +65,15 @@ describe('planProject', () => {
     assert.ok(!Object.hasOwn(json, 'style'), 'stil kavramı kaldırıldı');
   });
 
-  test('müzik tarifi planlayıcının varsayılanı; ambient yoksa anahtar yok', () => {
+  test('müzik planı yazılmaz; ambient yoksa anahtar yok', () => {
     const json = JSON.parse(planProject({ ...base, ambient: null }).files[0].content);
-    assert.deepEqual(Object.keys(json), ['clip', 'audioDir', 'video', 'output', 'music']);
-    assert.equal(json.music.style, 'Lo-fi / mellow / instrumental');
+    assert.deepEqual(Object.keys(json), ['clip', 'audioDir', 'video', 'output']);
+  });
+
+  test('müzik planı yalnızca açıkça verilince yazılır', () => {
+    const musicPlan = { style: 'Lo-fi / mellow / instrumental', totalTracks: 3, tracks: [] };
+    const json = JSON.parse(planProject({ ...base, ambient: null, musicPlan }).files[0].content);
+    assert.deepEqual(json.music, musicPlan);
   });
 
 });

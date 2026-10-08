@@ -2,12 +2,9 @@
 
 import { useRef, useState } from 'react';
 
+import { errorText } from '../../format';
 import type { WorkflowStepId } from '../../types';
 import { STEP_GUIDE } from '../../workflow';
-
-export function errorText(error: unknown, fallback: string) {
-  return error instanceof Error && error.message ? error.message : fallback;
-}
 
 export function StepGuide({ stepId }: { stepId: WorkflowStepId }) {
   const guide = STEP_GUIDE[stepId];

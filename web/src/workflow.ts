@@ -34,7 +34,7 @@ export const STEP_GUIDE: Record<WorkflowStepId, { who: 'user' | 'system'; lines:
   build: {
     who: 'system',
     lines: [
-      '"Başlat" de; sistem watermark kırpma, 16:9 oran, ses birleştirme, ambient, videoyu ses süresine uzatma, fade ve tracklist işlemlerini otomatik yapar.',
+      '"Başlat" de; kırpma, ses birleştirme, ambient, uzatma, fade ve tracklist otomatik.',
     ],
   },
   publish: {
@@ -50,7 +50,10 @@ export function stepInfo(workflow: ProjectWorkflow | undefined, id: WorkflowStep
 /** Kullanıcı yalnızca tamamlanmış adımlara ve ilk açık adıma gidebilir. */
 export function isStepReachable(workflow: ProjectWorkflow | undefined, id: WorkflowStepId): boolean {
   if (!workflow) return false;
-  return STEP_ORDER.indexOf(id) <= STEP_ORDER.indexOf(workflow.current) || stepInfo(workflow, id)?.status === 'done';
+  // `current` Shorts akışının adımı da olabilir; o ekran bu sihirbazı
+  // kullanmıyor, listede olmayan değer -1 ile sonuçlanır (erişilemez).
+  const currentIndex = STEP_ORDER.indexOf(workflow.current as WorkflowStepId);
+  return STEP_ORDER.indexOf(id) <= currentIndex || stepInfo(workflow, id)?.status === 'done';
 }
 
 export function previousStep(id: WorkflowStepId): WorkflowStepId | null {

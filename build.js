@@ -501,6 +501,7 @@ Seçenekler:
   --aspect <W:H|off>  en-boy kırpması (varsayılan 16:9)
   --scale <genişlik>  base.mp4'ü bu genişliğe ölçekle (çift sayı)
   --render            uzun videoyu da üret (varsayılan: yalnızca yayın paketi)
+  --stream-dir <yol|off>  yayın paketinin kopyalanacağı klasör; "off" yayına vermez
   --keep              workspace'i silme (ara dosyalar + loop testi kalır)
   --overwrite         çıktı varsa üzerine yaz
   -h, --help          bu metin`;
@@ -519,6 +520,7 @@ export function parseCli(argv) {
       'crop-bottom': { type: 'string' },
       'verify-crop': { type: 'boolean', default: false },
       aspect: { type: 'string' },
+      'stream-dir': { type: 'string' },
       scale: { type: 'string' },
       render: { type: 'boolean', default: false },
       keep: { type: 'boolean', default: false },
@@ -539,6 +541,10 @@ export function parseCli(argv) {
       cropBottom: toNumber(values['crop-bottom']),
       verifyCrop: values['verify-crop'],
       aspect: values.aspect,
+      // "off" → yayına verme, paket yalnızca out/ altına yazılsın.
+      streamDir: values['stream-dir'] === undefined
+        ? undefined
+        : (values['stream-dir'] === 'off' ? null : values['stream-dir']),
       scaleWidth: toNumber(values.scale),
     },
   };

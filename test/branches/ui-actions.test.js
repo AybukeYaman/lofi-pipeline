@@ -71,7 +71,10 @@ function makeCtx(answers = [], { code = 0, codes = [], closeWhenEmpty = false } 
   return { ctx, calls, prompter, openedFolders, out: () => prompter.output() };
 }
 
-const project = (name = 'v') => runNewVideo({ videoName: name, ...env });
+// Bu dosyadaki müzik senaryoları PLAN TABANLI akışı sınıyor (Track 01/02…,
+// "17/17 dolmadan montaja geçilmez"). Plan artık proje açılırken varsayılan
+// olarak yazılmıyor, bu yüzden fikstür planı açıkça istiyor.
+const project = (name = 'v') => runNewVideo({ videoName: name, totalTracks: 17, ...env });
 const readProject = async (dir) => JSON.parse(await readFile(join(dir, 'project.json'), 'utf8'));
 const itemsOf = (prompter, questionPart) =>
   prompter.questions.find((q) => q.question.includes(questionPart))?.items.map((i) => i.label);

@@ -3,9 +3,11 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, 
 import { fetchProject, fetchProjects, ProjectNotFoundError } from '../api';
 import { EmptyState } from '../components/Feedback';
 import { PageHeader } from '../components/PageHeader';
+import { ProjectTabs } from '../components/ProjectTabs';
 import { StatusBadge } from '../components/StatusBadge';
 import type { LoadState, ProjectDetail, ProjectSummary, WorkflowStepId } from '../types';
 import { isStepReachable, nextStepId, previousStep, stepInfo } from '../workflow';
+import { ShortsWorkspace } from './ShortsWorkspace';
 import { deriveAssets } from './workspace/assetState';
 import { OrderStage, ProjectStartStage } from './workspace/CanonicalStages';
 import {
@@ -15,7 +17,9 @@ import {
   VideoStage,
   type StageProps,
 } from './workspace/StageSections';
-import { errorText, StepGuide } from './workspace/StepWidgets';
+import { errorText } from '../format';
+import { StepGuide } from './workspace/StepWidgets';
+import { useCreateShorts } from '../useCreateShorts';
 
 /** Canonical 6 adımın ekranları — sıra workflow.ts STEP_ORDER'dır. */
 const stageComponents: Record<WorkflowStepId, ComponentType<StageProps>> = {
@@ -42,6 +46,7 @@ export function ProjectWorkspace({
   const [loadState, setLoadState] = useState<LoadState>('idle');
   const [errorMessage, setErrorMessage] = useState('Could not load project.');
   const [allProjects, setAllProjects] = useState<ProjectSummary[]>([]);
+  const { busyId: shortsBusyId, createShorts } = useCreateShorts(onOpenProject);
 
   useEffect(() => {
     fetchProjects().then(setAllProjects).catch(() => {});
@@ -81,6 +86,13 @@ export function ProjectWorkspace({
 
   const hasSubprojectGroup = Boolean(project?.parentId || siblingSubprojects.length > 0);
 
+  // Ana proje listede yoksa (henüz yüklenmediyse) kimliğiyle gösterilir.
+  const mainTabProject = useMemo(
+    () => allProjects.find((p) => p.id === rootParentId)
+      ?? { id: rootParentId ?? '', name: rootParentId ?? '' },
+    [allProjects, rootParentId],
+  );
+
   return (
     <section className="page workspace">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
@@ -88,100 +100,19 @@ export function ProjectWorkspace({
           ← Back to Projects
         </button>
 
+        {/* Ana proje + alt projeler şeridi — Projects sayfasındaki kartla
+            aynı bileşen. Burada seçim o projeye gider. Tek proje varsa şerit
+            yerine sade bir "alt proje aç" düğmesi durur. */}
         {hasSubprojectGroup && rootParentId ? (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              background: '#f8f5ee',
-              padding: '4px 10px',
-              borderRadius: 8,
-              border: '1px solid #e7ded0',
-              flexWrap: 'wrap',
-            }}
-          >
-            <span style={{ fontSize: 11, fontWeight: 600, color: '#7a6a55', marginRight: 2 }}>Sekmeler:</span>
-            <button
-              type="button"
-              style={{
-                padding: '3px 8px',
-                fontSize: 12,
-                fontWeight: project?.id === rootParentId ? 700 : 500,
-                borderRadius: 4,
-                border: '1px solid',
-                borderColor: project?.id === rootParentId ? '#a89476' : '#ded5c5',
-                background: project?.id === rootParentId ? '#ffffff' : 'transparent',
-                color: project?.id === rootParentId ? '#2c2214' : '#6b5d49',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-              }}
-              onClick={() => onOpenProject?.(rootParentId)}
-            >
-              {allProjects.find((p) => p.id === rootParentId)?.thumbnailUrl ? (
-                <img
-                  src={allProjects.find((p) => p.id === rootParentId)!.thumbnailUrl!}
-                  alt=""
-                  style={{ width: 16, height: 16, borderRadius: 3, objectFit: 'cover' }}
-                />
-              ) : (
-                <span>🏠</span>
-              )}
-              <span>{rootParentId} (Ana)</span>
-            </button>
-            {siblingSubprojects.map((sub) => (
-              <button
-                key={sub.id}
-                type="button"
-                style={{
-                  padding: '3px 8px',
-                  fontSize: 12,
-                  fontWeight: project?.id === sub.id ? 700 : 500,
-                  borderRadius: 4,
-                  border: '1px solid',
-                  borderColor: project?.id === sub.id ? '#a89476' : '#ded5c5',
-                  background: project?.id === sub.id ? '#ffffff' : 'transparent',
-                  color: project?.id === sub.id ? '#2c2214' : '#6b5d49',
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 5,
-                }}
-                onClick={() => onOpenProject?.(sub.id)}
-              >
-                {sub.thumbnailUrl ? (
-                  <img
-                    src={sub.thumbnailUrl}
-                    alt=""
-                    style={{ width: 16, height: 16, borderRadius: 3, objectFit: 'cover' }}
-                  />
-                ) : (
-                  <span>📄</span>
-                )}
-                <span>{sub.name}</span>
-              </button>
-            ))}
-            <button
-              type="button"
-              style={{
-                padding: '3px 7px',
-                fontSize: 11,
-                fontWeight: 600,
-                borderRadius: 4,
-                border: '1px dashed #bba990',
-                background: 'transparent',
-                color: '#6c593e',
-                cursor: 'pointer',
-                marginLeft: 4,
-              }}
-              title="Bu ana projeye yeni bir alt proje ekle"
-              onClick={() => onNewProject?.(rootParentId)}
-            >
-              ➕ Alt Proje
-            </button>
-          </div>
+          <ProjectTabs
+            main={mainTabProject}
+            subprojects={siblingSubprojects}
+            activeId={project?.id ?? rootParentId}
+            onSelect={(targetId) => onOpenProject?.(targetId)}
+            mainLabel={`${rootParentId} (Ana)`}
+            onAddSubproject={() => onNewProject?.(rootParentId)}
+            ariaLabel="Proje sekmeleri"
+          />
         ) : (
           <button
             type="button"
@@ -192,6 +123,20 @@ export function ProjectWorkspace({
             ➕ Bu Projeye Alt Proje Aç
           </button>
         )}
+
+        {/* Shorts alt projesi: bu projenin videosundan 9:16 kesitler almak için. */}
+        {project && project.kind !== 'shorts' ? (
+          <button
+            type="button"
+            className="button"
+            style={{ fontSize: 12, padding: '4px 10px' }}
+            disabled={shortsBusyId !== null}
+            title="Bu projenin videosundan 9:16 Shorts kesitleri al"
+            onClick={() => void createShorts(project.id)}
+          >
+            {shortsBusyId === project.id ? 'Açılıyor...' : '🎬 Shorts Alt Projesi'}
+          </button>
+        ) : null}
       </div>
 
       {loadState === 'loading' ? <div className="state-card">Loading project...</div> : null}
@@ -210,7 +155,13 @@ export function ProjectWorkspace({
       ) : null}
 
       {project ? (
-        <WorkspaceContent project={project} onProjectUpdate={(updated) => setProject(updated)} />
+        project.kind === 'shorts' ? (
+          // Shorts alt projesinin akışı ayrı: montaj sihirbazı (6 adım)
+          // yerine timeline + kadraj + kesit listesi.
+          <ShortsWorkspace id={project.id} onBack={onBack} />
+        ) : (
+          <WorkspaceContent project={project} onProjectUpdate={(updated) => setProject(updated)} />
+        )
       ) : null}
     </section>
   );
@@ -224,7 +175,9 @@ function WorkspaceContent({
   onProjectUpdate: (project: ProjectDetail) => void;
 }) {
   const workflow = project.workflow;
-  const current = workflow?.current ?? 'project';
+  // Shorts projeleri bu bileşene hiç girmiyor (ayrı ekran); `current` bu
+  // yüzden her zaman canonical akışın bir adımı.
+  const current = (workflow?.current ?? 'project') as WorkflowStepId;
   const assets = useMemo(() => deriveAssets(project), [project]);
 
   // Açılışta diskten hesaplanan ilk açık adım gösterilir. Bir işlem ilk açık
@@ -291,7 +244,10 @@ function WorkspaceContent({
 
       <nav className="panel wizard-steps" aria-label="İş akışı">
         <ol className="stepper stepper-horizontal">
-          {(workflow?.steps ?? []).map((step) => {
+          {(workflow?.steps ?? []).map((rawStep) => {
+            // Bu sihirbaz yalnızca canonical akış için çalışıyor (Shorts
+            // projeleri ayrı ekranda), adım kimliği bu yüzden daraltılabilir.
+            const step = rawStep as typeof rawStep & { id: WorkflowStepId };
             const reachable = isStepReachable(workflow, step.id);
             const classes = [
               'workflow-step',

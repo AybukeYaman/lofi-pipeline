@@ -376,7 +376,12 @@ export async function setProjectCrop(projectPath, { cropTop, cropBottom = 0, cro
 }
 
 /** project.json'u okur; kök nesne değilse ProjectFileError. */
-async function readProjectObject(projectPath) {
+/**
+ * project.json'u nesne olarak okur; hatayı ProjectFileError'a sarar.
+ * `prep/shorts-file.js` de bunu kullanıyor — aynı okuma/hata metni iki
+ * yerde ayrı yazılmasın.
+ */
+export async function readProjectObject(projectPath) {
   let json;
   try {
     json = await readJsonFile(projectPath);

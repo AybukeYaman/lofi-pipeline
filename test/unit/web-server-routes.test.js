@@ -38,8 +38,12 @@ describe('rota tablosu — her rota adapter\'da var olan bir metot çağırır',
    * kırılmıştı — rota eklendi, `maxBodyBytes` yazılmadı.
    */
   test('yükleme rotalarının gövde sınırı tanımlı ve dosya boyutuna uygun', () => {
+    // Shorts rotaları adında "clip" geçse de dosya YÜKLEMİYOR: gövdede
+    // yalnızca zaman aralığı/kadraj sayıları var, kaynak video kopyalanmıyor.
     const uploads = ROUTES.filter((route) =>
-      route.method === 'POST' && /upload|audio|image|clip/.test(route.pattern.source));
+      route.method === 'POST'
+      && /upload|audio|image|clip/.test(route.pattern.source)
+      && !/shorts/.test(route.pattern.source));
     assert.ok(uploads.length > 0, 'yükleme rotası bulunamadı');
     for (const route of uploads) {
       assert.equal(

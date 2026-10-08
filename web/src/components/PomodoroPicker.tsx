@@ -14,16 +14,15 @@
  * eklenmesi gerekiyor, montaj başlatılmaz.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { fetchProjectPomodoro, updateProjectPomodoro } from '../api';
+import { PickerPanel } from './PickerPanel';
 import type { ProjectPomodoro, UpdatePomodoroPayload } from '../types';
 
 type PomodoroPickerProps = {
   projectId: string;
   label?: string;
-  /** Kutu kapalı başlamasın (montaj adımında doğrulama hemen görünsün). */
-  defaultOpen?: boolean;
   /** Ayar değişince dış ekranın (ör. montaj düğmesi) kendini toplaması için. */
   onChange?: (data: ProjectPomodoro) => void;
 };
@@ -59,30 +58,52 @@ function payloadOf(data: ProjectPomodoro, changes: Partial<UpdatePomodoroPayload
 export function PomodoroPicker({
   projectId,
   label = 'Pomodoro modu',
-  defaultOpen = false,
   onChange,
 }: PomodoroPickerProps) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [open, setOpen] = useState(false);
   const [data, setData] = useState<ProjectPomodoro | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  // onChange ref'te tutulur: effect'in bağımlılığı olursa çağıranın her
+  // render'ında kimliği değişip effect'i yeniden kurabiliyor. Kutu ilk
+  // açıldığında temizlik, cevap gelmeden çalışıyor ve sonuç atılıyordu —
+  // ekran "Yükleniyor..."da kalıyordu (kapatıp açınca düzeliyordu).
+  const onChangeRef = useRef(onChange);
+  useEffect(() => { onChangeRef.current = onChange; });
+
   const apply = useCallback((loaded: ProjectPomodoro) => {
     setData(loaded);
-    onChange?.(loaded);
-  }, [onChange]);
+    onChangeRef.current?.(loaded);
+  }, []);
 
   // Yalnızca kutu açılınca yüklenir: her adım panelinde boşuna istek atılmasın.
+  // Her açılışta yeniden okunur — doğrulama ("müzik timeline'a uyuyor mu")
+  // aradan geçen müzik değişikliklerine göre tazelensin.
+  // Kutu ilk açıldığında yüklenir. Bekleme BİLEŞENİN ömrüne bağlı, effect'in
+  // ömrüne değil: ölçüm uzun sürebiliyor (parça süreleri ffprobe ile okunuyor)
+  // ve kutu bu arada kapanırsa sonuç eskiden atılıyor, ekran bir daha açılana
+  // kadar "Yükleniyor..."da kalıyordu.
+  const requested = useRef(false);
   useEffect(() => {
-    if (!open || data !== null) return;
-    let active = true;
+    if (!open || requested.current) return;
+    requested.current = true;
+    let mounted = true;
     fetchProjectPomodoro(projectId)
-      .then((loaded) => { if (active) apply(loaded); })
+      .then((loaded) => { if (mounted) apply(loaded); })
       .catch((err) => {
-        if (active) setError(err instanceof Error ? err.message : 'Pomodoro ayarı yüklenemedi.');
+        if (!mounted) return;
+        requested.current = false; // hata sonrası tekrar denenebilsin
+        setError(err instanceof Error ? err.message : 'Pomodoro ayarı yüklenemedi.');
       });
-    return () => { active = false; };
-  }, [open, data, projectId, apply]);
+    return () => { mounted = false; };
+  }, [open, projectId, apply]);
+
+  // Proje değişirse yeniden okunur.
+  useEffect(() => {
+    requested.current = false;
+    setData(null);
+  }, [projectId]);
 
   /**
    * Ayarı yazar ve sunucunun GÜNCEL doğrulamasını gösterir (iyimser güncelleme
@@ -114,36 +135,29 @@ export function PomodoroPicker({
   const chip = { fontSize: 12, minHeight: 28, padding: '2px 10px' } as const;
 
   return (
-    <div style={{ border: '1px solid var(--border, #333)', borderRadius: 6, padding: '8px 12px', margin: '12px 0' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <button
-          type="button"
-          className="button"
-          style={{ fontSize: 12, minHeight: 26, padding: '2px 10px' }}
-          aria-expanded={open}
-          onClick={() => setOpen(!open)}
-        >
-          {open ? '▾' : '▸'} {label}
-          {data ? (
-            <span className="count">
-              {' '}
-              ({settings ? `${settings.workMinutes}/${settings.breakMinutes} × ${settings.rounds} = ${total} dk` : 'kapalı'})
-            </span>
-          ) : null}
-        </button>
-        {/* Doğrulama durumu kutuyu açmadan da görünsün: montaj adımında asıl
-            soru "başlatabilir miyim". */}
-        {data?.enabled ? (
+    <PickerPanel
+      label={label}
+      badge={
+        data
+          ? `(${settings ? `${settings.workMinutes}/${settings.breakMinutes} × ${settings.rounds} = ${total} dk` : 'kapalı'})`
+          : undefined
+      }
+      open={open}
+      onOpenChange={setOpen}
+      actions={
+        /* Doğrulama durumu kutuyu açmadan da görünsün. */
+        data?.enabled ? (
           <span style={{ fontSize: 12, color: validation?.ok ? 'var(--text-muted)' : 'var(--danger, #c0392b)' }}>
             {validation?.ok ? '✓ Müzik timeline\'a uyuyor' : '⚠ Müzik uymuyor'}
           </span>
-        ) : null}
-      </div>
-
-      {open ? (
-        <div style={{ marginTop: 8 }}>
+        ) : null
+      }
+    >
+        <>
           {error ? <p className="form-error">{error}</p> : null}
-          {data === null && !error ? <p className="field-hint">Yükleniyor...</p> : null}
+          {data === null && !error ? (
+            <p className="field-hint">Parça süreleri ölçülüyor...</p>
+          ) : null}
           {data?.problems.map((problem) => (
             <p className="form-error" key={problem}>{problem}</p>
           ))}
@@ -151,10 +165,8 @@ export function PomodoroPicker({
           {data ? (
             <>
               <p className="field-hint">
-                Pomodoro açıkken video düz bir müzik akışı değil, <strong>çalışma ve mola
-                oturumları</strong> olarak kurulur. Her oturumdan {settings?.countdownSeconds
-                  ?? data.defaults.countdownSeconds} saniye önce geri sayım beep'i, oturum
-                başlarken ayrı bir efekt çalar.
+                Çalışma/mola oturumları · her oturumdan{' '}
+                {settings?.countdownSeconds ?? data.defaults.countdownSeconds} sn önce geri sayım
               </p>
 
               {/* --- düzen */}
@@ -293,9 +305,8 @@ export function PomodoroPicker({
                     {validation?.needsTrimConfirmation && validation.trim ? (
                       <div style={{ marginTop: 8 }}>
                         <p className="field-hint">
-                          Kırpılırsa: {validation.trim.trimmedCount} parça kısaltılır,
-                          {' '}{validation.trim.droppedCount} parça kullanılmaz.
-                          Orijinal müzik dosyalarına <strong>dokunulmaz</strong>.
+                          {validation.trim.trimmedCount} parça kısaltılır,{' '}
+                          {validation.trim.droppedCount} parça kullanılmaz · dosyalara dokunulmaz
                         </p>
                         <button
                           type="button"
@@ -342,8 +353,7 @@ export function PomodoroPicker({
               ) : null}
             </>
           ) : null}
-        </div>
-      ) : null}
-    </div>
+        </>
+    </PickerPanel>
   );
 }
