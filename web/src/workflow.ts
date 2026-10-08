@@ -17,7 +17,7 @@ export const STEP_ORDER: WorkflowStepId[] = [
 export const STEP_GUIDE: Record<WorkflowStepId, { who: 'user' | 'system'; lines: string[] }> = {
   project: {
     who: 'user',
-    lines: ['Proje adı, müzik stili ve ambient ses seçildi; proje ayarları hazırlandı.'],
+    lines: ['Proje klasörü kuruldu. Ambiance ve Pomodoro 3. adımda (Müzik) seçilir.'],
   },
   video: {
     who: 'user',

@@ -79,7 +79,3 @@ export async function mapWithLimit(items, limit, worker) {
   return results;
 }
 
-/** Testler için: önbelleği boşaltır. */
-export function clearProbeCache() {
-  cache.clear();
-}

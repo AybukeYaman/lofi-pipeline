@@ -170,7 +170,8 @@ export type ProjectDetail = {
   output?: ProjectFileEvidence;
   step?: ProjectStep;
   workflow?: ProjectWorkflow;
-  readiness?: ProjectReadiness;
+  /** Sunucu her zaman gönderir (getProject koşulsuz üretir). */
+  readiness: ProjectReadiness;
 };
 
 export type ProjectMusicAudio = {

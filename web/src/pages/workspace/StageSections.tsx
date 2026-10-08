@@ -1052,7 +1052,7 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
             </div>
           ) : (
             <p className="field-hint" style={{ margin: 0 }}>
-              Kütüphanede henüz albüm yok. Üst menüdeki <strong>Music Hub</strong> üzerinden albüm ekleyebilirsiniz.
+              Kütüphanede henüz albüm yok. Albümler <code>music_library/</code> klasöründen okunuyor.
             </p>
           )}
         </div>

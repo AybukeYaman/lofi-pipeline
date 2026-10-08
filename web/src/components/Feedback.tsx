@@ -26,13 +26,3 @@ export function SampleDataNotice({ children }: { children?: ReactNode }) {
     </p>
   );
 }
-
-/** Shown after a UI-only action that has no backend yet. */
-export function NotConnectedNotice({ children }: { children: ReactNode }) {
-  return (
-    <p className="notice notice-muted" role="status">
-      <strong>Not connected</strong>
-      <span>{children}</span>
-    </p>
-  );
-}

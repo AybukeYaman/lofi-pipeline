@@ -181,5 +181,3 @@ function hintFor(status) {
   }
 }
 
-/** Varsayılan örnek (gerçek fetch). */
-export const apiframeProvider = createApiframeSunoProvider();

@@ -204,14 +204,9 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
 
                 {/* Kart altı işlemler — her kartta aynı yerde dursun diye
                     gövde ne kadar uzun olursa olsun en alta sabitlenir. */}
+                {/* "Aç" düğmesi YOK: kartın gövdesi zaten projeyi açıyor, iki
+                    ayrı tetik aynı işi yapıyordu. */}
                 <div className="project-card-actions">
-                  <button
-                    className="button button-primary"
-                    type="button"
-                    onClick={() => onOpenProject(currentProject.id)}
-                  >
-                    Aç →
-                  </button>
                   <button
                     className="button"
                     type="button"
@@ -220,15 +215,20 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
                   >
                     + Alt Proje
                   </button>
-                  <button
-                    className="button"
-                    type="button"
-                    disabled={shortsBusyId !== null}
-                    title={`"${mainProject.name}" videosundan 9:16 Shorts kesitleri al`}
-                    onClick={() => void createShorts(mainProject.id)}
-                  >
-                    {shortsBusyId === mainProject.id ? 'Açılıyor...' : '🎬 + Shorts'}
-                  </button>
+                  {/* Shorts SEÇİLİ sekmenin projesinden açılır: kullanıcı bir alt
+                      projeye bakarken düğme sessizce ana projeyi kaynak alıyordu.
+                      Shorts'tan Shorts açılamaz (sunucu da 400 veriyor). */}
+                  {currentProject.kind !== 'shorts' ? (
+                    <button
+                      className="button"
+                      type="button"
+                      disabled={shortsBusyId !== null}
+                      title={`"${currentProject.name}" videosundan 9:16 Shorts kesitleri al`}
+                      onClick={() => void createShorts(currentProject.id)}
+                    >
+                      {shortsBusyId === currentProject.id ? 'Açılıyor...' : '🎬 + Shorts'}
+                    </button>
+                  ) : null}
                   <button
                     className="button project-delete"
                     type="button"

@@ -166,7 +166,7 @@ export function PromptLibrary() {
         title="Promptlar"
         description="Kendi promptlarını burada tut, her an kopyala. Projeye girmen ya da bir aşamaya geçmen gerekmez."
         actions={
-          <button type="button" className="button primary" onClick={openNew} disabled={editing === 'new'}>
+          <button type="button" className="button button-primary" onClick={openNew} disabled={editing === 'new'}>
             + Yeni prompt
           </button>
         }
@@ -222,7 +222,7 @@ export function PromptLibrary() {
             </p>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button type="button" className="button primary" onClick={() => void handleSave()} disabled={isSaving}>
+            <button type="button" className="button button-primary" onClick={() => void handleSave()} disabled={isSaving}>
               {isSaving ? 'Kaydediliyor...' : 'Kaydet'}
             </button>
             <button type="button" className="button" onClick={closeForm} disabled={isSaving}>
@@ -245,7 +245,7 @@ export function PromptLibrary() {
             <button
               key={tag}
               type="button"
-              className={`button${filter === tag ? ' primary' : ''}`}
+              className={`button${filter === tag ? ' button-selected' : ''}`}
               style={{ fontSize: 12, minHeight: 28, padding: '2px 10px' }}
               onClick={() => setFilter(tag)}
             >
@@ -282,7 +282,7 @@ export function PromptLibrary() {
               <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
                 <button
                   type="button"
-                  className="button primary"
+                  className="button button-primary"
                   onClick={() => void handleCopy(prompt)}
                   disabled={Boolean(prompt.error)}
                 >

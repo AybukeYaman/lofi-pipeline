@@ -28,42 +28,20 @@ export type ProjectAssets = Record<
   AssetStatus
 >;
 
+/**
+ * `readiness` sunucudan HER ZAMAN geliyor (`getProject` onu koşulsuz üretiyor),
+ * bu yüzden burada "readiness yoksa diskten kendimiz çıkaralım" dalı yoktu —
+ * hiç çalışmıyordu ve aynı kuralın ikinci, sapmaya açık bir kopyasıydı.
+ */
 export function deriveAssets(project: ProjectDetail): ProjectAssets {
-  const readiness = project.readiness;
-  const clipCount = readiness?.clip ? readiness.clip.availableCount : (project.clips?.length ?? 0);
+  const { clip, music, build, output } = project.readiness;
   const ambientCount = ambientFiles(project).length;
-  const outputExists = readiness?.output ? readiness.output.exists : Boolean(project.output?.exists);
-
-  if (readiness) {
-    return {
-      clip: readiness.clip.ready ? 'ready' : (readiness.clip.selected || clipCount > 0 ? 'waiting' : 'missing'),
-      music: readiness.music.ready ? 'ready' : (readiness.music.audioCount > 0 || readiness.music.completedTrackCount > 0 ? 'waiting' : 'missing'),
-      ambient: ambientCount > 0 ? 'ready' : 'optional',
-      assembly: outputExists ? 'completed' : (readiness.build.ready ? 'ready' : 'waiting'),
-      output: outputExists ? 'completed' : 'waiting',
-    };
-  }
 
   return {
-    clip: project.clip?.exists ? 'ready' : !project.clip?.value && clipCount > 0 ? 'waiting' : 'missing',
-    music: musicStatus(project),
+    clip: clip.ready ? 'ready' : (clip.selected || clip.availableCount > 0 ? 'waiting' : 'missing'),
+    music: music.ready ? 'ready' : (music.audioCount > 0 || music.completedTrackCount > 0 ? 'waiting' : 'missing'),
     ambient: ambientCount > 0 ? 'ready' : 'optional',
-    assembly: outputExists ? 'completed' : project.step?.id === 'build' ? 'ready' : 'waiting',
-    output: outputExists ? 'completed' : 'waiting',
+    assembly: output.exists ? 'completed' : (build.ready ? 'ready' : 'waiting'),
+    output: output.exists ? 'completed' : 'waiting',
   };
-}
-
-function musicStatus(project: ProjectDetail): AssetStatus {
-  const music = project.projectJson?.data?.music;
-  const tracks = musicTracks(project);
-  const audioCount = project.audioCount ?? 0;
-
-  if (tracks.length > 0) {
-    const done =
-      music?.status === 'completed' ||
-      music?.status === 'completed_by_user' ||
-      tracks.every((track) => track.status === 'completed');
-    return done ? 'ready' : 'waiting';
-  }
-  return audioCount > 0 ? 'ready' : 'missing';
 }

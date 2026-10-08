@@ -134,7 +134,7 @@ export function ProjectWorkspace({
             title="Bu projenin videosundan 9:16 Shorts kesitleri al"
             onClick={() => void createShorts(project.id)}
           >
-            {shortsBusyId === project.id ? 'Açılıyor...' : '🎬 Shorts Alt Projesi'}
+            {shortsBusyId === project.id ? 'Açılıyor...' : '🎬 + Shorts'}
           </button>
         ) : null}
       </div>
