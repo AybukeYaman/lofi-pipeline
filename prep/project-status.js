@@ -358,7 +358,7 @@ export async function audioAddedOrder(s) {
  *
  * Sıra kuralı `steps/02-audio-concat.js` ile aynı kaynaktan: `order` varsa
  * matchOrder, yoksa klasörün doğal sırası. Tek yerde duruyor çünkü hem web
- * (`server/project-api.js`) hem panel (`ui/actions.js`) Pomodoro doğrulamasını
+ * (`server/project-api.js`) hem montaj adımı (`steps/02-audio-concat.js`) Pomodoro doğrulamasını
  * montajdan ÖNCE aynı sayılarla göstermek zorunda — iki ayrı kopya zamanla
  * birbirinden sapardı.
  *

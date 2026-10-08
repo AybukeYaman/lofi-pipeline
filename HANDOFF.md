@@ -1,3 +1,5 @@
+> **NOT (8 Ekim 2026):** Terminal paneli (TUI) kaldırıldı — `lofi.js`, `ui/`, `scripts/tty-check*`, `scripts/tui-check*` ve panel testleri silindi. Bu dokümanda geçen "panel", `npm start` ile açılan menü ve `ui/actions.js` atıfları **tarihsel kayıttır**, bugünkü sistemi anlatmaz. Arayüz artık yalnızca web/Electron.
+
 # Lofi Video Pipeline — Devir ve Mimari Dokümanı (Aşama 7–11)
 
 > **GÜNCEL DURUM İÇİN `CLAUDE.md`'YE BAK.**

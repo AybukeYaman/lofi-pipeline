@@ -5,7 +5,7 @@ Lofi müzik videoları üretimi için otomatik prep (hazırlık) ve ffmpeg taban
 Bu proje iki ana katmandan oluşur:
 1. **Montaj Otomasyonu (Katman 1 - `build.js`):** Suno müzik parçalarını, Hailuo video klip döngüsünü ve ambient ses efektlerini otomatik olarak birleştirir, YouTube uyumlu tracklist ve rapor üretir.
 2. **Hazırlık Otomasyonu (`prep`):** Proje iskeleti oluşturma ve Gemini API ile albüm müzik planı. Görseller elle üretilir.
-3. **Panel (Aşama 8–9 / `npm start`):** Üç komutu ok tuşlu bir menüden çalıştırır; istenirse proje klasörüne bakıp kaldığı yerden devam eder, birden fazla projeyi sırayla derler.
+3. **Arayüz (`npm start`):** Masaüstü uygulaması (Electron + React). Proje listesi, 6 adımlı montaj sihirbazı, Shorts alt projeleri, Ambiance/Mimi/Prompt kütüphaneleri. _(Terminal paneli 8 Ekim 2026'da kaldırıldı; bu dokümanın eski bölümlerinde geçen "panel" atıfları artık geçerli değil.)_
 
 ---
 
@@ -15,7 +15,7 @@ Gereksinimler:
 - Node.js (>=22)
 - ffmpeg (9.0.1+ PATH üzerinde)
 
-Depoyu klonlayıp dizinde `npm install` çalıştırın. Tek bağımlılık `enquirer` 2.4.1'dir (sabit sürüm; panelin ok tuşlu menüsü). Geri kalan her şey Node.js dahili modülleriyle yazılmıştır.
+Depoyu klonlayıp dizinde `npm install` çalıştırın. Bağımlılıklar arayüz tarafında (React/Vite/Electron) ve Suno botunda (Playwright); montaj zincirinin kendisi yalnızca Node.js dahili modülleriyle ve ffmpeg ile yazılmıştır.
 
 ### `.env` Kurulumu (Opsiyonel - Müzik Planı İçin)
 

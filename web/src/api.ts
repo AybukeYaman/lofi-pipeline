@@ -346,9 +346,12 @@ export async function deleteProject(id: string): Promise<{ deleted: string }> {
 
 // ---------------------------------------------------------------- Music Library & Suno Ingest
 // Yalnızca ekranların kullandığı uçlar: kütüphaneyi okumak, bir albümü
-// projeye atamak ve Suno bağlantısını doğrudan projeye indirmek. Albüm/parça
-// yönetimi (oluştur/sil/yükle/klasör aç) web'de hiçbir yerden çağrılmıyordu —
-// o iş TUI'de (ui/actions.js, prep/) yapılıyor; sunucu uçları yerinde duruyor.
+// projeye atamak ve Suno bağlantısını doğrudan projeye indirmek.
+//
+// AÇIK İŞ: albüm/parça yönetimi uçları (POST /albums, DELETE /albums/:id,
+// DELETE /tracks/:a/:t, /upload, /open-folder, /ingest-suno, /assets/…) artık
+// HİÇBİR yerden çağrılmıyor — eskiden panelin işiydi, panel kaldırıldı. Ya bu
+// ekranlar web'e eklenmeli ya da uçlar silinmeli; ikisi de yapılmadan durmasın.
 
 export async function fetchMusicLibrary(): Promise<import('./types').MusicLibraryResponse> {
   const response = await fetch('/api/music-library');

@@ -1,7 +1,7 @@
 /**
  * Web UI'dan başlatılan montajlar.
  *
- * build.js, panelde olduğu gibi (ui/runner.js) ayrı süreçte çalışır: çift
+ * build.js ayrı süreçte çalışır: çift
  * Ctrl+C'de process.exit çağırıyor ve ffmpeg'i uzun süre tutuyor; sunucunun
  * içinde çalışmamalı. Fark: çıktı terminale değil iş kaydına akar, istek
  * beklemez. Durum yalnızca bellekte tutulur (sunucu yeniden başlarsa kaybolur;

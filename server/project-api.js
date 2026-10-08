@@ -3,7 +3,7 @@
  *
  * HTTP katmani filesystem ayrintilarini bilmez; mevcut proje-durum
  * fonksiyonlarini bu dar arayuzden kullanir. Yazan islemler panelin
- * (ui/actions.js) kullandigi domain fonksiyonlarinin aynisini cagirir.
+ * prep/ altindaki domain fonksiyonlarini cagirir.
  */
 
 import { spawn } from 'node:child_process';
