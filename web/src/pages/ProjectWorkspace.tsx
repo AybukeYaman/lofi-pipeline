@@ -10,13 +10,11 @@ import { isStepReachable, nextStepId, previousStep, stepInfo } from '../workflow
 import { ShortsWorkspace } from './ShortsWorkspace';
 import { deriveAssets } from './workspace/assetState';
 import { OrderStage, ProjectStartStage } from './workspace/CanonicalStages';
-import {
-  BuildStage,
-  MusicStage,
-  OutputStage,
-  VideoStage,
-  type StageProps,
-} from './workspace/StageSections';
+import { BuildStage } from './workspace/BuildStage';
+import { MusicStage } from './workspace/MusicStage';
+import { OutputStage } from './workspace/OutputStage';
+import type { StageProps } from './workspace/StagePanel';
+import { VideoStage } from './workspace/VideoStage';
 import { errorText } from '../format';
 import { StepGuide } from './workspace/StepWidgets';
 import { useCreateShorts } from '../useCreateShorts';

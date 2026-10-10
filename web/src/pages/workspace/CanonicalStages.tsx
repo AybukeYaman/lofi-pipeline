@@ -1,4 +1,4 @@
-/** Canonical akışta StageSections dışındaki adımlar: 1 (proje), 4 (sıralama). */
+/** Canonical akışta kendi dosyası olmayan adımlar: 1 (proje), 4 (sıralama). */
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 
@@ -6,7 +6,7 @@ import { fetchProjectMusic, saveTrackOrder } from '../../api';
 import { EmptyState } from '../../components/Feedback';
 import type { ProjectMusicInfo, TrackOrderMode } from '../../types';
 import { ambientFiles, fileName } from './assetState';
-import { StagePanel, type StageProps } from './StageSections';
+import { StagePanel, type StageProps } from './StagePanel';
 import { errorText } from '../../format';
 
 // ---------------------------------------------------------------- 1. Proje başlat
