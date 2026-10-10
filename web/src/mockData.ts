@@ -10,8 +10,8 @@ export type LibraryAmbient = {
 };
 
 export const sampleAmbients: LibraryAmbient[] = [
-  { id: 'gentleRain', name: 'gentleRain', category: 'Rain' },
-  { id: 'heavyRain', name: 'heavyRain', category: 'Rain' },
-  { id: 'rainStorm', name: 'rainStorm', category: 'Storm' },
-  { id: 'campfire', name: 'campfire', category: 'Fire' },
+  { id: 'gentleRain', name: 'gentleRain', category: 'Yağmur' },
+  { id: 'heavyRain', name: 'heavyRain', category: 'Yağmur' },
+  { id: 'rainStorm', name: 'rainStorm', category: 'Fırtına' },
+  { id: 'campfire', name: 'campfire', category: 'Ateş' },
 ];

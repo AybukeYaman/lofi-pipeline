@@ -325,7 +325,7 @@ function WorkspaceContent({
         </dl>
         <dl className="evidence-list">
           <AssetRow label="Proje klasörü" value={project.dir} />
-          <AssetRow label="Video clip" value={project.clip?.path ?? project.clip?.value} />
+          <AssetRow label="Video dosyası" value={project.clip?.path ?? project.clip?.value} />
           <AssetRow
             label="Video kırpma"
             value={

@@ -1364,8 +1364,8 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
   const [buildError, setBuildError] = useState<string | null>(null);
 
   const rows = [
-    { label: 'Video Clip', status: assets.clip },
-    { label: 'Music', status: assets.music },
+    { label: 'Video klibi', status: assets.clip },
+    { label: 'Müzik', status: assets.music },
   ];
 
   // Initial fetch of build status
@@ -1502,7 +1502,7 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
 
       {!isBuildReady ? (
         <p className="field-hint" style={{ marginTop: 12, color: 'var(--text-muted)' }}>
-          ℹ Build will be available when all required stages (Master Frame, Video Clip, Music) are ready.
+          ℹ Montaj, gerekli adımlar (Video klibi, Müzik) hazır olunca başlatılabilir.
         </p>
       ) : null}
 

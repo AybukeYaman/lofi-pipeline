@@ -46,7 +46,7 @@ export function AmbientLibrary() {
     setAmbientErrorNotice(res.ambientError ?? null);
     const loaded: LibraryAmbient[] = (res.ambients ?? []).map((a) => {
       const sample = sampleAmbients.find((item) => item.id === a.name);
-      return { id: a.name, name: a.name, category: sample?.category ?? 'Ambient sound' };
+      return { id: a.name, name: a.name, category: sample?.category ?? 'Arka plan sesi' };
     });
     setAmbients(loaded);
   }, []);
@@ -141,7 +141,7 @@ export function AmbientLibrary() {
   return (
     <section className="page">
       <PageHeader
-        eyebrow="LIBRARY"
+        eyebrow="KÜTÜPHANE"
         title="Arka Plan Sesleri"
         actions={
           <button
@@ -222,8 +222,8 @@ export function AmbientLibrary() {
         />
         <span className="muted">
           {loadState === 'loading'
-            ? 'Loading ambient sounds...'
-            : `${visibleAmbients.length} sounds · ${selectedIds.length} selected`}
+            ? 'Arka plan sesleri yükleniyor...'
+            : `${visibleAmbients.length} ses · ${selectedIds.length} seçili`}
         </span>
       </div>
 
@@ -249,7 +249,7 @@ export function AmbientLibrary() {
                   className="play-button"
                   type="button"
                   aria-pressed={isPreviewing}
-                  aria-label={`${isPreviewing ? 'Stop' : 'Play'} ${ambient.name}`}
+                  aria-label={`${ambient.name} — ${isPreviewing ? 'durdur' : 'çal'}`}
                   onClick={() => togglePreview(ambient.name)}
                 >
                   {isPreviewing ? '■' : '▶'}
@@ -266,7 +266,7 @@ export function AmbientLibrary() {
                   aria-pressed={isSelected}
                   onClick={() => toggleSelected(ambient.id)}
                 >
-                  {isSelected ? 'Selected' : 'Select'}
+                  {isSelected ? 'Seçili' : 'Seç'}
                 </button>
                 <button
                   className="button"

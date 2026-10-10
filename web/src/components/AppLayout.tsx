@@ -4,12 +4,12 @@ import { paths } from '../router';
 import type { Navigate, Route } from '../types';
 
 const navItems = [
-  { label: 'Projects', path: paths.dashboard, routes: ['dashboard', 'project'] },
-  { label: 'New Project', path: paths.newProject, routes: ['newProject'] },
-  { label: 'Ambient', path: paths.ambient, routes: ['ambient'] },
+  { label: 'Projeler', path: paths.dashboard, routes: ['dashboard', 'project'] },
+  { label: 'Yeni Proje', path: paths.newProject, routes: ['newProject'] },
+  { label: 'Arka Plan Sesleri', path: paths.ambient, routes: ['ambient'] },
   { label: 'Mimi', path: paths.mimi, routes: ['mimi'] },
   { label: 'Promptlar', path: paths.prompts, routes: ['prompts'] },
-  { label: 'Settings', path: paths.settings, routes: ['settings'] },
+  { label: 'Ayarlar', path: paths.settings, routes: ['settings'] },
 ] as const;
 
 type AppLayoutProps = {

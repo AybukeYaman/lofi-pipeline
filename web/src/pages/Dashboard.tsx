@@ -100,7 +100,7 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
               onClick={loadProjects}
               disabled={loadState === 'loading'}
             >
-              Refresh
+              Yenile
             </button>
             <button className="button button-primary" type="button" onClick={() => onNewProject()}>
               Yeni Proje
@@ -196,7 +196,7 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
                       </div>
                       <p>Adım: {stepLabel}</p>
                       <time dateTime={new Date(currentProject.mtimeMs).toISOString()}>
-                        Updated: {formatDateTime(currentProject.mtimeMs)}
+                        Güncellendi: {formatDateTime(currentProject.mtimeMs)}
                       </time>
                     </div>
                   </div>
