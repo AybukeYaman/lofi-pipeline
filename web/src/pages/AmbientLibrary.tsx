@@ -198,7 +198,7 @@ export function AmbientLibrary() {
           </p>
           <div className="form-actions">
             <button className="button" type="button" onClick={closeForm}>
-              Cancel
+              Vazgeç
             </button>
             <button className="button button-primary" type="submit" disabled={isSaving}>
               {isSaving ? 'Yükleniyor...' : 'Add'}
@@ -234,7 +234,7 @@ export function AmbientLibrary() {
           title="Aramaya uyan arka plan sesi yok."
           action={
             <button className="button" type="button" onClick={() => setQuery('')}>
-              Clear search
+              Aramayı temizle
             </button>
           }
         />

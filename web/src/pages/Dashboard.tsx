@@ -128,7 +128,7 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
 
       {loadState === 'error' ? (
         <div className="state-card" role="alert">
-          Projects could not be loaded.
+          Projeler yüklenemedi. Sunucunun çalıştığını kontrol edip tekrar dene.
         </div>
       ) : null}
 
@@ -234,7 +234,7 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
                     type="button"
                     onClick={() => handleDelete(currentProject)}
                     disabled={deletingId !== null}
-                    aria-label={`Delete project ${currentProject.name}`}
+                    aria-label={`${currentProject.name} projesini sil`}
                     title="Geri Dönüşüm Kutusu'na taşı"
                   >
                     {deletingId === currentProject.id ? 'Siliniyor…' : 'Sil'}

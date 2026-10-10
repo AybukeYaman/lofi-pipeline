@@ -72,7 +72,7 @@ export function TrackList({ tracks }: { tracks: MusicTrack[] }) {
                   title="Suno Promptunu Kopyala"
                   onClick={() => handleCopyPrompt(track)}
                 >
-                  {isCopied ? '✓ Copied' : '📋 Copy Prompt'}
+                  {isCopied ? '✓ Kopyalandı' : '📋 Promptu Kopyala'}
                 </button>
               ) : null}
               {track.status ? (

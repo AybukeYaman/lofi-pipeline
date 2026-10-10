@@ -54,7 +54,7 @@ export function AssetPreview({ kind, fileName, src, emptyLabel, alt }: AssetPrev
         ) : null}
 
         {(!src || isError || !hasFile) ? (
-          <span>{kind === 'image' ? 'IMAGE' : 'VIDEO'}</span>
+          <span>{kind === 'image' ? 'RESİM' : 'VİDEO'}</span>
         ) : null}
       </div>
 

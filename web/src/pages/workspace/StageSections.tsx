@@ -264,7 +264,7 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
       if (err instanceof ApiError) {
         setError(err.message);
       } else {
-        setError(err instanceof Error ? err.message : 'Could not save video settings.');
+        setError(err instanceof Error ? err.message : 'Video ayarları kaydedilemedi. Tekrar dene.');
       }
     } finally {
       setIsSaving(false);
@@ -302,7 +302,7 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
         ].join(' '),
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Video source could not be changed.');
+      setError(err instanceof Error ? err.message : 'Görsel kaynağı değiştirilemedi. Tekrar dene.');
     } finally {
       setIsSwitchingSource(false);
     }
@@ -330,11 +330,11 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
     setError(null);
     setSuccess(null);
     if (val.trim() === '') {
-      setValidationError(`${fieldLabel} is required.`);
+      setValidationError(`${fieldLabel} boş bırakılamaz.`);
     } else {
       const num = Number(val);
       if (!Number.isInteger(num) || num < 0) {
-        setValidationError(`${fieldLabel} must be 0 or a positive integer.`);
+        setValidationError(`${fieldLabel} 0 ya da pozitif bir tam sayı olmalı.`);
       } else if (num > 2160) {
         setValidationError(`${fieldLabel} cannot exceed 2160px.`);
       } else {
@@ -353,10 +353,10 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
           src={previewUrl}
           emptyLabel={
             clipMissing
-              ? `Configured clip not found: ${project.clip?.value}`
+              ? `Ayarlı klip bulunamadı: ${project.clip?.value}`
               : isStill
                 ? 'Henüz görsel yok. resimler\\ klasörüne bir görsel yükleyin veya ekleyin.'
-                : 'No clip selected. Put the loop clip (.mp4) under videolar\\.'
+                : 'Klip seçilmedi. Döngü klibini (.mp4) videolar\\ klasörüne koy.'
           }
         />
         <div className="stage-actions">
@@ -418,7 +418,7 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
           )}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6, margin: '12px 0 8px' }}>
             <h3 style={{ margin: 0 }}>
-              {isStill ? 'Images' : 'Clips in folder'} <span className="count">({clips.length})</span>
+              {isStill ? 'Klasördeki görseller' : 'Klasördeki klipler'} <span className="count">({clips.length})</span>
             </h3>
             <div style={{ display: 'flex', gap: 6 }}>
               <button
@@ -427,7 +427,7 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
                 style={{ fontSize: 12, minHeight: 26, padding: '2px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }}
                 onClick={handleOpenFolder}
               >
-                📂 Open Folder
+                📂 Klasörü Aç
               </button>
               <button
                 type="button"
@@ -435,7 +435,7 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
                 style={{ fontSize: 12, minHeight: 26, padding: '2px 10px' }}
                 onClick={handleRefreshClips}
               >
-                🔄 Refresh
+                🔄 Yenile
               </button>
             </div>
           </div>
@@ -452,7 +452,7 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
             </code>.
           </p>
           {clips.length > 0 ? (
-            <div className="option-list" role="radiogroup" aria-label={isStill ? 'Images' : 'Video clips'}>
+            <div className="option-list" role="radiogroup" aria-label={isStill ? 'Görseller' : 'Video klipleri'}>
               {clips.map((path) => {
                 const name = fileName(path);
                 const isCurrent = path === currentClip || name === currentClipName;
@@ -470,13 +470,13 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
                       }}
                     />
                     <span>{name}</span>
-                    {isCurrent ? <StatusBadge status="selected" label="In use" /> : null}
+                    {isCurrent ? <StatusBadge status="selected" label="Kullanımda" /> : null}
                   </label>
                 );
               })}
             </div>
           ) : (
-            <EmptyState compact title={isStill ? 'No MASTER image in resimler\\ yet.' : 'No .mp4 clips in videolar\\.'} />
+            <EmptyState compact title={isStill ? 'resimler\\ klasöründe henüz MASTER görseli yok.' : 'videolar\\ klasöründe .mp4 klip yok.'} />
           )}
 
           <div style={{ marginTop: 14, width: '100%', borderTop: '1px solid var(--border-subtle)', paddingTop: 14 }}>
@@ -686,7 +686,7 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
               onClick={handleSave}
             >
               {isSaving
-                ? 'Saving...'
+                ? 'Kaydediliyor...'
                 : hasClipChange
                   ? currentClip
                     ? (isStill ? 'Görseli değiştir ve kaydet' : 'Klibi değiştir ve kaydet')
@@ -854,7 +854,7 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
       if (err instanceof ApiError) {
         setCompleteError(err.message);
       } else {
-        setCompleteError(err instanceof Error ? err.message : 'Music could not be completed.');
+        setCompleteError(err instanceof Error ? err.message : 'Müzik adımı tamamlanamadı. Tekrar dene.');
       }
     } finally {
       setIsCompleting(false);
@@ -920,17 +920,17 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
           </p>
         ) : null}
         <p>
-          <strong>{trackCount > 0 ? `${trackCount} Tracks Planned` : `${audioCount} Audio Files`}</strong>
+          <strong>{trackCount > 0 ? `${trackCount} parça planlandı` : `${audioCount} ses dosyası`}</strong>
           <span className="muted">
             {' '}
             · {audioCount} of {trackCount || audioCount} audio files present
             {trackCount > 0 && missingTracksCount > 0 ? ` (${missingTracksCount} remaining)` : ''}
-            {completedCount > 0 ? ` · ${completedCount} marked completed` : ''}
+            {completedCount > 0 ? ` · ${completedCount} tamamlandı olarak işaretli` : ''}
             {isMusicReady
-              ? ' · Status: Completed'
+              ? ' · Durum: Tamamlandı'
               : audioCount === 0
-                ? ' · Status: Awaiting audio files'
-                : ' · Status: In progress'}
+                ? ' · Durum: Ses dosyaları bekleniyor'
+                : ' · Durum: Devam ediyor'}
           </span>
         </p>
       </div>
@@ -1261,7 +1261,7 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
           style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
           onClick={handleOpenFolder}
         >
-          📂 Open audio/ Folder
+          📂 audio/ Klasörünü Aç
         </button>
         {!isMusicReady ? (
           <button
@@ -1270,7 +1270,7 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
             disabled={isCompleting || audioCount === 0}
             onClick={handleCompleteMusic}
           >
-            {isCompleting ? 'Completing music...' : 'Complete Music & Continue'}
+            {isCompleting ? 'Müzik tamamlanıyor...' : 'Müziği Tamamla ve Devam Et'}
           </button>
         ) : null}
         <button
@@ -1279,7 +1279,7 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
           disabled={isCompleting}
           onClick={handleRefresh}
         >
-          🔄 Refresh Audio Files
+          🔄 Ses Dosyalarını Yenile
         </button>
       </div>
 
@@ -1442,7 +1442,7 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
       if (err instanceof ApiError) {
         setBuildError(err.message);
       } else {
-        setBuildError(err instanceof Error ? err.message : 'Build could not be started.');
+        setBuildError(err instanceof Error ? err.message : 'Montaj başlatılamadı. Tekrar dene.');
       }
     } finally {
       setIsStarting(false);
@@ -1634,9 +1634,9 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
             {buildJob.state === 'running' ? (
               <StatusBadge status="processing" label="Running" />
             ) : buildJob.state === 'succeeded' ? (
-              <StatusBadge status="completed" label="Succeeded" />
+              <StatusBadge status="completed" label="Başarılı" />
             ) : buildJob.state === 'failed' ? (
-              <StatusBadge status="failed" label="Failed" />
+              <StatusBadge status="failed" label="Başarısız" />
             ) : null}
           </div>
 
@@ -1679,8 +1679,8 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
             {pomodoroBlocks
               ? 'Pomodoro doğrulaması geçmeden montaj başlatılamaz — yukarıdaki kutuya bak.'
               : missingRequirements.length > 0
-                ? `Required assets missing: ${missingRequirements.join(', ')}`
-                : 'Available when audio and video are ready.'}
+                ? `Eksik gerekli dosyalar: ${missingRequirements.join(', ')}`
+                : 'Ses ve video hazır olunca başlatılabilir.'}
           </p>
         ) : null}
       </div>
@@ -1769,7 +1769,7 @@ export function OutputStage({ project, assets, stageStatus, onProjectUpdate }: S
               disabled={isRefreshing}
               onClick={handleRefreshOutput}
             >
-              {isRefreshing ? 'Checking out/...' : '🔄 Çıktıyı Kontrol Et / Yenile'}
+              {isRefreshing ? 'out/ kontrol ediliyor...' : '🔄 Çıktıyı Kontrol Et / Yenile'}
             </button>
           </div>
         </div>
