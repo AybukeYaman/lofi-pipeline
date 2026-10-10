@@ -142,7 +142,7 @@ export function AmbientLibrary() {
     <section className="page">
       <PageHeader
         eyebrow="LIBRARY"
-        title="Ambient"
+        title="Arka Plan Sesleri"
         actions={
           <button
             className="button button-primary"
@@ -150,7 +150,7 @@ export function AmbientLibrary() {
             onClick={() => (isAdding ? closeForm() : setIsAdding(true))}
             aria-expanded={isAdding}
           >
-            {isAdding ? 'Close' : 'Add Ambient'}
+            {isAdding ? 'Kapat' : 'Arka Plan Sesi Ekle'}
           </button>
         }
       />
@@ -159,7 +159,7 @@ export function AmbientLibrary() {
 
       {ambientErrorNotice ? (
         <p className="notice notice-muted" role="alert">
-          <strong>Ambient Library warning</strong>
+          <strong>Arka plan sesi uyarısı</strong>
           <span>{ambientErrorNotice}</span>
         </p>
       ) : null}
@@ -167,7 +167,7 @@ export function AmbientLibrary() {
       {isAdding ? (
         <form className="panel form" onSubmit={handleAdd} noValidate>
           <div className="field">
-            <label htmlFor="ambient-name">Name</label>
+            <label htmlFor="ambient-name">Ad</label>
             <input
               id="ambient-name"
               value={draftName}
@@ -182,7 +182,7 @@ export function AmbientLibrary() {
             />
           </div>
           <div className="field">
-            <label htmlFor="ambient-file">Audio file</label>
+            <label htmlFor="ambient-file">Ses dosyası</label>
             <input
               id="ambient-file"
               type="file"
@@ -215,8 +215,8 @@ export function AmbientLibrary() {
         <input
           className="search-input"
           type="search"
-          placeholder="Search ambient"
-          aria-label="Search ambient"
+          placeholder="Arka plan sesi ara"
+          aria-label="Arka plan sesi ara"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
@@ -228,10 +228,10 @@ export function AmbientLibrary() {
       </div>
 
       {ambients.length === 0 ? (
-        <EmptyState title="No ambient sounds yet." />
+        <EmptyState title="Henüz arka plan sesi yok." />
       ) : visibleAmbients.length === 0 ? (
         <EmptyState
-          title="No ambient sounds match your search."
+          title="Aramaya uyan arka plan sesi yok."
           action={
             <button className="button" type="button" onClick={() => setQuery('')}>
               Clear search

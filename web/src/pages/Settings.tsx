@@ -7,13 +7,13 @@ export function Settings() {
   return (
     <div className="page narrow">
       <PageHeader
-        eyebrow="Preferences"
-        title="Settings"
+        eyebrow="TERCİHLER"
+        title="Ayarlar"
         description="Uygulama genel görünümünü ve renk temasını özelleştirin."
       />
 
       <div className="panel" style={{ marginTop: 20 }}>
-        <h2>Renk Temaları (Color Themes)</h2>
+        <h2>Renk temaları</h2>
         <p className="field-hint" style={{ marginBottom: 18 }}>
           Seçtiğiniz tema anında tüm sayfalara ve aşamalara uygulanır ve yeniden başlatma sonrasında korunur.
         </p>

@@ -9,14 +9,14 @@ export type AssetStatus =
   | 'failed';
 
 const labels: Record<AssetStatus, string> = {
-  missing: 'Missing',
-  waiting: 'Waiting',
-  ready: 'Ready',
-  processing: 'Processing',
-  completed: 'Completed',
-  optional: 'Optional',
-  selected: 'Selected',
-  failed: 'Failed',
+  missing: 'Yok',
+  waiting: 'Bekliyor',
+  ready: 'Hazır',
+  processing: 'İşleniyor',
+  completed: 'Tamam',
+  optional: 'Opsiyonel',
+  selected: 'Seçili',
+  failed: 'Başarısız',
 };
 
 export function StatusBadge({ status, label }: { status: AssetStatus; label?: string }) {

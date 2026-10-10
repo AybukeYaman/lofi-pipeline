@@ -31,7 +31,7 @@ export function AssetPreview({ kind, fileName, src, emptyLabel, alt }: AssetPrev
             <img
               className="asset-preview-media"
               src={src}
-              alt={alt ?? fileName ?? 'Preview'}
+              alt={alt ?? fileName ?? 'Önizleme'}
               onLoad={() => setLoadState('loaded')}
               onError={() => setLoadState('error')}
               style={{ display: isLoaded ? 'block' : 'none' }}
@@ -50,7 +50,7 @@ export function AssetPreview({ kind, fileName, src, emptyLabel, alt }: AssetPrev
         ) : null}
 
         {loadState === 'loading' && kind === 'image' ? (
-          <span className="muted" style={{ fontSize: 12 }}>Loading preview...</span>
+          <span className="muted" style={{ fontSize: 12 }}>Önizleme yükleniyor...</span>
         ) : null}
 
         {(!src || isError || !hasFile) ? (
@@ -63,11 +63,11 @@ export function AssetPreview({ kind, fileName, src, emptyLabel, alt }: AssetPrev
           <>
             <strong>{fileName}</strong>
             {isError ? (
-              <span className="field-hint field-error">Preview file not accessible</span>
+              <span className="field-hint field-error">Önizleme dosyası açılamadı</span>
             ) : isLoaded ? (
-              <span style={{ color: '#34603f' }}>Preview loaded</span>
+              <span style={{ color: '#34603f' }}>Önizleme hazır</span>
             ) : (
-              <span>Media asset</span>
+              <span>Medya dosyası</span>
             )}
           </>
         ) : (

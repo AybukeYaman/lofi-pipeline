@@ -26,7 +26,7 @@ export function AppLayout({ route, navigate, children }: AppLayoutProps) {
           <AppLink className="brand" href={paths.dashboard} navigate={navigate}>
             Lofi Pipeline
           </AppLink>
-          <nav className="topnav" aria-label="Primary">
+          <nav className="topnav" aria-label="Ana menü">
             {navItems.map((item) => {
               const isActive = (item.routes as readonly string[]).includes(route.name);
               return (

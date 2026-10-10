@@ -26,7 +26,7 @@ type CopyPromptProps = {
 };
 
 /** Hazır metin + panoya kopyalama (prompt ya da tracklist). */
-export function CopyPrompt({ label, prompt, error, buttonLabel = 'Copy Prompt' }: CopyPromptProps) {
+export function CopyPrompt({ label, prompt, error, buttonLabel = 'Promptu Kopyala' }: CopyPromptProps) {
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
 

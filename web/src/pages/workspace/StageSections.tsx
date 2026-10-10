@@ -274,9 +274,9 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
   const handleOpenFolder = async () => {
     try {
       await openProjectFolder(project.id, mediaFolder);
-      setSuccess(`Opened ${mediaFolder}/ folder in Explorer.`);
+      setSuccess(`${mediaFolder}/ klasörü Explorer’da açıldı.`);
     } catch {
-      setError('Could not open folder in Explorer.');
+      setError('Klasör açılamadı. Proje klasörü taşınmış ya da silinmiş olabilir.');
     }
   };
 
@@ -314,9 +314,9 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
       if (onProjectUpdate) {
         onProjectUpdate(updated);
       }
-      setSuccess(`Refreshed ${isStill ? 'images' : 'clips'} from ${mediaFolder}/ folder.`);
+      setSuccess(`${mediaFolder}/ klasöründeki ${isStill ? 'görseller' : 'klipler'} yeniden okundu.`);
     } catch {
-      setError('Could not refresh clips.');
+      setError('Klipler okunamadı. Klasörü kontrol edip tekrar dene.');
     }
   };
 
@@ -441,11 +441,11 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
           </div>
           <p className="field-hint" style={{ margin: '0 0 10px' }}>
             {isStill
-              ? <>MASTER and angle images (<code>Master1.jpg</code> …) from</>
-              : <>Put loop video files (<code>.mp4</code>) into</>}{' '}
+              ? <>MASTER ve açı görselleri (<code>Master1.jpg</code> …) şu klasörden:</>
+              : <>Döngü videosu dosyalarını (<code>.mp4</code>) şu klasöre koy:</>}{' '}
             <code
               onClick={handleOpenFolder}
-              title={`Click to open ${mediaFolder}\ folder in Windows Explorer`}
+              title={`Explorer’da ${mediaFolder} klasörünü aç`}
               style={{ cursor: 'pointer', color: 'var(--primary)', textDecoration: 'underline' }}
             >
               {project.dir || project.name}\{mediaFolder}\
@@ -849,7 +849,7 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
       if (onProjectUpdate) {
         onProjectUpdate(updated);
       }
-      setCompleteSuccess('Music stage marked as completed.');
+      setCompleteSuccess('Müzik adımı tamamlandı olarak işaretlendi.');
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         setCompleteError(err.message);
@@ -867,18 +867,18 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
       if (onProjectUpdate) {
         onProjectUpdate(updated);
       }
-      setCompleteSuccess('Refreshed audio directory status.');
+      setCompleteSuccess('Ses klasörü yeniden okundu.');
     } catch {
-      setCompleteError('Could not refresh audio tracks.');
+      setCompleteError('Parçalar okunamadı. Ses klasörünü kontrol edip tekrar dene.');
     }
   };
 
   const handleOpenFolder = async () => {
     try {
       await openProjectFolder(project.id, 'audio');
-      setCompleteSuccess('Opened audio/ folder in Explorer.');
+      setCompleteSuccess('audio/ klasörü Explorer’da açıldı.');
     } catch {
-      setCompleteError('Could not open folder in Explorer.');
+      setCompleteError('Klasör açılamadı. Proje klasörü taşınmış ya da silinmiş olabilir.');
     }
   };
 
@@ -916,7 +916,7 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
       <div className="music-summary">
         {music?.concept ? (
           <p>
-            <span className="muted">Concept</span> {music.concept}
+            <span className="muted">Konsept</span> {music.concept}
           </p>
         ) : null}
         <p>
@@ -1193,25 +1193,25 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
           ))}
         </ol>
       ) : audioCount > 0 ? (
-        <EmptyState compact title="Track names are not available.">
-          {audioCount} audio files found in{' '}
+        <EmptyState compact title="Parça adları okunamadı.">
+          {audioCount} ses dosyası bulundu:{' '}
           <code
             onClick={handleOpenFolder}
-            title="Click to open audio folder in Windows Explorer"
+            title="Explorer’da ses klasörünü aç"
             style={{ cursor: 'pointer', color: 'var(--primary)', textDecoration: 'underline' }}
           >
-            {project.audioDir ?? 'the audio folder'}
+            {project.audioDir ?? 'ses klasörü'}
           </code>.
         </EmptyState>
       ) : (
-        <EmptyState compact title="No music tracks yet.">
-          Put Suno audio files (.mp3, .wav, .m4a, .flac) in{' '}
+        <EmptyState compact title="Henüz müzik parçası yok.">
+          Suno ses dosyalarını (.mp3, .wav, .m4a, .flac) şu klasöre koy:{' '}
           <code
             onClick={handleOpenFolder}
-            title="Click to open audio folder in Windows Explorer"
+            title="Explorer’da ses klasörünü aç"
             style={{ cursor: 'pointer', color: 'var(--primary)', textDecoration: 'underline' }}
           >
-            {project.audioDir ?? 'the audio folder'}
+            {project.audioDir ?? 'ses klasörü'}
           </code>.
         </EmptyState>
       )}
@@ -1493,7 +1493,7 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
           </div>
         ))}
         <div>
-          <dt>Video Crop & Format</dt>
+          <dt>Video kırpma ve format</dt>
           <dd>
             {cropDescription} → {project.projectJson?.data?.video?.aspect || '16:9'}
           </dd>
@@ -1630,7 +1630,7 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
       {buildJob && buildJob.state !== 'idle' ? (
         <div style={{ marginTop: 14 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <strong>Build status:</strong>
+            <strong>Montaj durumu:</strong>
             {buildJob.state === 'running' ? (
               <StatusBadge status="processing" label="Running" />
             ) : buildJob.state === 'succeeded' ? (
@@ -1716,15 +1716,15 @@ export function OutputStage({ project, assets, stageStatus, onProjectUpdate }: S
           <div className="stage-actions">
             <dl className="readiness-list">
               <div>
-                <dt>Output</dt>
+                <dt>Çıktı</dt>
                 <dd>{outputName}</dd>
               </div>
               <div>
-                <dt>Audio files</dt>
+                <dt>Ses dosyaları</dt>
                 <dd>{project.audioCount ?? 0}</dd>
               </div>
               <div>
-                <dt>Output Path</dt>
+                <dt>Çıktı yolu</dt>
                 <dd><code>{project.output?.path ?? 'out/final_ambient.mp4'}</code></dd>
               </div>
             </dl>
@@ -1759,7 +1759,7 @@ export function OutputStage({ project, assets, stageStatus, onProjectUpdate }: S
         </div>
       ) : (
         <div>
-          <EmptyState compact title="No output yet.">
+          <EmptyState compact title="Henüz çıktı yok.">
             The video will be assembled and written to <code>{outputName ?? 'out/final_ambient.mp4'}</code> when build completes.
           </EmptyState>
           <div style={{ marginTop: 10 }}>

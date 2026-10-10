@@ -21,8 +21,8 @@ export function EmptyState({ title, children, action, compact }: EmptyStateProps
 export function SampleDataNotice({ children }: { children?: ReactNode }) {
   return (
     <p className="notice">
-      <strong>Preview</strong>
-      <span>{children ?? 'Sample data. Not connected to the pipeline yet; nothing is saved.'}</span>
+      <strong>Önizleme</strong>
+      <span>{children ?? 'Örnek veri. Henüz pipeline’a bağlı değil; hiçbir şey kaydedilmiyor.'}</span>
     </p>
   );
 }

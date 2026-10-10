@@ -91,7 +91,7 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
     <section className="page">
       <PageHeader
         eyebrow="LOFI PIPELINE"
-        title="Projects"
+        title="Projeler"
         actions={
           <>
             <button
@@ -103,7 +103,7 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
               Refresh
             </button>
             <button className="button button-primary" type="button" onClick={() => onNewProject()}>
-              New Project
+              Yeni Proje
             </button>
           </>
         }
@@ -119,7 +119,7 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
           ) : null}
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          {loadState === 'loading' ? <span>Loading projects...</span> : null}
+          {loadState === 'loading' ? <span>Projeler yükleniyor...</span> : null}
           {mainProjects.length > 0 ? (
             <LayoutSwitcher value={layoutCols} onChange={setLayoutCols} />
           ) : null}
@@ -134,10 +134,10 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
 
       {loadState === 'loaded' && mainProjects.length === 0 ? (
         <EmptyState
-          title="No projects yet."
+          title="Henüz proje yok."
           action={
             <button className="button button-primary" type="button" onClick={() => onNewProject()}>
-              New Project
+              Yeni Proje
             </button>
           }
         />
@@ -157,7 +157,7 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
 
             const stepLabel = currentProject.workflow
               ? `${currentProject.workflow.steps.find((step) => step.id === currentProject.workflow?.current)?.number ?? '?'}/${currentProject.workflow.steps.length} · ${currentProject.workflow.currentTitle}`
-              : currentProject.step?.title ?? currentProject.step?.id ?? 'Unknown';
+              : currentProject.step?.title ?? currentProject.step?.id ?? 'Bilinmiyor';
 
             return (
               <div className="project-card" key={mainProject.id}>

@@ -44,7 +44,7 @@ export function ProjectWorkspace({
 }) {
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [loadState, setLoadState] = useState<LoadState>('idle');
-  const [errorMessage, setErrorMessage] = useState('Could not load project.');
+  const [errorMessage, setErrorMessage] = useState('Proje yüklenemedi. Klasör taşınmış ya da silinmiş olabilir.');
   const [allProjects, setAllProjects] = useState<ProjectSummary[]>([]);
   const { busyId: shortsBusyId, createShorts } = useCreateShorts(onOpenProject);
 
@@ -56,7 +56,7 @@ export function ProjectWorkspace({
     let isActive = true;
     setLoadState('loading');
     setProject(null);
-    setErrorMessage('Could not load project.');
+    setErrorMessage('Proje yüklenemedi. Klasör taşınmış ya da silinmiş olabilir.');
 
     fetchProject(id)
       .then((nextProject) => {
@@ -67,7 +67,9 @@ export function ProjectWorkspace({
       .catch((error: unknown) => {
         if (!isActive) return;
         setErrorMessage(
-          error instanceof ProjectNotFoundError ? 'Project not found.' : 'Could not load project.',
+          error instanceof ProjectNotFoundError
+            ? 'Proje bulunamadı. Projeler listesinden tekrar seç.'
+            : 'Proje yüklenemedi. Klasör taşınmış ya da silinmiş olabilir.',
         );
         setLoadState('error');
       });
@@ -97,7 +99,7 @@ export function ProjectWorkspace({
     <section className="page workspace">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
         <button className="back-button" type="button" onClick={onBack} style={{ margin: 0 }}>
-          ← Back to Projects
+          ← Projelere dön
         </button>
 
         {/* Ana proje + alt projeler şeridi — Projects sayfasındaki kartla
@@ -139,7 +141,7 @@ export function ProjectWorkspace({
         ) : null}
       </div>
 
-      {loadState === 'loading' ? <div className="state-card">Loading project...</div> : null}
+      {loadState === 'loading' ? <div className="state-card">Proje yükleniyor...</div> : null}
 
       {loadState === 'error' ? (
         <div role="alert">
@@ -147,7 +149,7 @@ export function ProjectWorkspace({
             title={errorMessage}
             action={
               <button className="button" type="button" onClick={onBack}>
-                Back to Projects
+                Projelere dön
               </button>
             }
           />
@@ -224,7 +226,7 @@ function WorkspaceContent({
   return (
     <>
       <PageHeader
-        eyebrow={project.parentId ? `ALT PROJE (ANA: ${project.parentId})` : 'PROJECT WORKSPACE'}
+        eyebrow={project.parentId ? `ALT PROJE (ANA: ${project.parentId})` : 'PROJE ÇALIŞMA ALANI'}
         title={project.name}
         actions={
           <div className="current-step">
@@ -313,28 +315,28 @@ function WorkspaceContent({
       ) : null}
 
       <details className="panel evidence-panel">
-        <summary>Project Assets & Filesystem Evidence</summary>
+        <summary>Proje dosyaları ve disk kanıtı</summary>
         <dl className="asset-list">
-          {project.parentId ? <AssetRow label="Parent Project" value={project.parentId} /> : null}
-          <AssetRow label="Video Clip" value={<StatusBadge status={assets.clip} />} />
-          <AssetRow label="Music" value={<StatusBadge status={assets.music} />} />
-          <AssetRow label="Ambient" value={<StatusBadge status={assets.ambient} />} />
-          <AssetRow label="Output" value={<StatusBadge status={assets.output} />} />
+          {project.parentId ? <AssetRow label="Ana proje" value={project.parentId} /> : null}
+          <AssetRow label="Video klibi" value={<StatusBadge status={assets.clip} />} />
+          <AssetRow label="Müzik" value={<StatusBadge status={assets.music} />} />
+          <AssetRow label="Arka plan sesi" value={<StatusBadge status={assets.ambient} />} />
+          <AssetRow label="Çıktı" value={<StatusBadge status={assets.output} />} />
         </dl>
         <dl className="evidence-list">
-          <AssetRow label="Project folder" value={project.dir} />
+          <AssetRow label="Proje klasörü" value={project.dir} />
           <AssetRow label="Video clip" value={project.clip?.path ?? project.clip?.value} />
           <AssetRow
-            label="Video crop"
+            label="Video kırpma"
             value={
               project.projectJson?.data?.video?.cropBottom !== undefined
                 ? `${project.projectJson.data.video.cropBottom}px`
                 : undefined
             }
           />
-          <AssetRow label="Audio directory" value={project.audioDir} />
-          <AssetRow label="Track order" value={project.projectJson?.data?.order?.join(' → ')} />
-          <AssetRow label="Output file" value={project.output?.path} />
+          <AssetRow label="Ses klasörü" value={project.audioDir} />
+          <AssetRow label="Parça sırası" value={project.projectJson?.data?.order?.join(' → ')} />
+          <AssetRow label="Çıktı dosyası" value={project.output?.path} />
         </dl>
       </details>
     </>
@@ -345,7 +347,7 @@ function AssetRow({ label, value }: { label: string; value?: ReactNode }) {
   return (
     <div>
       <dt>{label}</dt>
-      <dd>{value === undefined || value === null || value === '' ? 'Unknown' : value}</dd>
+      <dd>{value === undefined || value === null || value === '' ? 'Bilinmiyor' : value}</dd>
     </div>
   );
 }
