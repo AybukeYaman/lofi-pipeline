@@ -758,7 +758,6 @@ span.project-thumb::after {
 .button:focus-visible,
 .back-button:focus-visible,
 .workflow-step:focus-visible,
-.library-card:focus-visible,
 .play-button:focus-visible,
 .chip button:focus-visible,
 .evidence-panel summary:focus-visible {
@@ -832,17 +831,6 @@ span.project-thumb::after {
 .current-step strong {
   color: var(--text-main);
   font-size: 18px;
-}
-
-.step-detail {
-  color: var(--text-muted);
-  overflow-wrap: anywhere;
-}
-
-.workspace-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
-  gap: 16px;
 }
 
 .panel {
@@ -1180,10 +1168,6 @@ span.project-thumb::after {
   gap: 8px;
 }
 
-.option-grid {
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-}
-
 .option {
   display: flex;
   align-items: center;
@@ -1213,54 +1197,6 @@ span.project-thumb::after {
 .option .muted {
   margin-left: auto;
   font-size: 12px;
-}
-
-/* Başlık + açıklamalı seçenek: metin radyonun yanında alt alta, kart eşit yükseklikte. */
-.option-card-list {
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-}
-
-.option-card {
-  align-items: flex-start;
-  padding: 12px 14px;
-}
-
-.option-card input {
-  flex: none;
-  margin: 2px 0 0;
-}
-
-.option-card-text {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.option-card-title {
-  font-weight: 600;
-}
-
-.option-card-description {
-  color: var(--text-muted);
-  font-size: 13px;
-  font-weight: 400;
-  line-height: 1.4;
-}
-
-.reference-picker {
-  position: relative;
-  display: grid;
-  gap: 10px;
-  justify-items: start;
-}
-
-.chip-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
 }
 
 .chip {
@@ -1325,74 +1261,6 @@ span.project-thumb::after {
   max-width: 320px;
 }
 
-.library-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 12px;
-}
-
-.library-card {
-  display: grid;
-  align-content: start;
-  padding: 0;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: inherit;
-  background: var(--bg-surface);
-  box-shadow: var(--shadow);
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 0.1s ease, box-shadow 0.1s ease;
-}
-
-.library-card:hover {
-  border-color: var(--border-hover);
-}
-
-.library-card.selected {
-  border-color: var(--border-current);
-  box-shadow: 0 0 0 1px var(--border-current), var(--shadow-strong);
-}
-
-.swatch {
-  display: grid;
-  grid-template-columns: 2fr 1fr 1fr;
-  height: 96px;
-}
-
-.swatch-neutral {
-  flex: none;
-  width: 64px;
-  height: 64px;
-  border-radius: 6px;
-  background: linear-gradient(135deg, var(--secondary), var(--border));
-}
-
-.library-card-body {
-  display: grid;
-  gap: 6px;
-  padding: 16px;
-  font-size: 14px;
-}
-
-.library-card-title {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-.library-card-title strong {
-  color: var(--text-main);
-  font-size: 16px;
-}
-
-.library-card code {
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
 .library-list {
   display: grid;
   margin: 0;
@@ -1412,12 +1280,6 @@ span.project-thumb::after {
 /* Müzik stilleri: oynatma sütunu yok — gövde, rozet, butonlar. */
 .library-list.style-list li {
   grid-template-columns: minmax(0, 1fr) auto auto;
-}
-
-.library-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
 }
 
 .library-list li:last-child {
@@ -1491,14 +1353,12 @@ span.project-thumb::after {
   text-transform: uppercase;
 }
 
-.stage-grid,
 .stage-media {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 20px;
 }
 
-.stage-block,
 .stage-actions {
   display: grid;
   align-content: start;
@@ -1507,7 +1367,6 @@ span.project-thumb::after {
   min-width: 0;
 }
 
-.stage-block h3,
 .stage-actions h3 {
   display: flex;
   align-items: center;
@@ -1517,7 +1376,6 @@ span.project-thumb::after {
   font-size: 14px;
 }
 
-.stage-block .empty-state,
 .stage-actions .empty-state,
 .stage-actions .option-list,
 .stage-actions .notice {
@@ -1527,37 +1385,6 @@ span.project-thumb::after {
 .count {
   color: var(--text-muted);
   font-weight: 400;
-}
-
-.style-summary {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  font-size: 14px;
-}
-
-.style-summary strong {
-  display: block;
-  margin-bottom: 4px;
-  color: var(--text-main);
-}
-
-.file-list {
-  display: grid;
-  gap: 4px;
-  width: 100%;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-size: 13px;
-}
-
-.file-list li {
-  padding: 6px 10px;
-  border-radius: 6px;
-  background: var(--bg-surface-subtle);
-  overflow-wrap: anywhere;
-  color: var(--text-main);
 }
 
 .asset-preview {
@@ -1715,7 +1542,6 @@ span.project-thumb::after {
     padding: 10px 16px;
   }
 
-  .stage-grid,
   .stage-media,
   .readiness-list div {
     grid-template-columns: 1fr;
@@ -1733,7 +1559,6 @@ span.project-thumb::after {
 
   .page-header,
   .summary-row,
-  .workspace-grid,
   .asset-list div,
   .evidence-list div {
     align-items: start;
@@ -1869,15 +1694,6 @@ span.project-thumb::after {
   align-items: center;
 }
 
-.card-grid-layout.cols-1 .library-card {
-  grid-template-columns: 180px minmax(0, 1fr);
-}
-
-.card-grid-layout.cols-1 .library-card .swatch {
-  height: 100%;
-  min-height: 110px;
-}
-
 @media (max-width: 1024px) {
   .card-grid-layout.cols-4 {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1895,9 +1711,6 @@ span.project-thumb::after {
   .card-grid-layout.cols-4,
   .card-grid-layout.cols-3,
   .card-grid-layout.cols-2 {
-    grid-template-columns: 1fr;
-  }
-  .card-grid-layout.cols-1 .library-card {
     grid-template-columns: 1fr;
   }
 }
@@ -2016,16 +1829,6 @@ span.project-thumb::after {
   gap: 10px;
   align-items: center;
   margin-bottom: 12px;
-}
-
-.angle-list {
-  display: grid;
-  gap: 16px;
-}
-
-.angle-item {
-  padding-top: 12px;
-  border-top: 1px solid var(--border-subtle);
 }
 
 .order-list {
