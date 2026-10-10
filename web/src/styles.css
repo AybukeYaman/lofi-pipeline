@@ -813,26 +813,6 @@ span.project-thumb::after {
   color: var(--text-main);
 }
 
-.current-step {
-  min-width: 220px;
-  padding: 16px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-surface);
-}
-
-.current-step span {
-  display: block;
-  margin-bottom: 6px;
-  color: var(--text-muted);
-  font-size: 13px;
-}
-
-.current-step strong {
-  color: var(--text-main);
-  font-size: 18px;
-}
-
 .panel {
   border: 1px solid var(--border);
   border-radius: 8px;

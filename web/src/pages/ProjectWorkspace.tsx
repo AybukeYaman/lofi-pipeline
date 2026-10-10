@@ -228,14 +228,6 @@ function WorkspaceContent({
       <PageHeader
         eyebrow={project.parentId ? `ALT PROJE (ANA: ${project.parentId})` : 'PROJE ÇALIŞMA ALANI'}
         title={project.name}
-        actions={
-          <div className="current-step">
-            <span>Kaldığın adım</span>
-            <strong>
-              {stepInfo(workflow, current)?.number}. {workflow?.currentTitle ?? 'Bilinmiyor'}
-            </strong>
-          </div>
-        }
       />
 
       {!project.projectJson?.ok && project.projectJson?.error ? (
