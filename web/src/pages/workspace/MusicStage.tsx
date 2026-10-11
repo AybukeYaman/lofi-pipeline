@@ -246,8 +246,8 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
           <strong>{trackCount > 0 ? `${trackCount} parça planlandı` : `${audioCount} ses dosyası`}</strong>
           <span className="muted">
             {' '}
-            · {audioCount} of {trackCount || audioCount} audio files present
-            {trackCount > 0 && missingTracksCount > 0 ? ` (${missingTracksCount} remaining)` : ''}
+            · {trackCount || audioCount} ses dosyasından {audioCount} tanesi hazır
+            {trackCount > 0 && missingTracksCount > 0 ? ` (${missingTracksCount} eksik)` : ''}
             {completedCount > 0 ? ` · ${completedCount} tamamlandı olarak işaretli` : ''}
             {isMusicReady
               ? ' · Durum: Tamamlandı'
@@ -607,8 +607,8 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
       </div>
 
       {!isMusicReady && audioCount === 0 ? (
-        <p className="field-hint" style={{ marginTop: 8 }}>
-          ℹ Add at least 1 audio file (.mp3, .wav) to the audio folder, import an album, or download with Suno above to continue.
+        <p className="field-hint">
+          ℹ Devam etmek için ses klasörüne en az 1 dosya (.mp3, .wav) ekle, bir albüm aktar ya da yukarıdan Suno linkiyle indir.
         </p>
       ) : null}
     </StagePanel>
