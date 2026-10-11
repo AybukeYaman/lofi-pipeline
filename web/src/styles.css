@@ -875,9 +875,15 @@ span.project-thumb::after {
   font-size: 16px;
 }
 
+/* Adım rayı: kutusuz dikey liste. Numara dairesi + ad + durum; aktif adımın
+   solunda tek çizgi. Durumlar: sırada (dolgulu daire), tamam (koyu daire ✓),
+   bekliyor (soluk). */
 .stepper {
   display: grid;
-  gap: 10px;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .workflow-step {
@@ -886,18 +892,27 @@ span.project-thumb::after {
   text-align: left;
   cursor: pointer;
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
+  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-areas:
+    'num title'
+    'num state';
+  column-gap: var(--space-3);
   align-items: center;
-  gap: 12px;
-  padding: 12px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-left: 3px solid transparent;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
   color: var(--text-muted);
+  background: transparent;
+  transition: background 0.1s ease, border-color 0.1s ease;
+}
+
+.workflow-step:hover:not(:disabled) {
   background: var(--bg-surface-subtle);
-  transition: border-color 0.1s ease, background 0.1s ease;
 }
 
 .workflow-step span {
+  grid-area: num;
   display: grid;
   width: 28px;
   height: 28px;
@@ -905,25 +920,24 @@ span.project-thumb::after {
   border-radius: 999px;
   background: var(--bg-surface-hover);
   color: var(--text-main);
-  font-size: 13px;
+  font-family: var(--font-display);
+  font-size: var(--text-sm);
   font-weight: 700;
 }
 
 .workflow-step strong {
+  grid-area: title;
   color: var(--text-main);
+  font-size: var(--text-md);
+  font-weight: 600;
   overflow-wrap: anywhere;
 }
 
 .workflow-step em {
+  grid-area: state;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-style: normal;
-  text-transform: capitalize;
-}
-
-.workflow-step.current {
-  border-color: var(--border-current);
-  background: var(--primary-subtle);
 }
 
 .workflow-step.current span {
@@ -931,18 +945,19 @@ span.project-thumb::after {
   background: var(--step-current-bg);
 }
 
-.workflow-step.completed {
-  color: var(--text-muted);
-}
-
 .workflow-step.completed span {
   color: var(--step-completed-text);
   background: var(--step-completed-bg);
 }
 
-.workflow-step.unavailable {
-  border-style: dashed;
-  opacity: 0.6;
+.workflow-step.active {
+  border-left-color: var(--border-current);
+  background: var(--primary-subtle);
+}
+
+.workflow-step:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .asset-list,
@@ -1767,35 +1782,28 @@ span.project-thumb::after {
 
 /* ---------------------------------------------------------------- Canonical workflow wizard */
 
-.wizard-steps {
-  padding: 14px;
+/* Çalışma alanı: solda sabit adım rayı, sağda tek odak alanı. */
+.page.workspace {
+  width: min(1180px, 100%);
 }
 
-.stepper-horizontal {
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  margin: 0;
-  padding: 0;
-  list-style: none;
+.workspace-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: start;
 }
 
-.stepper-horizontal .workflow-step {
-  grid-template-columns: 30px minmax(0, 1fr);
-  height: 100%;
-  padding: 10px;
+.step-rail {
+  position: sticky;
+  top: 80px;
+  padding-top: var(--space-1);
 }
 
-.stepper-horizontal .workflow-step em {
-  grid-column: 2;
-}
-
-.workflow-step.active {
-  outline: 2px solid var(--primary);
-  outline-offset: 1px;
-}
-
-.workflow-step:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
+.workspace-main {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
 }
 
 .step-guide {
@@ -1985,11 +1993,37 @@ span.project-thumb::after {
   font-weight: 600;
 }
 
-@media (max-width: 580px) {
-  .stepper-horizontal {
+/* Dar ekranda ray, içeriğin üstüne yatay kaydırmalı şerit olarak yatar. */
+@media (max-width: 860px) {
+  .workspace-layout {
     grid-template-columns: 1fr;
+    gap: var(--space-4);
   }
 
+  .step-rail {
+    position: static;
+    overflow-x: auto;
+  }
+
+  .step-rail .stepper {
+    display: flex;
+    gap: var(--space-2);
+  }
+
+  .step-rail .workflow-step {
+    width: auto;
+    min-width: 150px;
+    border-left-width: 0;
+    border-bottom: 3px solid transparent;
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+  }
+
+  .step-rail .workflow-step.active {
+    border-bottom-color: var(--border-current);
+  }
+}
+
+@media (max-width: 580px) {
   .wizard-nav .button {
     flex: 1 1 100%;
   }

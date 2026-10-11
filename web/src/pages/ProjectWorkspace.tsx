@@ -232,107 +232,111 @@ function WorkspaceContent({
         </p>
       ) : null}
 
-      <nav className="panel wizard-steps" aria-label="İş akışı">
-        <ol className="stepper stepper-horizontal">
-          {(workflow?.steps ?? []).map((rawStep) => {
-            // Bu sihirbaz yalnızca canonical akış için çalışıyor (Shorts
-            // projeleri ayrı ekranda), adım kimliği bu yüzden daraltılabilir.
-            const step = rawStep as typeof rawStep & { id: WorkflowStepId };
-            const reachable = isStepReachable(workflow, step.id);
-            const classes = [
-              'workflow-step',
-              step.status === 'done' ? 'completed' : step.status,
-              step.id === activeStep ? 'active' : '',
-            ].join(' ');
-            return (
-              <li key={step.id}>
-                <button
-                  className={classes}
-                  type="button"
-                  disabled={!reachable}
-                  aria-current={step.id === activeStep ? 'step' : undefined}
-                  onClick={() => goTo(step.id)}
-                >
-                  <span>{step.status === 'done' ? '✓' : step.number}</span>
-                  <strong>
-                    {step.title}
-                    {step.optional ? ' (opsiyonel)' : ''}
-                  </strong>
-                  <em>{step.skipped ? 'atlandı' : step.status === 'done' ? 'tamam' : step.status === 'current' ? 'sırada' : 'bekliyor'}</em>
-                </button>
-              </li>
-            );
-          })}
-        </ol>
-      </nav>
+      <div className="workspace-layout">
+        <nav className="step-rail" aria-label="İş akışı">
+          <ol className="stepper">
+            {(workflow?.steps ?? []).map((rawStep) => {
+              // Bu sihirbaz yalnızca canonical akış için çalışıyor (Shorts
+              // projeleri ayrı ekranda), adım kimliği bu yüzden daraltılabilir.
+              const step = rawStep as typeof rawStep & { id: WorkflowStepId };
+              const reachable = isStepReachable(workflow, step.id);
+              const classes = [
+                'workflow-step',
+                step.status === 'done' ? 'completed' : step.status,
+                step.id === activeStep ? 'active' : '',
+              ].join(' ');
+              return (
+                <li key={step.id}>
+                  <button
+                    className={classes}
+                    type="button"
+                    disabled={!reachable}
+                    aria-current={step.id === activeStep ? 'step' : undefined}
+                    onClick={() => goTo(step.id)}
+                  >
+                    <span>{step.status === 'done' ? '✓' : step.number}</span>
+                    <strong>
+                      {step.title}
+                      {step.optional ? ' (opsiyonel)' : ''}
+                    </strong>
+                    <em>{step.skipped ? 'atlandı' : step.status === 'done' ? 'tamam' : step.status === 'current' ? 'sırada' : 'bekliyor'}</em>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        </nav>
 
-      <StepGuide stepId={activeStep} />
+        <div className="workspace-main">
+          <StepGuide stepId={activeStep} />
 
-      <Stage
-        key={activeStep}
-        project={project}
-        assets={assets}
-        stageStatus={active?.status ?? 'pending'}
-        onProjectUpdate={onProjectUpdate}
-        onGoToStep={goTo}
-      />
-
-      <div className="wizard-nav">
-        <button className="button" type="button" disabled={!previous} onClick={() => previous && goTo(previous)}>
-          ← Geri dön
-        </button>
-        <button className="button" type="button" disabled={isRefreshing} onClick={refresh}>
-          {isRefreshing ? 'Kontrol ediliyor...' : '🔄 Klasörü yeniden kontrol et'}
-        </button>
-        {activeStep !== current && active?.status === 'done' ? (
-          <button className="button" type="button" onClick={() => goTo(current)}>
-            Kaldığım adıma dön ({workflow?.currentTitle})
-          </button>
-        ) : null}
-        {/* Adımın kendi eylemi birincil; "İleri" yalnızca adım bitince öne çıkar. */}
-        <button
-          className={canGoNext ? 'button button-primary wizard-next' : 'button wizard-next'}
-          type="button"
-          disabled={!canGoNext}
-          onClick={() => next && goTo(next)}
-        >
-          İleri →
-        </button>
-      </div>
-      {refreshError ? (
-        <p className="field-hint field-error" role="alert">
-          {refreshError}
-        </p>
-      ) : null}
-      {!canGoNext && next && active?.status !== 'done' ? (
-        <p className="field-hint">Bu adım tamamlanınca sonraki adıma otomatik geçilir.</p>
-      ) : null}
-
-      <details className="panel evidence-panel">
-        <summary>Proje dosyaları ve disk kanıtı</summary>
-        <dl className="asset-list">
-          {project.parentId ? <AssetRow label="Ana proje" value={project.parentId} /> : null}
-          <AssetRow label="Video klibi" value={<StatusBadge status={assets.clip} />} />
-          <AssetRow label="Müzik" value={<StatusBadge status={assets.music} />} />
-          <AssetRow label="Arka plan sesi" value={<StatusBadge status={assets.ambient} />} />
-          <AssetRow label="Çıktı" value={<StatusBadge status={assets.output} />} />
-        </dl>
-        <dl className="evidence-list">
-          <AssetRow label="Proje klasörü" value={project.dir} />
-          <AssetRow label="Video dosyası" value={project.clip?.path ?? project.clip?.value} />
-          <AssetRow
-            label="Video kırpma"
-            value={
-              project.projectJson?.data?.video?.cropBottom !== undefined
-                ? `${project.projectJson.data.video.cropBottom}px`
-                : undefined
-            }
+          <Stage
+            key={activeStep}
+            project={project}
+            assets={assets}
+            stageStatus={active?.status ?? 'pending'}
+            onProjectUpdate={onProjectUpdate}
+            onGoToStep={goTo}
           />
-          <AssetRow label="Ses klasörü" value={project.audioDir} />
-          <AssetRow label="Parça sırası" value={project.projectJson?.data?.order?.join(' → ')} />
-          <AssetRow label="Çıktı dosyası" value={project.output?.path} />
-        </dl>
-      </details>
+
+          <div className="wizard-nav">
+            <button className="button" type="button" disabled={!previous} onClick={() => previous && goTo(previous)}>
+              ← Geri dön
+            </button>
+            <button className="button" type="button" disabled={isRefreshing} onClick={refresh}>
+              {isRefreshing ? 'Kontrol ediliyor...' : '🔄 Klasörü yeniden kontrol et'}
+            </button>
+            {activeStep !== current && active?.status === 'done' ? (
+              <button className="button" type="button" onClick={() => goTo(current)}>
+                Kaldığım adıma dön ({workflow?.currentTitle})
+              </button>
+            ) : null}
+            {/* Adımın kendi eylemi birincil; "İleri" yalnızca adım bitince öne çıkar. */}
+            <button
+              className={canGoNext ? 'button button-primary wizard-next' : 'button wizard-next'}
+              type="button"
+              disabled={!canGoNext}
+              onClick={() => next && goTo(next)}
+            >
+              İleri →
+            </button>
+          </div>
+          {refreshError ? (
+            <p className="field-hint field-error" role="alert">
+              {refreshError}
+            </p>
+          ) : null}
+          {!canGoNext && next && active?.status !== 'done' ? (
+            <p className="field-hint">Bu adım tamamlanınca sonraki adıma otomatik geçilir.</p>
+          ) : null}
+
+          <details className="panel evidence-panel">
+            <summary>Proje dosyaları ve disk kanıtı</summary>
+            <dl className="asset-list">
+              {project.parentId ? <AssetRow label="Ana proje" value={project.parentId} /> : null}
+              <AssetRow label="Video klibi" value={<StatusBadge status={assets.clip} />} />
+              <AssetRow label="Müzik" value={<StatusBadge status={assets.music} />} />
+              <AssetRow label="Arka plan sesi" value={<StatusBadge status={assets.ambient} />} />
+              <AssetRow label="Çıktı" value={<StatusBadge status={assets.output} />} />
+            </dl>
+            <dl className="evidence-list">
+              <AssetRow label="Proje klasörü" value={project.dir} />
+              <AssetRow label="Video dosyası" value={project.clip?.path ?? project.clip?.value} />
+              <AssetRow
+                label="Video kırpma"
+                value={
+                  project.projectJson?.data?.video?.cropBottom !== undefined
+                    ? `${project.projectJson.data.video.cropBottom}px`
+                    : undefined
+                }
+              />
+              <AssetRow label="Ses klasörü" value={project.audioDir} />
+              <AssetRow label="Parça sırası" value={project.projectJson?.data?.order?.join(' → ')} />
+              <AssetRow label="Çıktı dosyası" value={project.output?.path} />
+            </dl>
+          </details>
+        </div>
+      </div>
     </>
   );
 }
