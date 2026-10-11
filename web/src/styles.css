@@ -2014,6 +2014,78 @@ span.project-thumb::after {
   user-select: none;
 }
 
+/* Montaj: ilerleme tek blok; başarı ve durum satırı kutusuz. */
+.build-progress {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--border-current);
+  background: var(--bg-surface-subtle);
+}
+
+.build-progress-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.build-progress-step {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.build-progress-percent {
+  color: var(--primary);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-track {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--bg-surface-hover);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: var(--primary);
+  transition: width 0.5s ease;
+}
+
+.build-done {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--status-ready-text);
+  background: var(--status-ready-bg);
+}
+
+.build-done-title {
+  display: block;
+  color: var(--status-ready-text);
+  font-family: var(--font-display);
+}
+
+.build-done-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.build-status-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 .build-ops {
   display: grid;
   gap: 4px;

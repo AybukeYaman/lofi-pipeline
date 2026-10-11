@@ -223,7 +223,7 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
       </dl>
 
       {!isBuildReady ? (
-        <p className="field-hint" style={{ marginTop: 12, color: 'var(--text-muted)' }}>
+        <p className="field-hint">
           ℹ Montaj, gerekli adımlar (Video klibi, Müzik) hazır olunca başlatılabilir.
         </p>
       ) : null}
@@ -232,7 +232,7 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
           montaj anında fark ediliyor ve o an 5. adıma dönmek akla gelmiyor.
           Aynı bileşen, aynı uç — iki yerden de aynı seçimi yazar. */}
       {ambientMissing ? (
-        <p className="field-hint" style={{ marginTop: 12 }}>
+        <p className="field-hint">
           ⚠ Ambiance seçilmemiş — aşağıdan ekleyebilirsin
         </p>
       ) : null}
@@ -248,49 +248,22 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
       />
 
       {buildError ? (
-        <p className="field-hint field-error" role="alert" style={{ marginTop: 12 }}>
+        <p className="field-hint field-error" role="alert">
           {buildError}
         </p>
       ) : null}
 
       {/* Progress bar during build */}
       {isRunning || buildJob?.state === 'failed' ? (
-        <div
-          style={{
-            marginTop: 16,
-            padding: '14px 16px',
-            borderRadius: 8,
-            backgroundColor: 'var(--bg-surface-subtle)',
-            border: '1px solid var(--border-subtle)',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-main)' }}>
+        <div className="build-progress">
+          <div className="build-progress-head">
+            <span className="build-progress-step">
               {isRunning ? '⏳' : '✗'} {progress.stepLabel}
             </span>
-            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--primary)' }}>
-              %{progress.percent}
-            </span>
+            <span className="build-progress-percent">%{progress.percent}</span>
           </div>
-          <div
-            style={{
-              width: '100%',
-              height: 10,
-              borderRadius: 5,
-              background: 'var(--bg-surface)',
-              border: '1px solid var(--border)',
-              overflow: 'hidden',
-            }}
-          >
-            <div
-              style={{
-                width: `${progress.percent}%`,
-                height: '100%',
-                borderRadius: 5,
-                background: 'linear-gradient(90deg, #4caf50, #2e7d32)',
-                transition: 'width 0.5s ease',
-              }}
-            />
+          <div className="progress-track">
+            <div className="progress-fill" style={{ width: `${progress.percent}%` }} />
           </div>
           <ol className="build-ops">
             {progress.items.map((item) => (
@@ -303,58 +276,30 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
       ) : null}
 
       {isSucceeded ? (
-        <div
-          style={{
-            marginTop: 16,
-            padding: '14px 18px',
-            borderRadius: 8,
-            backgroundColor: 'var(--bg-surface-subtle)',
-            border: '1px solid #34603f',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            gap: 12,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span style={{ fontSize: 26 }} role="img" aria-label="party popper">🎉</span>
-            <div>
-              <strong style={{ fontSize: 15, color: '#34603f', display: 'block' }}>
-                Video Başarıyla Oluşturuldu!
-              </strong>
-              <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
-                Nihai video <code>out/final_ambient.mp4</code> olarak hazırlandı.
-              </span>
-            </div>
+        <div className="build-done">
+          <div>
+            <strong className="build-done-title">✓ Video oluşturuldu</strong>
+            <span className="muted">
+              Nihai video <code>out/final_ambient.mp4</code> olarak hazırlandı.
+            </span>
           </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              className="button button-primary"
-              style={{ fontSize: 12.5, minHeight: 30, padding: '2px 12px' }}
-              onClick={() => onGoToStep?.('publish')}
-            >
-              ▶️ Yayın adımına geç
+          <div className="build-done-actions">
+            <button type="button" className="button button-primary button-compact" onClick={() => onGoToStep?.('publish')}>
+              Yayın adımına geç
             </button>
-            <button
-              type="button"
-              className="button"
-              style={{ fontSize: 12.5, minHeight: 30, padding: '2px 12px' }}
-              onClick={() => openProjectFolder(project.id, 'out')}
-            >
-              📂 Çıktı Klasörünü Aç
+            <button type="button" className="button button-compact" onClick={() => openProjectFolder(project.id, 'out')}>
+              Çıktı klasörünü aç
             </button>
           </div>
         </div>
       ) : null}
 
       {buildJob && buildJob.state !== 'idle' ? (
-        <div style={{ marginTop: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div>
+          <div className="build-status-row">
             <strong>Montaj durumu:</strong>
             {buildJob.state === 'running' ? (
-              <StatusBadge status="processing" label="Running" />
+              <StatusBadge status="processing" label="Çalışıyor" />
             ) : buildJob.state === 'succeeded' ? (
               <StatusBadge status="completed" label="Başarılı" />
             ) : buildJob.state === 'failed' ? (
@@ -363,7 +308,7 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
           </div>
 
           {buildJob.error ? (
-            <p className="field-hint field-error" role="alert" style={{ marginTop: 4 }}>
+            <p className="field-hint field-error" role="alert">
               {buildJob.error}
             </p>
           ) : null}
