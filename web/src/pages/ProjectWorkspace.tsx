@@ -5,13 +5,13 @@ import { EmptyState } from '../components/Feedback';
 import { PageHeader } from '../components/PageHeader';
 import { ProjectTabs } from '../components/ProjectTabs';
 import { StatusBadge } from '../components/StatusBadge';
-import type { LoadState, ProjectDetail, ProjectSummary, WorkflowStepId } from '../types';
-import { isStepReachable, nextStepId, previousStep, stepInfo } from '../workflow';
+import type { LoadState, ProjectDetail, ProjectSummary } from '../types';
+import { isStepReachable, nextStepId, previousStep, stepInfo, viewWorkflow, type ViewStepId } from '../workflow';
 import { ShortsWorkspace } from './ShortsWorkspace';
 import { deriveAssets } from './workspace/assetState';
-import { OrderStage, ProjectStartStage } from './workspace/CanonicalStages';
+import { ProjectStartStage } from './workspace/CanonicalStages';
 import { BuildStage } from './workspace/BuildStage';
-import { MusicStage } from './workspace/MusicStage';
+import { MusicOrderStage } from './workspace/MusicOrderStage';
 import { OutputStage } from './workspace/OutputStage';
 import type { StageProps } from './workspace/StagePanel';
 import { VideoStage } from './workspace/VideoStage';
@@ -19,12 +19,11 @@ import { errorText } from '../format';
 import { StepGuide } from './workspace/StepWidgets';
 import { useCreateShorts } from '../useCreateShorts';
 
-/** Canonical 6 adımın ekranları — sıra workflow.ts STEP_ORDER'dır. */
-const stageComponents: Record<WorkflowStepId, ComponentType<StageProps>> = {
+/** Arayüzdeki 5 adımın ekranları — sıra workflow.ts STEP_ORDER'dır (müzik + sıralama tek adım). */
+const stageComponents: Record<ViewStepId, ComponentType<StageProps>> = {
   project: ProjectStartStage,
   video: VideoStage,
-  music: MusicStage,
-  order: OrderStage,
+  music: MusicOrderStage,
   build: BuildStage,
   publish: OutputStage,
 };
@@ -172,16 +171,17 @@ function WorkspaceContent({
   project: ProjectDetail;
   onProjectUpdate: (project: ProjectDetail) => void;
 }) {
-  const workflow = project.workflow;
+  // Sunucunun 6 adımı ekranda 5 adım: müzik + sıralama birleşik (bkz. viewWorkflow).
+  const workflow = useMemo(() => viewWorkflow(project.workflow), [project.workflow]);
   // Shorts projeleri bu bileşene hiç girmiyor (ayrı ekran); `current` bu
   // yüzden her zaman canonical akışın bir adımı.
-  const current = (workflow?.current ?? 'project') as WorkflowStepId;
+  const current = (workflow?.current ?? 'project') as ViewStepId;
   const assets = useMemo(() => deriveAssets(project), [project]);
 
   // Açılışta diskten hesaplanan ilk açık adım gösterilir. Bir işlem ilk açık
   // adımı değiştirirse (adım tamamlandı / yeniden açıldı) oraya geçilir;
   // kullanıcı geri döndüyse ve ilk açık adım aynı kaldıysa bulunduğu yerde kalır.
-  const [activeStep, setActiveStep] = useState<WorkflowStepId>(current);
+  const [activeStep, setActiveStep] = useState<ViewStepId>(current);
   const lastCurrent = useRef(current);
   useEffect(() => {
     if (lastCurrent.current !== current) {
@@ -191,7 +191,7 @@ function WorkspaceContent({
   }, [current]);
 
   const goTo = useCallback(
-    (step: WorkflowStepId) => {
+    (step: ViewStepId) => {
       if (!isStepReachable(workflow, step)) return;
       setActiveStep(step);
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -238,7 +238,7 @@ function WorkspaceContent({
             {(workflow?.steps ?? []).map((rawStep) => {
               // Bu sihirbaz yalnızca canonical akış için çalışıyor (Shorts
               // projeleri ayrı ekranda), adım kimliği bu yüzden daraltılabilir.
-              const step = rawStep as typeof rawStep & { id: WorkflowStepId };
+              const step = rawStep as typeof rawStep & { id: ViewStepId };
               const reachable = isStepReachable(workflow, step.id);
               const classes = [
                 'workflow-step',

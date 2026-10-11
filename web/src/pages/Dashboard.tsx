@@ -9,6 +9,7 @@ import { ProjectTabs } from '../components/ProjectTabs';
 import { showError, showSuccess } from '../toast';
 import type { LoadState, ProjectSummary } from '../types';
 import { useCreateShorts } from '../useCreateShorts';
+import { viewWorkflow } from '../workflow';
 
 type DashboardProps = {
   onOpenProject: (id: string) => void;
@@ -155,8 +156,10 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
                 : subprojects.find((s) => s.id === activeId) || mainProject;
             const isViewingSub = currentProject.id !== mainProject.id;
 
-            const stepLabel = currentProject.workflow
-              ? `${currentProject.workflow.steps.find((step) => step.id === currentProject.workflow?.current)?.number ?? '?'}/${currentProject.workflow.steps.length} · ${currentProject.workflow.currentTitle}`
+            // Çalışma alanıyla aynı 5 adımlı görünüm (müzik + sıralama birleşik).
+            const flow = viewWorkflow(currentProject.workflow);
+            const stepLabel = flow
+              ? `${flow.steps.find((step) => step.id === flow.current)?.number ?? '?'}/${flow.steps.length} · ${flow.currentTitle}`
               : currentProject.step?.title ?? currentProject.step?.id ?? 'Bilinmiyor';
 
             return (

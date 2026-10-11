@@ -204,7 +204,7 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
     : 'Kırpma yok';
 
   return (
-    <StagePanel section="build" title="5. Montaj" status={assets.assembly} stageStatus={stageStatus}>
+    <StagePanel section="build" title="4. Montaj" status={assets.assembly} stageStatus={stageStatus}>
       <dl className="readiness-list">
         {rows.map((row) => (
           <div key={row.label}>

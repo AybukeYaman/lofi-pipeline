@@ -1,4 +1,4 @@
-/** 3. adım — Müzik: Suno'dan aktarım, albüm, Ambiance ve Pomodoro seçimi. */
+/** 3. adımın müzik bölümü: Suno'dan aktarım, albüm, Ambiance ve Pomodoro seçimi. Çerçeve `MusicOrderStage`de. */
 import { useEffect, useState } from 'react';
 import {
   assignAlbumToProject,
@@ -19,9 +19,9 @@ import { PromptPicker } from '../../components/PromptPicker';
 import { paths } from '../../router';
 import type { ProjectMusicInfo } from '../../types';
 import { UploadButton } from './StepWidgets';
-import { StagePanel, type StageProps } from './StagePanel';
+import type { StageProps } from './StagePanel';
 
-export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: StageProps) {
+export function MusicSection({ project, assets, onProjectUpdate }: StageProps) {
   const music = project.projectJson?.data?.music;
   const readinessMusic = project.readiness?.music;
   const audioCount = readinessMusic ? readinessMusic.audioCount : (project.audioCount ?? 0);
@@ -198,7 +198,7 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
   };
 
   return (
-    <StagePanel section="music" title="3. Müzik" status={assets.music} stageStatus={stageStatus}>
+    <>
       <div className="picker-group">
         {/* Kendi promptlarım — müzik üretmeye başlamadan önce kopyalanır. */}
         <PromptPicker
@@ -244,9 +244,6 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
                 : ' · Durum: Devam ediyor'}
           </span>
         </p>
-        {audioCount > 0 ? (
-          <p className="field-hint">Parça adları, süreleri ve sırası 4. adım Sıralama'da.</p>
-        ) : null}
       </div>
 
       {/* Suno Downloader Accordion / Box */}
@@ -449,6 +446,6 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
           ℹ Devam etmek için ses klasörüne en az 1 dosya (.mp3, .wav) ekle, bir albüm aktar ya da yukarıdan Suno linkiyle indir.
         </p>
       ) : null}
-    </StagePanel>
+    </>
   );
 }

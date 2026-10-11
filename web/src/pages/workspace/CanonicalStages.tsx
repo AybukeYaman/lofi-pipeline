@@ -29,9 +29,10 @@ export function ProjectStartStage({ project, stageStatus }: StageProps) {
   );
 }
 
-// ---------------------------------------------------------------- 6. Sıralama
+// ---------------------------------------------------------------- 3. Müzik ve sıralama — sıralama bölümü
 
-export function OrderStage({ project, stageStatus, onProjectUpdate }: StageProps) {
+/** `primary`: kaydet düğmesi o an ekrandaki tek vurgulu eylem mi (çerçeve `MusicOrderStage`de). */
+export function OrderSection({ project, primary, onProjectUpdate }: StageProps & { primary: boolean }) {
   const [music, setMusic] = useState<ProjectMusicInfo | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [order, setOrder] = useState<string[]>([]);
@@ -164,13 +165,7 @@ export function OrderStage({ project, stageStatus, onProjectUpdate }: StageProps
   const durations = new Map(music?.audioFiles.map((audio) => [audio.file, audio.duration]) ?? []);
 
   return (
-    <StagePanel
-      section="order"
-      title="4. Sıralama"
-      status={savedOrder && savedOrder.length > 0 ? 'ready' : 'waiting'}
-      statusLabel={savedOrder && savedOrder.length > 0 ? 'Sıra kaydedildi' : 'Sıra bekleniyor'}
-      stageStatus={stageStatus}
-    >
+    <>
       {loadError ? (
         <p className="field-hint field-error" role="alert">
           {loadError}
@@ -196,7 +191,7 @@ export function OrderStage({ project, stageStatus, onProjectUpdate }: StageProps
           Parçalar okunuyor… Dosya sayısı çoksa süreler hesaplanırken birkaç saniye sürebilir.
         </p>
       ) : null}
-      {music && shown.length === 0 ? <EmptyState compact title="Sıralanacak parça yok — önce Müzik adımında yükle." /> : null}
+      {music && shown.length === 0 ? <EmptyState compact title="Sıralanacak parça yok — önce yukarıdan müzik yükle." /> : null}
       {music && shown.length > 0 ? (
         <p className="field-hint">
           {shown.length} parça · toplam {formatDuration(shown.reduce((sum, name) => sum + (durations.get(name) ?? 0), 0))}
@@ -253,7 +248,7 @@ export function OrderStage({ project, stageStatus, onProjectUpdate }: StageProps
       {success ? <p className="field-hint field-success">✓ {success}</p> : null}
       <div className="stage-footer">
         <button
-          className={stageStatus === 'done' ? 'button' : 'button button-primary'}
+          className={primary ? 'button button-primary' : 'button'}
           type="button"
           disabled={saving || shown.length === 0}
           onClick={save}
@@ -261,7 +256,7 @@ export function OrderStage({ project, stageStatus, onProjectUpdate }: StageProps
           {saving ? 'Kaydediliyor...' : 'Sıralamayı uygula ve kaydet'}
         </button>
       </div>
-    </StagePanel>
+    </>
   );
 }
 

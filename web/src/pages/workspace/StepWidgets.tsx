@@ -3,10 +3,9 @@
 import { useRef, useState } from 'react';
 
 import { errorText } from '../../format';
-import type { WorkflowStepId } from '../../types';
-import { STEP_GUIDE } from '../../workflow';
+import { STEP_GUIDE, type ViewStepId } from '../../workflow';
 
-export function StepGuide({ stepId }: { stepId: WorkflowStepId }) {
+export function StepGuide({ stepId }: { stepId: ViewStepId }) {
   const guide = STEP_GUIDE[stepId];
   return (
     <div className="step-guide" role="note">

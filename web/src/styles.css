@@ -1724,6 +1724,19 @@ span.project-thumb::after {
   accent-color: var(--primary);
 }
 
+/* Birleşik adımın ikinci bölümü (Müzik ve sıralama → Sıralama): üstte ayraç. */
+.stage-subsection {
+  display: grid;
+  gap: var(--space-3);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.stage-subsection > h3 {
+  margin: 0;
+  font-size: var(--text-md);
+}
+
 /* Adım altındaki eylem satırı: ikincil eylemler yan yana, birincil sonda. */
 .stage-actions-row {
   display: flex;

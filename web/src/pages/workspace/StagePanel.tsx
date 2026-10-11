@@ -1,7 +1,8 @@
 /** Adım ekranlarının ortak çerçevesi: başlık, "sıradaki adım" rozeti, durum rozeti. */
 import type { ReactNode } from 'react';
 import { StatusBadge, type AssetStatus } from '../../components/StatusBadge';
-import type { ProjectDetail, WorkflowStepId } from '../../types';
+import type { ProjectDetail } from '../../types';
+import type { ViewStepId } from '../../workflow';
 import type { ProjectAssets } from './assetState';
 
 /** Adımın canonical akıştaki durumu (backend workflow.steps[].status). */
@@ -12,7 +13,7 @@ export type StageProps = {
   assets: ProjectAssets;
   stageStatus: StageStatus;
   onProjectUpdate?: (updatedProject: ProjectDetail) => void;
-  onGoToStep?: (step: WorkflowStepId) => void;
+  onGoToStep?: (step: ViewStepId) => void;
 };
 
 function sectionAnchor(section: string) {

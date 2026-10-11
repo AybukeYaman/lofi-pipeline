@@ -28,7 +28,7 @@ export function OutputStage({ project, assets, stageStatus, onProjectUpdate }: S
   };
 
   return (
-    <StagePanel section="publish" title="6. Yayın" status={assets.output} stageStatus={stageStatus}>
+    <StagePanel section="publish" title="5. Yayın" status={assets.output} stageStatus={stageStatus}>
       {project.output?.exists ? (
         <div className="stage-media">
           <AssetPreview kind="video" fileName={outputName} src={outputUrl} emptyLabel="" />
