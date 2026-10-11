@@ -36,28 +36,9 @@ export function StagePanel({ section, title, status, statusLabel, stageStatus, c
       aria-labelledby={`${sectionAnchor(section)}-title`}
     >
       <header className="stage-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <div className="stage-title-row">
           <h2 id={`${sectionAnchor(section)}-title`}>{title}</h2>
-          {stageStatus === 'current' ? (
-            <span
-              className="stage-current-chip"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                padding: '2px 8px',
-                borderRadius: 6,
-                background: 'var(--primary-subtle)',
-                color: 'var(--primary)',
-                fontSize: 11,
-                fontWeight: 700,
-                textTransform: 'uppercase',
-                letterSpacing: '0.06em',
-                border: '1px solid var(--border-current)',
-              }}
-            >
-              Sıradaki adım
-            </span>
-          ) : null}
+          {stageStatus === 'current' ? <span className="stage-current-chip">Sıradaki adım</span> : null}
         </div>
         <div className="stage-meta">
           {status ? <StatusBadge status={status} label={statusLabel} /> : null}
