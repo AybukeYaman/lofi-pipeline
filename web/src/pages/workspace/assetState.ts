@@ -5,16 +5,11 @@
  */
 
 import type { AssetStatus } from '../../components/StatusBadge';
-import type { MusicTrack, ProjectDetail } from '../../types';
+import type { ProjectDetail } from '../../types';
 
 export function fileName(path?: string | null) {
   if (!path) return null;
   return path.split(/[\\/]/).pop() || path;
-}
-
-export function musicTracks(project: ProjectDetail): MusicTrack[] {
-  const tracks = project.projectJson?.data?.music?.tracks;
-  return Array.isArray(tracks) ? tracks : [];
 }
 
 export function ambientFiles(project: ProjectDetail): string[] {

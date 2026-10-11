@@ -17,21 +17,14 @@ import { AmbientPicker } from '../../components/AmbientPicker';
 import { PomodoroPicker } from '../../components/PomodoroPicker';
 import { PromptPicker } from '../../components/PromptPicker';
 import { paths } from '../../router';
-import { TrackList } from '../../components/TrackList';
 import type { ProjectMusicInfo } from '../../types';
-import { musicTracks } from './assetState';
 import { UploadButton } from './StepWidgets';
 import { StagePanel, type StageProps } from './StagePanel';
 
 export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: StageProps) {
   const music = project.projectJson?.data?.music;
-  const tracks = musicTracks(project);
   const readinessMusic = project.readiness?.music;
   const audioCount = readinessMusic ? readinessMusic.audioCount : (project.audioCount ?? 0);
-  const trackCount = readinessMusic ? readinessMusic.trackCount : (music?.totalTracks ?? tracks.length);
-  const completedCount = readinessMusic
-    ? readinessMusic.completedTrackCount
-    : (music?.completedCount ?? tracks.filter((t) => t.status === 'completed').length);
 
   const [isCompleting, setIsCompleting] = useState(false);
   const [completeError, setCompleteError] = useState<string | null>(null);
@@ -138,7 +131,6 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
   };
 
   const isMusicReady = readinessMusic?.ready ?? (assets.music === 'ready');
-  const missingTracksCount = Math.max(0, trackCount - audioCount);
 
   const handleDownloadSuno = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -243,12 +235,8 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
           </p>
         ) : null}
         <p>
-          <strong>{trackCount > 0 ? `${trackCount} parça planlandı` : `${audioCount} ses dosyası`}</strong>
+          <strong>{audioCount} ses dosyası</strong>
           <span className="muted">
-            {' '}
-            {trackCount > 0 ? ` · ${audioCount} / ${trackCount} ses dosyası hazır` : ''}
-            {trackCount > 0 && missingTracksCount > 0 ? ` (${missingTracksCount} eksik)` : ''}
-            {completedCount > 0 ? ` · ${completedCount} tamamlandı olarak işaretli` : ''}
             {isMusicReady
               ? ' · Durum: Tamamlandı'
               : audioCount === 0
@@ -256,6 +244,9 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
                 : ' · Durum: Devam ediyor'}
           </span>
         </p>
+        {audioCount > 0 ? (
+          <p className="field-hint">Parça adları, süreleri ve sırası 4. adım Sıralama'da.</p>
+        ) : null}
       </div>
 
       {/* Suno Downloader Accordion / Box */}
@@ -406,32 +397,14 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
         </div>
       ) : null}
 
-      {tracks.length > 0 ? (
-        <TrackList tracks={tracks} />
-      ) : musicInfo && musicInfo.audioFiles.length > 0 ? (
-        <ol className="order-list">
-          {musicInfo.audioFiles.map((audio, index) => (
-            <li key={audio.file}>
-              <span className="order-number">{index + 1}</span>
-              <span className="order-name">{audio.file}</span>
-            </li>
-          ))}
-        </ol>
-      ) : audioCount > 0 ? (
-        <EmptyState compact title="Parça adları okunamadı.">
-          {audioCount} ses dosyası bulundu:{' '}
-          <code className="link-code" onClick={handleOpenFolder} title="Explorer’da ses klasörünü aç">
-            {project.audioDir ?? 'ses klasörü'}
-          </code>.
-        </EmptyState>
-      ) : (
+      {audioCount === 0 ? (
         <EmptyState compact title="Henüz müzik parçası yok.">
           Suno ses dosyalarını (.mp3, .wav, .m4a, .flac) şu klasöre koy:{' '}
           <code className="link-code" onClick={handleOpenFolder} title="Explorer’da ses klasörünü aç">
             {project.audioDir ?? 'ses klasörü'}
           </code>.
         </EmptyState>
-      )}
+      ) : null}
 
       {completeError ? (
         <p className="field-hint field-error" role="alert">

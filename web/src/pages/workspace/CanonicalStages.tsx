@@ -191,7 +191,17 @@ export function OrderStage({ project, stageStatus, onProjectUpdate }: StageProps
         </label>
       </div>
 
+      {!music && !loadError ? (
+        <p className="field-hint" role="status">
+          Parçalar okunuyor… Dosya sayısı çoksa süreler hesaplanırken birkaç saniye sürebilir.
+        </p>
+      ) : null}
       {music && shown.length === 0 ? <EmptyState compact title="Sıralanacak parça yok — önce Müzik adımında yükle." /> : null}
+      {music && shown.length > 0 ? (
+        <p className="field-hint">
+          {shown.length} parça · toplam {formatDuration(shown.reduce((sum, name) => sum + (durations.get(name) ?? 0), 0))}
+        </p>
+      ) : null}
       {mode === 'manual' && shown.length > 1 ? (
         <p className="field-hint">Satırları tutup sürükle · klavyeyle Alt + ↑/↓</p>
       ) : null}
@@ -264,5 +274,7 @@ const ORDER_SAVED_MESSAGES: Record<TrackOrderMode, string> = {
 function formatDuration(seconds: number | null | undefined) {
   if (seconds === null || seconds === undefined) return '';
   const total = Math.round(seconds);
-  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+  const ss = String(total % 60).padStart(2, '0');
+  if (total >= 3600) return `${Math.floor(total / 3600)}:${String(Math.floor((total % 3600) / 60)).padStart(2, '0')}:${ss}`;
+  return `${Math.floor(total / 60)}:${ss}`;
 }

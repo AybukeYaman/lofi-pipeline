@@ -1732,34 +1732,6 @@ span.project-thumb::after {
   gap: var(--space-2);
 }
 
-.track-list {
-  display: grid;
-  margin: 0;
-  padding: 0;
-  border-top: 1px solid var(--border-subtle);
-  list-style: none;
-}
-
-.track-list li {
-  display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border-subtle);
-  font-size: 14px;
-}
-
-.track-number {
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.track-title {
-  color: var(--text-main);
-  overflow-wrap: anywhere;
-}
-
 .readiness-list {
   display: grid;
   width: 100%;
