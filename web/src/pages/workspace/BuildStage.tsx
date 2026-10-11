@@ -286,7 +286,7 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
             </span>
           </div>
           <div className="build-done-actions">
-            <button type="button" className="button button-primary button-compact" onClick={() => onGoToStep?.('publish')}>
+            <button type="button" className="button button-compact" onClick={() => onGoToStep?.('publish')}>
               Yayın adımına geç
             </button>
             <button type="button" className="button button-compact" onClick={() => openProjectFolder(project.id, 'out')}>
@@ -329,7 +329,7 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
 
       <div className="stage-footer">
         <button
-          className="button button-primary"
+          className={project.output?.exists ? 'button' : 'button button-primary'}
           type="button"
           disabled={!canBuild || isRunning || isStarting}
           onClick={handleStartBuild}

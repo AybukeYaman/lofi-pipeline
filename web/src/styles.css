@@ -1069,7 +1069,6 @@ span.project-thumb::after {
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
-  text-transform: capitalize;
 }
 
 .status-missing {
@@ -1102,10 +1101,11 @@ span.project-thumb::after {
   background: var(--status-processing-bg);
 }
 
+/* Tamam = hazır ile aynı yeşil: dolgulu birincil renk buton gibi okunuyordu. */
 .status-completed {
-  border-color: var(--primary);
-  color: var(--text-on-primary);
-  background: var(--primary);
+  border-color: var(--status-ready-border);
+  color: var(--status-ready-text);
+  background: var(--status-ready-bg);
 }
 
 .status-selected {

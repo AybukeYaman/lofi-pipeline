@@ -242,7 +242,12 @@ export function OrderStage({ project, stageStatus, onProjectUpdate }: StageProps
       ) : null}
       {success ? <p className="field-hint field-success">✓ {success}</p> : null}
       <div className="stage-footer">
-        <button className="button button-primary" type="button" disabled={saving || shown.length === 0} onClick={save}>
+        <button
+          className={stageStatus === 'done' ? 'button' : 'button button-primary'}
+          type="button"
+          disabled={saving || shown.length === 0}
+          onClick={save}
+        >
           {saving ? 'Kaydediliyor...' : 'Sıralamayı uygula ve kaydet'}
         </button>
       </div>
