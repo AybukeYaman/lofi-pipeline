@@ -72,11 +72,13 @@ type UploadButtonProps = {
   accept: string;
   multiple?: boolean;
   disabled?: boolean;
+  /** Ekrandaki tek birincil eylem bu değilse `false` (varsayılan `true`). */
+  primary?: boolean;
   onFiles: (files: File[]) => Promise<void>;
 };
 
 /** Dosya seçtirir, yüklemeyi bekler; hata ve başarı mesajını kendisi gösterir. */
-export function UploadButton({ label, accept, multiple, disabled, onFiles }: UploadButtonProps) {
+export function UploadButton({ label, accept, multiple, disabled, primary = true, onFiles }: UploadButtonProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -103,7 +105,7 @@ export function UploadButton({ label, accept, multiple, disabled, onFiles }: Upl
     <div className="upload-button">
       <input ref={inputRef} type="file" accept={accept} multiple={multiple} className="visually-hidden" onChange={handleChange} />
       <button
-        className="button button-primary"
+        className={primary ? 'button button-primary' : 'button'}
         type="button"
         disabled={busy || disabled}
         onClick={() => inputRef.current?.click()}

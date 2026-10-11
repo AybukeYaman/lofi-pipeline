@@ -207,25 +207,28 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
 
   return (
     <StagePanel section="music" title="3. Müzik" status={assets.music} stageStatus={stageStatus}>
-      {/* Kendi promptlarım — müzik üretmeye başlamadan önce kopyalanır. */}
-      <PromptPicker
-        tag="music"
-        label="Kayıtlı promptlarım"
-        onManage={() => { window.location.href = paths.prompts; }}
-      />
-      {/* Pomodoro burada: videonun kaç dakika olacağına karar veren ayar,
-          müzik seçilirken bilinmeli — kullanıcı ne kadar parça gerektiğini
-          parçaları eklemeden önce görsün. */}
-      <PomodoroPicker projectId={project.id} />
-      {/* Arka plan sesi — videonun tamamı boyunca döner. Montaja kadar
-          değiştirilebilir; seçim project.json'daki `ambient` alanına yazılır. */}
-      <AmbientPicker
-        projectId={project.id}
-        onManage={() => { window.location.href = paths.ambient; }}
-      />
+      <div className="picker-group">
+        {/* Kendi promptlarım — müzik üretmeye başlamadan önce kopyalanır. */}
+        <PromptPicker
+          tag="music"
+          label="Kayıtlı promptlarım"
+          onManage={() => { window.location.href = paths.prompts; }}
+        />
+        {/* Pomodoro burada: videonun kaç dakika olacağına karar veren ayar,
+            müzik seçilirken bilinmeli — kullanıcı ne kadar parça gerektiğini
+            parçaları eklemeden önce görsün. */}
+        <PomodoroPicker projectId={project.id} />
+        {/* Arka plan sesi — videonun tamamı boyunca döner. Montaja kadar
+            değiştirilebilir; seçim project.json'daki `ambient` alanına yazılır. */}
+        <AmbientPicker
+          projectId={project.id}
+          onManage={() => { window.location.href = paths.ambient; }}
+        />
+      </div>
       <UploadButton
         label="Müzik dosyalarını yükle"
         accept=".mp3,.wav,.m4a,.flac,.aac,.opus,.ogg"
+        primary={audioCount === 0}
         multiple
         onFiles={async (files) => {
           let latest = project;
@@ -233,9 +236,6 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
           onProjectUpdate?.(latest);
         }}
       />
-      <p className="field-hint">
-        <strong>{audioCount} parça yüklendi.</strong>
-      </p>
       <div className="music-summary">
         {music?.concept ? (
           <p>
@@ -246,7 +246,7 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
           <strong>{trackCount > 0 ? `${trackCount} parça planlandı` : `${audioCount} ses dosyası`}</strong>
           <span className="muted">
             {' '}
-            · {trackCount || audioCount} ses dosyasından {audioCount} tanesi hazır
+            {trackCount > 0 ? ` · ${audioCount} / ${trackCount} ses dosyası hazır` : ''}
             {trackCount > 0 && missingTracksCount > 0 ? ` (${missingTracksCount} eksik)` : ''}
             {completedCount > 0 ? ` · ${completedCount} tamamlandı olarak işaretli` : ''}
             {isMusicReady
@@ -260,121 +260,72 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
 
       {/* Suno Downloader Accordion / Box */}
       {showSunoBox ? (
-        <div
-          style={{
-            margin: '12px 0 16px',
-            padding: '14px 16px',
-            borderRadius: 8,
-            background: 'var(--bg-surface-subtle)',
-            border: '1px solid var(--border)',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <strong style={{ fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span>🌐</span> Suno Linkinden Otomatik İndir (Suno Ingest)
-            </strong>
-            <button
-              type="button"
-              className="button"
-              style={{ fontSize: 11, minHeight: 22, padding: '0 6px' }}
-              onClick={() => setShowSunoBox(false)}
-            >
+        <div className="tool-box">
+          <div className="tool-box-head">
+            <strong className="tool-box-title">Suno linkinden otomatik indir</strong>
+            <button type="button" className="button button-compact" onClick={() => setShowSunoBox(false)}>
               Kapat
             </button>
           </div>
-          <form onSubmit={handleDownloadSuno} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ display: 'flex', gap: 8 }}>
+          <form onSubmit={handleDownloadSuno} className="tool-box-body">
+            <div className="tool-box-row">
               <input
                 type="url"
+                className="tool-box-input"
                 placeholder="https://suno.com/playlist/... veya https://suno.com/song/..."
                 value={sunoUrl}
                 onChange={(e) => setSunoUrl(e.target.value)}
                 disabled={isIngestingSuno}
-                style={{ flex: 1, fontSize: 13, padding: '6px 10px' }}
                 required
               />
               <button
                 type="submit"
                 className="button button-primary"
                 disabled={isIngestingSuno || !sunoUrl.trim()}
-                style={{ fontSize: 13, minHeight: 32 }}
               >
-                {isIngestingSuno ? 'İndiriliyor...' : 'İndir & Bağla'}
+                {isIngestingSuno ? 'İndiriliyor...' : 'İndir ve bağla'}
               </button>
             </div>
             {sunoIngestError ? (
-              <p className="field-hint field-error" role="alert" style={{ margin: 0 }}>
+              <p className="field-hint field-error" role="alert">
                 {sunoIngestError}
               </p>
             ) : null}
-            {sunoIngestSuccess ? (
-              <p className="field-hint" style={{ color: '#34603f', margin: 0, fontWeight: 600 }}>
-                {sunoIngestSuccess}
-              </p>
-            ) : null}
+            {sunoIngestSuccess ? <p className="field-hint field-success">{sunoIngestSuccess}</p> : null}
           </form>
         </div>
       ) : null}
 
       {/* Album Library Picker Box */}
       {showAlbumPicker ? (
-        <div
-          style={{
-            margin: '12px 0 16px',
-            padding: '14px 16px',
-            borderRadius: 8,
-            background: 'var(--bg-surface-subtle)',
-            border: '1px solid var(--border)',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-            <strong style={{ fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span>📚</span> Müzik Kütüphanesinden Albüm Seç & Bu Projeye Aktar
-            </strong>
-            <button
-              type="button"
-              className="button"
-              style={{ fontSize: 11, minHeight: 22, padding: '0 6px' }}
-              onClick={() => setShowAlbumPicker(false)}
-            >
+        <div className="tool-box">
+          <div className="tool-box-head">
+            <strong className="tool-box-title">Kütüphaneden albüm seç ve bu projeye aktar</strong>
+            <button type="button" className="button button-compact" onClick={() => setShowAlbumPicker(false)}>
               Kapat
             </button>
           </div>
           {libraryAlbums.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <ul className="tool-list">
               {libraryAlbums.map((album) => (
-                <div
-                  key={album.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '8px 12px',
-                    borderRadius: 6,
-                    background: 'var(--bg-surface)',
-                    border: '1px solid var(--border-subtle)',
-                  }}
-                >
+                <li key={album.id}>
                   <div>
-                    <strong style={{ fontSize: 13 }}>📁 {album.name}</strong>
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>
-                      ({album.trackCount} parça)
-                    </span>
+                    <strong>{album.name}</strong>
+                    <span className="muted"> · {album.trackCount} parça</span>
                   </div>
                   <button
                     type="button"
-                    className="button button-primary"
+                    className="button button-primary button-compact"
                     disabled={isImportingAlbum || album.trackCount === 0}
-                    style={{ fontSize: 12, minHeight: 26, padding: '2px 10px' }}
                     onClick={() => handleImportAlbum(album.id)}
                   >
-                    {isImportingAlbum ? 'Aktarılıyor...' : 'Bu Albümü Projeye Aktar'}
+                    {isImportingAlbum ? 'Aktarılıyor...' : 'Bu albümü projeye aktar'}
                   </button>
-                </div>
+                </li>
               ))}
-            </div>
+            </ul>
           ) : (
-            <p className="field-hint" style={{ margin: 0 }}>
+            <p className="field-hint">
               Kütüphanede henüz albüm yok. Albümler <code>music_library/</code> klasöründen okunuyor.
             </p>
           )}
@@ -383,82 +334,44 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
 
       {/* Parent Project Music Picker Box */}
       {project.parentId && showParentPicker ? (
-        <div
-          style={{
-            margin: '12px 0 16px',
-            padding: '14px 16px',
-            borderRadius: 8,
-            background: 'var(--bg-surface-subtle)',
-            border: '1px solid var(--border)',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-            <strong style={{ fontSize: 13.5, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span>📁</span> Ana Projeden Müzik Seç & Bu Projeye Aktar ({project.parentId})
-            </strong>
-            <button
-              type="button"
-              className="button"
-              style={{ fontSize: 11, minHeight: 22, padding: '0 6px' }}
-              onClick={() => setShowParentPicker(false)}
-            >
+        <div className="tool-box">
+          <div className="tool-box-head">
+            <strong className="tool-box-title">Ana projeden müzik seç ve bu projeye aktar ({project.parentId})</strong>
+            <button type="button" className="button button-compact" onClick={() => setShowParentPicker(false)}>
               Kapat
             </button>
           </div>
 
           {isLoadingParentTracks ? (
-            <p className="field-hint" style={{ margin: 0 }}>
-              Ana projenin müzikleri yükleniyor...
-            </p>
+            <p className="field-hint">Ana projenin müzikleri yükleniyor...</p>
           ) : parentAudioFiles.length === 0 ? (
-            <p className="field-hint" style={{ margin: 0 }}>
-              Ana proje "{project.parentId}" içinde henüz ses dosyası bulunamadı.
-            </p>
+            <p className="field-hint">Ana proje "{project.parentId}" içinde henüz ses dosyası bulunamadı.</p>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            <div className="tool-box-body">
+              <div className="tool-box-row tool-box-row-between">
+                <span className="muted">
                   {selectedParentTracks.length} / {parentAudioFiles.length} parça seçildi
                 </span>
-                <div style={{ display: 'flex', gap: 6 }}>
+                <div className="tool-box-row">
                   <button
                     type="button"
-                    className="button"
-                    style={{ fontSize: 11, padding: '2px 8px' }}
+                    className="button button-compact"
                     onClick={() => setSelectedParentTracks(parentAudioFiles.map((a) => a.file))}
                   >
-                    Tümünü Seç
+                    Tümünü seç
                   </button>
-                  <button
-                    type="button"
-                    className="button"
-                    style={{ fontSize: 11, padding: '2px 8px' }}
-                    onClick={() => setSelectedParentTracks([])}
-                  >
+                  <button type="button" className="button button-compact" onClick={() => setSelectedParentTracks([])}>
                     Temizle
                   </button>
                 </div>
               </div>
-              <div style={{ maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <ul className="tool-list tool-list-scroll">
                 {parentAudioFiles.map((item) => {
                   const isChecked = selectedParentTracks.includes(item.file);
                   const isAlreadyInProject = musicInfo?.audioFiles.some((a) => a.file === item.file);
                   return (
-                    <label
-                      key={item.file}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '6px 10px',
-                        borderRadius: 6,
-                        background: 'var(--bg-surface)',
-                        border: '1px solid var(--border-subtle)',
-                        fontSize: 13,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <li key={item.file}>
+                      <label className="tool-check">
                         <input
                           type="checkbox"
                           checked={isChecked}
@@ -471,33 +384,22 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
                           }}
                         />
                         <span>{item.file}</span>
-                        {isAlreadyInProject ? (
-                          <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: '#efece4', color: '#685d4d' }}>
-                            Mevcut
-                          </span>
-                        ) : null}
-                      </div>
+                        {isAlreadyInProject ? <span className="tag">Mevcut</span> : null}
+                      </label>
                       {item.previewUrl ? (
-                        <audio
-                          controls
-                          src={item.previewUrl}
-                          preload="none"
-                          style={{ height: 24, width: 140 }}
-                          onClick={(e) => e.stopPropagation()}
-                        />
+                        <audio controls src={item.previewUrl} preload="none" className="tool-audio" />
                       ) : null}
-                    </label>
+                    </li>
                   );
                 })}
-              </div>
+              </ul>
               <button
                 type="button"
-                className="button button-primary"
+                className="button button-primary tool-box-submit"
                 disabled={isCopyingFromParent || selectedParentTracks.length === 0}
-                style={{ alignSelf: 'flex-start', marginTop: 4 }}
                 onClick={handleCopyFromParent}
               >
-                {isCopyingFromParent ? 'Aktarılıyor...' : `Seçilen ${selectedParentTracks.length} Parçayı Aktar`}
+                {isCopyingFromParent ? 'Aktarılıyor...' : `Seçilen ${selectedParentTracks.length} parçayı aktar`}
               </button>
             </div>
           )}
@@ -518,92 +420,55 @@ export function MusicStage({ project, assets, stageStatus, onProjectUpdate }: St
       ) : audioCount > 0 ? (
         <EmptyState compact title="Parça adları okunamadı.">
           {audioCount} ses dosyası bulundu:{' '}
-          <code
-            onClick={handleOpenFolder}
-            title="Explorer’da ses klasörünü aç"
-            style={{ cursor: 'pointer', color: 'var(--primary)', textDecoration: 'underline' }}
-          >
+          <code className="link-code" onClick={handleOpenFolder} title="Explorer’da ses klasörünü aç">
             {project.audioDir ?? 'ses klasörü'}
           </code>.
         </EmptyState>
       ) : (
         <EmptyState compact title="Henüz müzik parçası yok.">
           Suno ses dosyalarını (.mp3, .wav, .m4a, .flac) şu klasöre koy:{' '}
-          <code
-            onClick={handleOpenFolder}
-            title="Explorer’da ses klasörünü aç"
-            style={{ cursor: 'pointer', color: 'var(--primary)', textDecoration: 'underline' }}
-          >
+          <code className="link-code" onClick={handleOpenFolder} title="Explorer’da ses klasörünü aç">
             {project.audioDir ?? 'ses klasörü'}
           </code>.
         </EmptyState>
       )}
 
       {completeError ? (
-        <p className="field-hint field-error" role="alert" style={{ marginTop: 12 }}>
+        <p className="field-hint field-error" role="alert">
           {completeError}
         </p>
       ) : null}
 
-      {completeSuccess ? (
-        <p className="field-hint" style={{ color: '#34603f', marginTop: 12 }}>
-          ✓ {completeSuccess}
-        </p>
-      ) : null}
+      {completeSuccess ? <p className="field-hint field-success">✓ {completeSuccess}</p> : null}
 
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 14 }}>
-        <button
-          className="button"
-          type="button"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
-          onClick={() => setShowAlbumPicker((prev) => !prev)}
-        >
-          📚 {showAlbumPicker ? 'Albümleri Gizle' : 'Kütüphaneden Albüm Seç'}
+      <div className="stage-actions-row">
+        <button className="button" type="button" onClick={() => setShowAlbumPicker((prev) => !prev)}>
+          {showAlbumPicker ? 'Albümleri gizle' : 'Kütüphaneden albüm seç'}
         </button>
         {project.parentId ? (
-          <button
-            className="button"
-            type="button"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#faf6ee', borderColor: '#d3c5ae' }}
-            onClick={() => setShowParentPicker((prev) => !prev)}
-          >
-            📁 {showParentPicker ? 'Ana Proje Müziklerini Gizle' : `Ana Projeden Müzik Aktar (${project.parentId})`}
+          <button className="button" type="button" onClick={() => setShowParentPicker((prev) => !prev)}>
+            {showParentPicker ? 'Ana proje müziklerini gizle' : `Ana projeden müzik aktar (${project.parentId})`}
           </button>
         ) : null}
-        <button
-          className="button"
-          type="button"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
-          onClick={() => setShowSunoBox((prev) => !prev)}
-        >
-          🌐 {showSunoBox ? 'Suno Alanını Gizle' : 'Suno Linkinden İndir'}
+        <button className="button" type="button" onClick={() => setShowSunoBox((prev) => !prev)}>
+          {showSunoBox ? 'Suno alanını gizle' : 'Suno linkinden indir'}
         </button>
-        <button
-          className="button"
-          type="button"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
-          onClick={handleOpenFolder}
-        >
-          📂 audio/ Klasörünü Aç
+        <button className="button" type="button" onClick={handleOpenFolder}>
+          audio/ klasörünü aç
+        </button>
+        <button className="button" type="button" disabled={isCompleting} onClick={handleRefresh}>
+          Ses dosyalarını yenile
         </button>
         {!isMusicReady ? (
           <button
-            className="button button-primary"
+            className={audioCount > 0 ? 'button button-primary' : 'button'}
             type="button"
             disabled={isCompleting || audioCount === 0}
             onClick={handleCompleteMusic}
           >
-            {isCompleting ? 'Müzik tamamlanıyor...' : 'Müziği Tamamla ve Devam Et'}
+            {isCompleting ? 'Müzik tamamlanıyor...' : 'Müziği tamamla ve devam et'}
           </button>
         ) : null}
-        <button
-          className="button"
-          type="button"
-          disabled={isCompleting}
-          onClick={handleRefresh}
-        >
-          🔄 Ses Dosyalarını Yenile
-        </button>
       </div>
 
       {!isMusicReady && audioCount === 0 ? (

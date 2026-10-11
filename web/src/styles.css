@@ -1508,8 +1508,114 @@ span.project-thumb::after {
 .music-summary {
   display: grid;
   gap: 6px;
-  margin-bottom: 14px;
-  font-size: 14px;
+  font-size: var(--text-sm);
+}
+
+/* Çekmece (Suno / albüm / ana proje): tam çerçeve yok, sol vurgu çizgisi. */
+.tool-box {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--border);
+  background: var(--bg-surface-subtle);
+}
+
+.tool-box-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.tool-box-title {
+  font-family: var(--font-display);
+  font-size: var(--text-sm);
+}
+
+.tool-box-body {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.tool-box-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.tool-box-row-between {
+  justify-content: space-between;
+}
+
+.tool-box-input {
+  flex: 1;
+  min-width: 220px;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.tool-box-submit {
+  justify-self: start;
+}
+
+.tool-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--border-subtle);
+  font-size: var(--text-sm);
+}
+
+.tool-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-1);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.tool-list-scroll {
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.tool-check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+
+.tool-audio {
+  width: 140px;
+  height: 24px;
+}
+
+.tag {
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface-hover);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.link-code {
+  color: var(--primary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Adım altındaki eylem satırı: ikincil eylemler yan yana, birincil sonda. */
+.stage-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .track-list {
@@ -1812,13 +1918,14 @@ span.project-thumb::after {
   min-width: 0;
 }
 
+/* Adım rehberi: tam çerçeve yerine sol vurgu çizgisi, hafif zemin. */
 .step-guide {
   display: grid;
-  gap: 4px;
-  padding: 12px 16px;
-  border: 1px solid var(--border-current);
-  border-radius: 8px;
-  background: var(--primary-subtle);
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--border-current);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: var(--bg-surface-subtle);
   color: var(--text-main);
 }
 
@@ -1900,7 +2007,7 @@ span.project-thumb::after {
 }
 
 .field-hint.field-success {
-  color: #34603f;
+  color: var(--status-ready-text);
   font-weight: 600;
 }
 
@@ -3159,17 +3266,35 @@ span.project-thumb::after {
    Üç seçici de aynı kutuyu satır içi stillerle tekrarlıyordu; stiller buraya
    alındı ki tema değişkenleri geçerli olsun. Açılan kısım dropdown: sayfayı
    aşağı itmek yerine üstüne biner, böylece uzun formda adımlar kaymaz. */
+/* Seçici: kutu değil düz satır — ince alt çizgi; açılınca çizgi vurgulanır. */
 .picker {
   position: relative;
-  margin: 12px 0;
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-surface);
+  margin: 0;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
 }
 
 .picker.is-open {
-  border-color: var(--border-current);
+  border-bottom-color: var(--border-current);
+}
+
+/* Yan yana seçiciler tek liste gibi dizilir; ızgara boşluğu araya girmez. */
+.picker-group {
+  display: grid;
+}
+
+.picker-group > .picker:first-child {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.picker-head .picker-toggle {
+  min-height: 28px;
+  padding: 0 var(--space-2) 0 0;
+  border: 0;
+  background: transparent;
+  font-size: var(--text-sm);
+  font-weight: 600;
 }
 
 .picker-head {

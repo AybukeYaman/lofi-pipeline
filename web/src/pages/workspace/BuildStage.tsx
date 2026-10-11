@@ -241,11 +241,13 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
           aynı ayarı yazar. Kapalı başlıyor: "başlatabilir miyim" sorusunun
           cevabı (düzen özeti + ✓/⚠ durumu) kutuyu açmadan başlıkta zaten
           duruyor, açık başlasa dropdown Başlat düğmesinin üstüne binerdi. */}
-      <PomodoroPicker projectId={project.id} onChange={setPomodoro} />
-      <AmbientPicker
-        projectId={project.id}
-        onManage={() => { window.location.href = paths.ambient; }}
-      />
+      <div className="picker-group">
+        <PomodoroPicker projectId={project.id} onChange={setPomodoro} />
+        <AmbientPicker
+          projectId={project.id}
+          onManage={() => { window.location.href = paths.ambient; }}
+        />
+      </div>
 
       {buildError ? (
         <p className="field-hint field-error" role="alert">
