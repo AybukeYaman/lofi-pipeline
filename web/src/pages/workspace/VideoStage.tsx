@@ -258,7 +258,7 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
       if (!Number.isInteger(num) || num < 0) {
         setValidationError(`${fieldLabel} 0 ya da pozitif bir tam sayı olmalı.`);
       } else if (num > 2160) {
-        setValidationError(`${fieldLabel} cannot exceed 2160px.`);
+        setValidationError(`${fieldLabel} en fazla 2160px olabilir.`);
       } else {
         setValidationError(null);
         setter(num);
@@ -282,15 +282,11 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
           }
         />
         <div className="stage-actions">
-          <fieldset
-            style={{
-              border: '1px solid var(--border, #333)', borderRadius: 6, padding: '8px 12px 10px', margin: '0 0 12px',
-            }}
-          >
-            <legend style={{ fontSize: 12, padding: '0 6px' }}>Görsel kaynağı</legend>
-            <div role="radiogroup" aria-label="Görsel kaynağı" style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
+          <fieldset className="source-switch">
+            <legend>Görsel kaynağı</legend>
+            <div role="radiogroup" aria-label="Görsel kaynağı" className="source-switch-options">
               {(['clip', 'image'] as VideoSource[]).map((source) => (
-                <label key={source} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                <label key={source} className="source-switch-option">
                   <input
                     type="radio"
                     name={`video-source-${project.id}`}
@@ -306,9 +302,7 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
                 </label>
               ))}
             </div>
-            <p className="field-hint" style={{ marginBottom: 0 }}>
-              Sonradan değiştirilebilir · kırpma korunur
-            </p>
+            <p className="field-hint">Sonradan değiştirilebilir · kırpma korunur</p>
           </fieldset>
           {isStill ? (
             <>
@@ -318,6 +312,7 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
               <UploadButton
                 label="Görsel yükle (.png, .jpg, .webp)"
                 accept=".png,.jpg,.jpeg,.webp"
+                primary={!canSave && stageStatus !== 'done'}
                 multiple
                 onFiles={async (files) => {
                   let latest = project;
@@ -330,6 +325,7 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
             <UploadButton
               label="Video klibi yükle (.mp4)"
               accept=".mp4"
+              primary={!canSave && stageStatus !== 'done'}
               multiple
               onFiles={async (files) => {
                 let latest = project;
@@ -338,38 +334,24 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
               }}
             />
           )}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6, margin: '12px 0 8px' }}>
-            <h3 style={{ margin: 0 }}>
+          <div className="stage-section-head">
+            <h3>
               {isStill ? 'Klasördeki görseller' : 'Klasördeki klipler'} <span className="count">({clips.length})</span>
             </h3>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button
-                type="button"
-                className="button"
-                style={{ fontSize: 12, minHeight: 26, padding: '2px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                onClick={handleOpenFolder}
-              >
-                📂 Klasörü Aç
+            <div className="tool-box-row">
+              <button type="button" className="button button-compact" onClick={handleOpenFolder}>
+                Klasörü aç
               </button>
-              <button
-                type="button"
-                className="button"
-                style={{ fontSize: 12, minHeight: 26, padding: '2px 10px' }}
-                onClick={handleRefreshClips}
-              >
-                🔄 Yenile
+              <button type="button" className="button button-compact" onClick={handleRefreshClips}>
+                Yenile
               </button>
             </div>
           </div>
-          <p className="field-hint" style={{ margin: '0 0 10px' }}>
+          <p className="field-hint">
             {isStill
               ? <>MASTER ve açı görselleri (<code>Master1.jpg</code> …) şu klasörden:</>
               : <>Döngü videosu dosyalarını (<code>.mp4</code>) şu klasöre koy:</>}{' '}
-            <code
-              onClick={handleOpenFolder}
-              title={`Explorer’da ${mediaFolder} klasörünü aç`}
-              style={{ cursor: 'pointer', color: 'var(--primary)', textDecoration: 'underline' }}
-            >
+            <code className="link-code" onClick={handleOpenFolder} title={`Explorer’da ${mediaFolder} klasörünü aç`}>
               {project.dir || project.name}\{mediaFolder}\
             </code>.
           </p>
@@ -401,208 +383,104 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
             <EmptyState compact title={isStill ? 'resimler\\ klasöründe henüz MASTER görseli yok.' : 'videolar\\ klasöründe .mp4 klip yok.'} />
           )}
 
-          <div style={{ marginTop: 14, width: '100%', borderTop: '1px solid var(--border-subtle)', paddingTop: 14 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
-              <h3 style={{ margin: 0 }}>Watermark & Kenar Kırpma (Çok Yönlü)</h3>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button
-                  type="button"
-                  className="button"
-                  style={{ fontSize: 11.5, minHeight: 24, padding: '2px 8px' }}
-                  onClick={() => handleApplyPreset(150, 0, 0, 0)}
-                >
-                  🎯 Hailuo (Alt: 150px)
-                </button>
-                <button
-                  type="button"
-                  className="button"
-                  style={{ fontSize: 11.5, minHeight: 24, padding: '2px 8px' }}
-                  onClick={() => handleApplyPreset(0, 0, 0, 0)}
-                >
-                  🔄 Sıfırla (0px)
-                </button>
+          {/* Kırpma ve format ayarlarının çoğu projede varsayılanla çalışır:
+              varsayılan dışı bir değer varsa açık, yoksa katlı başlar. */}
+          <details className="advanced" open={watermark || aspect !== '16:9'}>
+            <summary>Kenar kırpma ve video formatı (gelişmiş)</summary>
+            <div className="advanced-body">
+              <div className="stage-section-head">
+                <h3>Watermark ve kenar kırpma</h3>
+                <div className="tool-box-row">
+                  <button type="button" className="button button-compact" onClick={() => handleApplyPreset(150, 0, 0, 0)}>
+                    Hailuo (alt 150px)
+                  </button>
+                  <button type="button" className="button button-compact" onClick={() => handleApplyPreset(0, 0, 0, 0)}>
+                    Sıfırla
+                  </button>
+                </div>
               </div>
-            </div>
 
-            <label className="option" style={{ marginBottom: 10 }}>
-              <input
-                type="checkbox"
-                checked={watermark}
-                disabled={isSaving}
-                onChange={(e) => {
-                  const checked = e.target.checked;
-                  setWatermark(checked);
-                  setError(null);
-                  setSuccess(null);
-                  if (checked && cropBottom === 0 && cropTop === 0 && cropLeft === 0 && cropRight === 0) {
-                    setCropBottom(150);
-                    setCropBottomInput('150');
-                  }
-                }}
-              />
-              <span>Kenar / Watermark kırpmayı etkinleştir</span>
-            </label>
-
-            {/* Directional 4-side inputs */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(2, 1fr)',
-                gap: 10,
-                padding: '10px 12px',
-                borderRadius: 8,
-                background: 'var(--bg-surface-subtle)',
-                border: '1px solid var(--border-subtle)',
-                opacity: watermark ? 1 : 0.6,
-              }}
-            >
-              <div className="field" style={{ margin: 0 }}>
-                <label style={{ fontSize: 12.5, fontWeight: 600 }}>⬆️ Üstten Kırp (Top px)</label>
+              <label className="option">
                 <input
-                  type="number"
-                  min={0}
-                  max={2160}
-                  value={cropTopInput}
-                  disabled={!watermark || isSaving}
-                  onChange={(e) => handleNumberChange(e.target.value, setCropTop, setCropTopInput, 'Top crop')}
-                  style={{ padding: '6px 8px', fontSize: 13 }}
+                  type="checkbox"
+                  checked={watermark}
+                  disabled={isSaving}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setWatermark(checked);
+                    setError(null);
+                    setSuccess(null);
+                    if (checked && cropBottom === 0 && cropTop === 0 && cropLeft === 0 && cropRight === 0) {
+                      setCropBottom(150);
+                      setCropBottomInput('150');
+                    }
+                  }}
                 />
-              </div>
-
-              <div className="field" style={{ margin: 0 }}>
-                <label style={{ fontSize: 12.5, fontWeight: 600 }}>⬇️ Alttan Kırp (Bottom px)</label>
-                <input
-                  type="number"
-                  min={0}
-                  max={2160}
-                  value={cropBottomInput}
-                  disabled={!watermark || isSaving}
-                  onChange={(e) => handleNumberChange(e.target.value, setCropBottom, setCropBottomInput, 'Bottom crop')}
-                  style={{ padding: '6px 8px', fontSize: 13 }}
-                />
-              </div>
-
-              <div className="field" style={{ margin: 0 }}>
-                <label style={{ fontSize: 12.5, fontWeight: 600 }}>⬅️ Soldan Kırp (Left px)</label>
-                <input
-                  type="number"
-                  min={0}
-                  max={2160}
-                  value={cropLeftInput}
-                  disabled={!watermark || isSaving}
-                  onChange={(e) => handleNumberChange(e.target.value, setCropLeft, setCropLeftInput, 'Left crop')}
-                  style={{ padding: '6px 8px', fontSize: 13 }}
-                />
-              </div>
-
-              <div className="field" style={{ margin: 0 }}>
-                <label style={{ fontSize: 12.5, fontWeight: 600 }}>➡️ Sağdan Kırp (Right px)</label>
-                <input
-                  type="number"
-                  min={0}
-                  max={2160}
-                  value={cropRightInput}
-                  disabled={!watermark || isSaving}
-                  onChange={(e) => handleNumberChange(e.target.value, setCropRight, setCropRightInput, 'Right crop')}
-                  style={{ padding: '6px 8px', fontSize: 13 }}
-                />
-              </div>
-            </div>
-
-            {/* En-Boy Oranı Seçimi: 16:9 mu yoksa 9:16 mı? */}
-            <div style={{ marginTop: 12 }}>
-              <label style={{ fontSize: 13, fontWeight: 700, display: 'block', marginBottom: 8, color: 'var(--text-main)' }}>
-                📐 Video Formatı (Otomatik Kadraj Garantisi)
+                <span>Kenar / watermark kırpmayı etkinleştir</span>
               </label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
-                {/* 16:9 Parçası */}
-                <div
-                  onClick={() => !isSaving && setAspect('16:9')}
-                  style={{
-                    padding: '12px 14px',
-                    borderRadius: 8,
-                    cursor: isSaving ? 'not-allowed' : 'pointer',
-                    background: aspect === '16:9' ? '#f5f0e4' : 'var(--bg-surface)',
-                    border: `2px solid ${aspect === '16:9' ? '#a5916f' : 'var(--border-subtle)'}`,
-                    transition: 'all 0.15s ease',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 4,
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <strong style={{ fontSize: 13.5, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span>🖥️</span> 16:9 (Yatay / Landscape)
-                    </strong>
-                    <input
-                      type="radio"
-                      name="video-aspect-choice"
-                      checked={aspect === '16:9'}
-                      onChange={() => setAspect('16:9')}
-                      disabled={isSaving}
-                    />
-                  </div>
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                    YouTube standart video formatı. Videoyu merkezden otomatik 16:9 oranına tamamlar.
-                  </span>
-                </div>
 
-                {/* 9:16 Parçası */}
-                <div
-                  onClick={() => !isSaving && setAspect('9:16')}
-                  style={{
-                    padding: '12px 14px',
-                    borderRadius: 8,
-                    cursor: isSaving ? 'not-allowed' : 'pointer',
-                    background: aspect === '9:16' ? '#f5f0e4' : 'var(--bg-surface)',
-                    border: `2px solid ${aspect === '9:16' ? '#a5916f' : 'var(--border-subtle)'}`,
-                    transition: 'all 0.15s ease',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 4,
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <strong style={{ fontSize: 13.5, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span>📱</span> 9:16 (Dikey / Portrait)
-                    </strong>
+              <div className={watermark ? 'crop-grid' : 'crop-grid is-off'}>
+                {([
+                  ['Üstten kırp (px)', cropTopInput, setCropTop, setCropTopInput, 'Üst kırpma'],
+                  ['Alttan kırp (px)', cropBottomInput, setCropBottom, setCropBottomInput, 'Alt kırpma'],
+                  ['Soldan kırp (px)', cropLeftInput, setCropLeft, setCropLeftInput, 'Sol kırpma'],
+                  ['Sağdan kırp (px)', cropRightInput, setCropRight, setCropRightInput, 'Sağ kırpma'],
+                ] as const).map(([label, value, setter, inputSetter, fieldLabel]) => (
+                  <div className="field" key={label}>
+                    <label>{label}</label>
                     <input
-                      type="radio"
-                      name="video-aspect-choice"
-                      checked={aspect === '9:16'}
-                      onChange={() => setAspect('9:16')}
-                      disabled={isSaving}
+                      type="number"
+                      min={0}
+                      max={2160}
+                      value={value}
+                      disabled={!watermark || isSaving}
+                      onChange={(e) => handleNumberChange(e.target.value, setter, inputSetter, fieldLabel)}
                     />
                   </div>
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                    YouTube Shorts, TikTok ve Reels formatı. Videoyu merkezden otomatik 9:16 dikey kadraja tamamlar.
-                  </span>
-                </div>
+                ))}
+              </div>
+
+              <h3>Video formatı</h3>
+              <div className="choice-cards" role="radiogroup" aria-label="Video formatı">
+                {([
+                  ['16:9', '16:9 (yatay)', 'YouTube standart video formatı. Videoyu merkezden otomatik 16:9 oranına tamamlar.'],
+                  ['9:16', '9:16 (dikey)', 'YouTube Shorts, TikTok ve Reels formatı. Videoyu merkezden otomatik 9:16 dikey kadraja tamamlar.'],
+                ] as const).map(([value, title, text]) => (
+                  <label key={value} className={aspect === value ? 'choice-card selected' : 'choice-card'}>
+                    <span className="choice-card-head">
+                      <strong>{title}</strong>
+                      <input
+                        type="radio"
+                        name="video-aspect-choice"
+                        checked={aspect === value}
+                        onChange={() => setAspect(value)}
+                        disabled={isSaving}
+                      />
+                    </span>
+                    <span className="muted">{text}</span>
+                  </label>
+                ))}
               </div>
             </div>
-          </div>
+          </details>
 
           {validationError ? (
-            <p className="field-hint field-error" role="alert" style={{ marginTop: 8 }}>
+            <p className="field-hint field-error" role="alert">
               {validationError}
             </p>
           ) : null}
 
           {error ? (
-            <p className="field-hint field-error" role="alert" style={{ marginTop: 8 }}>
+            <p className="field-hint field-error" role="alert">
               {error}
             </p>
           ) : null}
 
-          {success ? (
-            <p className="field-hint" style={{ marginTop: 8, color: '#34603f' }}>
-              ✓ {success}
-            </p>
-          ) : null}
+          {success ? <p className="field-hint field-success">✓ {success}</p> : null}
 
-          <div style={{ marginTop: 12 }}>
+          <div>
             <button
-              className="button button-primary"
+              className={canSave ? 'button button-primary' : 'button'}
               type="button"
               disabled={!canSave || isSaving}
               onClick={handleSave}
