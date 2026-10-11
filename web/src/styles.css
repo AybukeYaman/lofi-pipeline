@@ -1362,6 +1362,12 @@ span.project-thumb::after {
   box-shadow: none;
 }
 
+/* Boşluğu ızgara verir; çocukların eski dış boşlukları üst üste binmesin. */
+.panel.stage-panel > * {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
 /* Sıradaki adım: parıltı yerine üstte tek ince çizgi. */
 .stage-panel.is-current {
   border-top: 3px solid var(--border-current);
@@ -1897,43 +1903,85 @@ span.project-thumb::after {
   font-weight: 600;
 }
 
-.choice-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
+/* Parça listesi: kutu yok, satırlar ince çizgiyle ayrılır; süre sağa hizalı. */
 .order-list {
   display: grid;
-  gap: 4px;
-  margin: 10px 0;
+  margin: 0;
   padding: 0;
   list-style: none;
+  border-top: 1px solid var(--border-subtle);
 }
 
 .order-list li {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
+  gap: var(--space-3);
   align-items: center;
-  padding: 6px 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 6px;
-  background: var(--bg-surface);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.order-list li .muted {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
 }
 
 .order-number {
   min-width: 24px;
   color: var(--text-muted);
+  font-family: var(--font-display);
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .order-name {
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* Bölmeli seçim: ayrı kutular yerine tek çerçeve içinde yan yana seçenekler. */
+.segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  width: fit-content;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.segment {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-surface);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  transition: background 0.1s ease;
+}
+
+.segment + .segment {
+  border-left: 1px solid var(--border-subtle);
+}
+
+.segment:hover {
+  background: var(--bg-surface-subtle);
+}
+
+.segment.selected {
+  background: var(--primary-subtle);
+  font-weight: 600;
+}
+
+.segment input {
+  accent-color: var(--primary);
+}
+
+.segment:focus-within {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
 }
 
 /* Elle sıralama: satırlar sürüklenir (eski ↑/↓ düğmeleri kaldırıldı).

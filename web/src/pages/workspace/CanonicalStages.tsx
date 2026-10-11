@@ -176,16 +176,16 @@ export function OrderStage({ project, stageStatus, onProjectUpdate }: StageProps
           {loadError}
         </p>
       ) : null}
-      <div className="choice-row" role="radiogroup" aria-label="Sıralama yöntemi">
-        <label className={mode === 'added' ? 'option selected' : 'option'}>
+      <div className="segmented" role="radiogroup" aria-label="Sıralama yöntemi">
+        <label className={mode === 'added' ? 'segment selected' : 'segment'}>
           <input type="radio" checked={mode === 'added'} onChange={() => setMode('added')} />
           <span>Eklediğim sıra</span>
         </label>
-        <label className={mode === 'manual' ? 'option selected' : 'option'}>
+        <label className={mode === 'manual' ? 'segment selected' : 'segment'}>
           <input type="radio" checked={mode === 'manual'} onChange={() => setMode('manual')} />
           <span>Kendim belirleyeceğim</span>
         </label>
-        <label className={mode === 'alphabetical' ? 'option selected' : 'option'}>
+        <label className={mode === 'alphabetical' ? 'segment selected' : 'segment'}>
           <input type="radio" checked={mode === 'alphabetical'} onChange={() => setMode('alphabetical')} />
           <span>Alfabetik</span>
         </label>
