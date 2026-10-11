@@ -95,8 +95,8 @@ export function ProjectWorkspace({
 
   return (
     <section className="page workspace">
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
-        <button className="back-button" type="button" onClick={onBack} style={{ margin: 0 }}>
+      <div className="workspace-toolbar">
+        <button className="back-button" type="button" onClick={onBack}>
           ← Projelere dön
         </button>
 
@@ -116,8 +116,7 @@ export function ProjectWorkspace({
         ) : (
           <button
             type="button"
-            className="button"
-            style={{ fontSize: 12, padding: '4px 10px' }}
+            className="button button-compact"
             onClick={() => onNewProject?.(project?.id)}
           >
             ➕ Bu Projeye Alt Proje Aç
@@ -128,8 +127,7 @@ export function ProjectWorkspace({
         {project && project.kind !== 'shorts' ? (
           <button
             type="button"
-            className="button"
-            style={{ fontSize: 12, padding: '4px 10px' }}
+            className="button button-compact"
             disabled={shortsBusyId !== null}
             title="Bu projenin videosundan 9:16 Shorts kesitleri al"
             onClick={() => void createShorts(project.id)}
@@ -291,7 +289,13 @@ function WorkspaceContent({
             Kaldığım adıma dön ({workflow?.currentTitle})
           </button>
         ) : null}
-        <button className="button button-primary" type="button" disabled={!canGoNext} onClick={() => next && goTo(next)}>
+        {/* Adımın kendi eylemi birincil; "İleri" yalnızca adım bitince öne çıkar. */}
+        <button
+          className={canGoNext ? 'button button-primary wizard-next' : 'button wizard-next'}
+          type="button"
+          disabled={!canGoNext}
+          onClick={() => next && goTo(next)}
+        >
           İleri →
         </button>
       </div>

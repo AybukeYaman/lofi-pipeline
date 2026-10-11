@@ -1257,11 +1257,6 @@ span.project-thumb::after {
   border-bottom: 1px solid var(--border-subtle);
 }
 
-/* Müzik stilleri: oynatma sütunu yok — gövde, rozet, butonlar. */
-.library-list.style-list li {
-  grid-template-columns: minmax(0, 1fr) auto auto;
-}
-
 .library-list li:last-child {
   border-bottom: 0;
 }
@@ -1757,8 +1752,25 @@ span.project-thumb::after {
   justify-content: space-between;
 }
 
-.wizard-nav .button-primary {
+.wizard-nav .wizard-next {
   margin-left: auto;
+}
+
+.workspace-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workspace-toolbar .back-button {
+  margin: 0;
+}
+
+.button-compact {
+  padding: 4px 10px;
+  font-size: 12px;
 }
 
 .prompt-box {

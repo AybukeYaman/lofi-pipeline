@@ -144,6 +144,12 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
 
   const handleStartBuild = async () => {
     if (isStarting || buildJob?.state === 'running') return;
+    if (
+      project.output?.exists &&
+      !window.confirm('Bu projenin montajlanmış çıktısı zaten var. Yeniden montaj mevcut videonun üzerine yazar. Devam edilsin mi?')
+    ) {
+      return;
+    }
     setIsStarting(true);
     setBuildError(null);
 

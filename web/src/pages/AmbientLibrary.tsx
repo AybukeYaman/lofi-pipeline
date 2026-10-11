@@ -126,6 +126,7 @@ export function AmbientLibrary() {
   /** Ortak klasörden kaldırır — kalıcı silme değil, Geri Dönüşüm Kutusu'na. */
   const handleDelete = async (name: string) => {
     if (isSaving) return;
+    if (!window.confirm(`"${name}" silinsin mi? Ortak klasörden kalkar, Geri Dönüşüm Kutusu'na gider.`)) return;
     setIsSaving(true);
     setListError(null);
     try {
