@@ -15,6 +15,7 @@
 import { mkdir, rm, stat } from 'node:fs/promises';
 import { basename, extname, join, relative, resolve } from 'node:path';
 
+import { normalizeLabelPlan } from '../core/label-plan.js';
 import { probe } from '../core/probe.js';
 import {
   computeShortsCrop,
@@ -26,7 +27,7 @@ import {
   SHORTS_TARGET,
 } from '../core/shorts-plan.js';
 import { moveFileToTrash } from '../core/trash.js';
-import { writeTextFile } from '../core/workspace.js';
+import { createWorkspace, writeTextFile } from '../core/workspace.js';
 import { inspectProject, nextStep, projectWorkflow } from '../prep/project-status.js';
 import { DEFAULT_VIDEOS_DIR, validateVideoName } from '../prep/scaffold.js';
 import {
@@ -35,6 +36,7 @@ import {
   removeShortsClip,
   updateShortsClip,
 } from '../prep/shorts-file.js';
+import { prepareLabelOverlay } from '../steps/04a-label-overlay.js';
 import { exportShortsClip } from '../steps/08-shorts-export.js';
 import { ApiError, parseBody, resolveProjectDir } from './project-api.js';
 
@@ -383,13 +385,27 @@ export async function startShortsRender(id, clipId, {
   runningRender = key;
 
   // Bilinçli olarak beklenmiyor: istek hemen 202 ile dönüyor.
+  // Videoya yazılan metinler (project.json → labels). Pomodoro yazıları Shorts'ta
+  // anlamsız (oturum zamanı yok), yalnızca serbest metin yakılır.
+  const textLabels = normalizeLabelPlan(status.projectJson.data?.labels).labels
+    .filter((label) => label.kind === 'text');
+
   void (async () => {
+    let workspace = null;
     try {
+      let labelFilter = null;
+      if (textLabels.length > 0) {
+        workspace = await createWorkspace();
+        ({ filter: labelFilter } = await prepareLabelOverlay({
+          labels: textLabels, height: SHORTS_TARGET.height, workspace,
+        }));
+      }
       await exportFn({
         sourcePath: status.shorts.source.path,
         clip,
         outputPath: clip.outputPath,
         sourceInfo: measured,
+        labelFilter,
         onProgress: (seconds) => { job.progressSeconds = seconds; },
       });
       await markShortsClipRendered(status.projectPath, clipId).catch(() => null);
@@ -401,6 +417,7 @@ export async function startShortsRender(id, clipId, {
         finishedAt: new Date().toISOString(),
       });
     } finally {
+      await workspace?.cleanup().catch(() => null);
       runningRender = null;
     }
   })();

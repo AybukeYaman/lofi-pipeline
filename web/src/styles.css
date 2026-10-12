@@ -1511,7 +1511,7 @@ span.project-thumb::after {
   font-size: var(--text-sm);
 }
 
-/* Çekmece (Suno / albüm / ana proje): tam çerçeve yok, sol vurgu çizgisi. */
+/* Çekmece (albüm / ana proje): tam çerçeve yok, sol vurgu çizgisi. */
 .tool-box {
   display: grid;
   gap: var(--space-3);
@@ -2930,13 +2930,6 @@ span.project-thumb::after {
   background: #000;
 }
 
-.shorts-player-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
-}
-
 .shorts-range-panel {
   display: grid;
   gap: 12px;
@@ -3028,26 +3021,6 @@ span.project-thumb::after {
   height: 100%;
   object-fit: cover;
   opacity: 0.85;
-}
-
-/* İnce ayar şeridi — ±1 / ±0.1 / ±0.01 sn. */
-.shorts-nudge-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
-}
-
-.shorts-nudge-group {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-}
-
-.shorts-nudge {
-  padding: 2px 7px;
-  font-size: 11.5px;
-  font-variant-numeric: tabular-nums;
 }
 
 .shorts-track {
@@ -3165,9 +3138,13 @@ span.project-thumb::after {
 
 .shorts-crop-grid {
   display: grid;
-  grid-template-columns: minmax(280px, 1.4fr) minmax(170px, 0.6fr);
+  grid-template-columns: minmax(0, 420px) minmax(0, 240px);
   gap: 16px;
   align-items: start;
+}
+
+@media (max-width: 760px) {
+  .shorts-crop-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 .shorts-frame-stage {
@@ -3238,18 +3215,6 @@ span.project-thumb::after {
   flex: 1;
 }
 
-.shorts-frame-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.shorts-crop-preview {
-  display: grid;
-  gap: 6px;
-  justify-items: start;
-}
-
 /* 9:16 pencere: içindeki video büyütülüp kaydırılıyor, yalnızca kadraj görünür. */
 .shorts-preview {
   position: relative;
@@ -3273,8 +3238,9 @@ span.project-thumb::after {
   display: flex;
   align-items: center;
   gap: 12px;
-  flex-wrap: wrap;
-  margin: 4px 0 12px;
+  flex-direction: column;
+  align-items: stretch;
+  margin: 0;
   padding: 12px;
   border: 1px solid var(--border-current, #a89476);
   border-radius: 8px;
@@ -3291,17 +3257,29 @@ span.project-thumb::after {
 
 .shorts-clip-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 8px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
+@media (max-width: 1400px) {
+  .shorts-clip-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+
+@media (max-width: 1000px) {
+  .shorts-clip-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (max-width: 640px) {
+  .shorts-clip-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 .shorts-clip-card {
   display: grid;
-  gap: 8px;
-  padding: 10px;
+  gap: 6px;
+  padding: 6px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-surface);
@@ -3325,7 +3303,7 @@ span.project-thumb::after {
 
 .shorts-clip-body strong {
   overflow-wrap: anywhere;
-  font-size: 14px;
+  font-size: 12px;
 }
 
 .shorts-clip-body .muted {
@@ -3351,12 +3329,13 @@ span.project-thumb::after {
   flex: 1;
   text-align: center;
   text-decoration: none;
-  font-size: 12.5px;
+  font-size: 11px;
+  padding: 4px 6px;
+  min-width: 0;
 }
 
 @media (max-width: 900px) {
-  .shorts-editor-grid,
-  .shorts-crop-grid {
+  .shorts-editor-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -3527,3 +3506,88 @@ span.project-thumb::after {
   padding: 0 8px;
   font-size: 12px;
 }
+
+/* ==========================================================================
+   Video üstü yazı editörü (components/LabelEditor.tsx) — her şey önizlemede
+   ========================================================================== */
+
+.label-editor { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.label-toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.label-status { margin-left: auto; font-size: 12px; color: var(--text-muted); }
+.label-status.is-error { color: var(--danger, #c0392b); }
+
+.label-stage { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.label-frame {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  background: #1a1a1a;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+  touch-action: none;
+  user-select: none;
+}
+.label-frame:focus-visible { border-color: var(--border-focus); box-shadow: 0 0 0 2px var(--primary-subtle); }
+.label-frame.is-dragging { cursor: grabbing; }
+.label-frame > img,
+.label-frame > video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.label-frame-empty,
+.label-frame-hint { position: absolute; inset: 0; display: grid; place-items: center; color: #cfcfcf; font-size: 12px; text-align: center; padding: 8px; pointer-events: none; }
+
+.label-guide { position: absolute; background: rgba(255, 64, 160, 0.85); pointer-events: none; z-index: 1; }
+.label-guide.is-vertical { top: 0; bottom: 0; width: 1px; }
+.label-guide.is-horizontal { left: 0; right: 0; height: 1px; }
+
+.label-chip {
+  position: absolute;
+  white-space: nowrap;
+  line-height: 1.15;
+  padding: 0 0.15em;
+  cursor: grab;
+  font-weight: 500;
+  text-shadow: 0.05em 0.05em 0 rgba(0, 0, 0, 0.6);
+  outline: 1px dashed rgba(255, 255, 255, 0.35);
+  outline-offset: 2px;
+  touch-action: none;
+  z-index: 2;
+}
+.label-chip:hover { outline-color: rgba(255, 255, 255, 0.7); }
+.label-chip.is-selected { outline: 2px solid var(--primary); outline-offset: 2px; z-index: 3; }
+.label-chip.is-editing { cursor: text; }
+.label-chip-input {
+  font: inherit; color: inherit; background: rgba(0, 0, 0, 0.35); border: 0; outline: 0;
+  padding: 0; margin: 0; text-shadow: inherit; min-width: 3ch;
+}
+
+/* Seçilince yazının üstünde çıkan küçük çubuk: renk + değiştir + sil. Sabit boy (yazının puntosundan bağımsız). */
+.label-bar {
+  position: absolute; left: 0; bottom: calc(100% + 8px);
+  display: flex; gap: 5px; align-items: center;
+  padding: 4px 6px; border-radius: 8px;
+  background: var(--bg-surface); border: 1px solid var(--border);
+  box-shadow: var(--shadow); font-size: 12px; line-height: 1; font-weight: 400;
+  text-shadow: none; cursor: default; white-space: nowrap;
+}
+.label-bar.is-below { bottom: auto; top: calc(100% + 8px); }
+.label-bar.is-right { left: auto; right: 0; }
+.label-bar-button {
+  width: 24px; height: 24px; padding: 0; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--bg-surface-subtle); color: var(--text-main);
+}
+.label-bar-button.is-danger { color: var(--danger, #c0392b); }
+.label-color-dot { width: 20px; height: 20px; padding: 0; border-radius: 50%; border: 2px solid var(--border); cursor: pointer; }
+.label-color-dot.is-active { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-subtle); }
+
+/* Köşedeki boyutlandırma karesi. */
+.label-handle {
+  position: absolute; right: -9px; bottom: -9px; width: 12px; height: 12px;
+  background: var(--primary); border: 2px solid #fff; border-radius: 3px;
+  cursor: nwse-resize; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+
+.label-time { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+/* Shorts: 9:16 yazı önizlemesi tüm genişliği kaplamasın. */
+#shorts-yazilar .label-editor { max-width: 340px; }
+#shorts-yazilar .label-frame { max-width: 240px; }

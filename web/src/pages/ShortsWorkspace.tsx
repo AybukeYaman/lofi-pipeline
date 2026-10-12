@@ -8,10 +8,10 @@ import {
   updateShortsClip,
 } from '../api';
 import { EmptyState } from '../components/Feedback';
+import { LabelEditor } from '../components/LabelEditor';
 import { errorText, formatSize } from '../format';
 import { PageHeader } from '../components/PageHeader';
 import {
-  computeShortsCrop,
   DEFAULT_FRAME,
   formatTimecode,
   parseTimecode,
@@ -55,7 +55,6 @@ export function ShortsWorkspace({
   /** Düzenlenen kesit — "Bu Aralığı Al" yerine "Kesidi Güncelle" olur. */
   const [editingId, setEditingId] = useState<string | null>(null);
   /** Seçili aralığı oynatma: bitişte durdurmak için işaret. */
-  const stopAt = useRef<number | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const load = useCallback(async () => {
@@ -104,10 +103,6 @@ export function ShortsWorkspace({
   const overLimit = selectionDuration > limits.maxSeconds;
   const tooShort = selectionDuration < limits.minSeconds;
 
-  const crop = source?.width && source?.height
-    ? computeShortsCrop(source.width, source.height, frame)
-    : null;
-
   const seek = (seconds: number) => {
     const video = videoRef.current;
     if (!video) return;
@@ -115,23 +110,10 @@ export function ShortsWorkspace({
     setCurrentTime(video.currentTime);
   };
 
-  /** Seçili aralığı baştan oynatır ve bitişinde durur. */
-  const playSelection = () => {
-    const video = videoRef.current;
-    if (!video) return;
-    video.currentTime = range.start;
-    stopAt.current = range.end;
-    void video.play().catch(() => {});
-  };
-
   const handleTimeUpdate = () => {
     const video = videoRef.current;
     if (!video) return;
     setCurrentTime(video.currentTime);
-    if (stopAt.current !== null && video.currentTime >= stopAt.current) {
-      video.pause();
-      stopAt.current = null;
-    }
   };
 
   const applyState = (next: ShortsState, message: string | null = null) => {
@@ -235,9 +217,18 @@ export function ShortsWorkspace({
         actions={
           /* Ana projeye dönüş üstteki sekme şeridinden (ProjectTabs) yapılıyor,
              burada ikinci bir düğme olarak tekrarlanmıyor. */
-          <button className="button" type="button" disabled={busy} onClick={() => void load()}>
-            🔄 Yenile
-          </button>
+          <>
+            <button
+              className="button"
+              type="button"
+              onClick={() => document.getElementById('shorts-yazilar')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            >
+              ✎ Videoya yazı ekle
+            </button>
+            <button className="button" type="button" disabled={busy} onClick={() => void load()}>
+              🔄 Yenile
+            </button>
+          </>
         }
       />
 
@@ -275,33 +266,6 @@ export function ShortsWorkspace({
                   onTimeUpdate={handleTimeUpdate}
                   onLoadedMetadata={handleTimeUpdate}
                 />
-                <div className="shorts-player-actions">
-                  <button className="button" type="button" onClick={playSelection}>
-                    ▶ Seçimi oynat
-                  </button>
-                  <button
-                    className="button"
-                    type="button"
-                    title="Başlangıcı oynatma konumuna al"
-                    onClick={() => setRange((prev) => ({
-                      start: Math.min(currentTime, prev.end - limits.minSeconds),
-                      end: prev.end,
-                    }))}
-                  >
-                    ⇤ Başlangıç = {formatTimecode(currentTime)}
-                  </button>
-                  <button
-                    className="button"
-                    type="button"
-                    title="Bitişi oynatma konumuna al"
-                    onClick={() => setRange((prev) => ({
-                      start: prev.start,
-                      end: Math.max(currentTime, prev.start + limits.minSeconds),
-                    }))}
-                  >
-                    Bitiş = {formatTimecode(currentTime)} ⇥
-                  </button>
-                </div>
               </div>
 
               <div className="shorts-range-panel">
@@ -362,45 +326,27 @@ export function ShortsWorkspace({
                 onChange={setFrame}
                 previewTime={range.start}
               />
-              {crop ? (
-                <div className="shorts-crop-preview">
-                  <span className="eyebrow">9:16 ÖNİZLEME</span>
-                  <ShortsPreview
-                    videoUrl={source.url}
-                    sourceWidth={source.width}
-                    sourceHeight={source.height}
-                    crop={crop}
-                    time={range.start}
-                    range={range}
-                    controls
-                  />
-                  <p className="field-hint">
-                    Yalnızca kadrajın içi görünür — render böyle çıkar.
-                  </p>
-                </div>
+            <div className="shorts-take-bar">
+              <button
+                className="button button-primary shorts-take"
+                type="button"
+                disabled={busy || tooShort}
+                onClick={() => void handleTake()}
+              >
+                {editingId ? `✓ Kesidi Güncelle (${editingId})` : '✂ Bu Aralığı Al'}
+              </button>
+              <span className="muted">
+                {formatTimecode(range.start)} → {formatTimecode(range.end)} · {formatTimecode(selectionDuration)}
+                {tooShort ? ` · en az ${limits.minSeconds} sn seç` : ''}
+              </span>
+              {editingId ? (
+                <button className="button" type="button" onClick={() => { setEditingId(null); setNotice(null); }}>
+                  Düzenlemeyi bırak
+                </button>
               ) : null}
             </div>
+            </div>
           </section>
-
-          <div className="shorts-take-bar">
-            <button
-              className="button button-primary shorts-take"
-              type="button"
-              disabled={busy || tooShort}
-              onClick={() => void handleTake()}
-            >
-              {editingId ? `✓ Kesidi Güncelle (${editingId})` : '✂ Bu Aralığı Al'}
-            </button>
-            <span className="muted">
-              {formatTimecode(range.start)} → {formatTimecode(range.end)} · {formatTimecode(selectionDuration)}
-              {tooShort ? ` · en az ${limits.minSeconds} sn seç` : ''}
-            </span>
-            {editingId ? (
-              <button className="button" type="button" onClick={() => { setEditingId(null); setNotice(null); }}>
-                Düzenlemeyi bırak
-              </button>
-            ) : null}
-          </div>
 
           <section className="panel shorts-editor">
             <h2>3. Kesitler ({shorts.clips.length})</h2>
@@ -441,13 +387,6 @@ export function ShortsWorkspace({
 
                       <div className="shorts-clip-body">
                         <strong>{clip.title}</strong>
-                        <span className="muted">
-                          {clip.startLabel} → {clip.endLabel} · {clip.durationLabel}
-                        </span>
-                        <span className="muted">
-                          zoom {clip.frame.zoom.toFixed(2)}× · kadraj {Math.round(clip.frame.x * 100)}/
-                          {Math.round(clip.frame.y * 100)}
-                        </span>
                         <div className="shorts-clip-badges">
                           {isRendering ? (
                             <span className="status-badge status-processing">
@@ -504,6 +443,15 @@ export function ShortsWorkspace({
             <p className="field-hint">
               Çıktı: <code>{shorts.outputDir}</code>
             </p>
+          </section>
+
+          <section className="panel shorts-editor" id="shorts-yazilar">
+            <h2>4. Videoya yazı ekle (isteğe bağlı)</h2>
+            <p className="field-hint">
+              Eklediğin yazılar bu projedeki bütün kesitlerin üstünde görünür. Yazıyı değiştirdiysen
+              kesitleri yeniden Render et.
+            </p>
+            <LabelEditor projectId={id} />
           </section>
         </>
       )}

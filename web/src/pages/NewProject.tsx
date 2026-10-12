@@ -1,23 +1,24 @@
 import { useEffect, useState, type FormEvent } from 'react';
 
+import { POMODORO_PRESETS } from '../../../core/pomodoro-plan.js';
 import { validateVideoName } from '../../../core/project-name.js';
 import { createProject, fetchProjects, ApiError } from '../api';
 import { PageHeader } from '../components/PageHeader';
+import { PomodoroSetup, type PomodoroChoice } from '../components/PomodoroSetup';
 import { showError, showSuccess } from '../toast';
-import type { LoadState, ProjectSummary, VideoSource } from '../types';
+import type { LoadState, ProjectSummary } from '../types';
 
-type FormErrors = Partial<Record<'name' | 'form', string>>;
+type FormErrors = Partial<Record<'name' | 'mode' | 'form', string>>;
 
-/**
- * Görsel kaynağı burada kalır (workspace'te de var) çünkü yalnızca kuruluş
- * anında seçilirse doğru kırpma varsayılanı yazılır: prep/scaffold.js tek resim
- * için cropBottom 0, klip için 150 verir. Sonradan kaynağı değiştirmek
- * (prep/project-file.js) kırpmayı bilerek korur, yani 0'a dönmez.
- */
-const VIDEO_SOURCE_OPTIONS: Array<{ id: VideoSource; name: string; description: string }> = [
-  { id: 'clip', name: 'Döngü videosu (.mp4)', description: 'Watermark payı için alttan 150 px kırpma ile başlar.' },
-  { id: 'image', name: 'Tek resim', description: 'Tek görsel video boyunca ekranda kalır; kırpma 0 ile başlar.' },
-];
+/** "Bu video nasıl olacak?" — sihirbazın geri kalanı bu cevaba göre uyarlanır. */
+type VideoMode = 'ambiance' | 'pomodoro';
+
+/** Pomodoro seçilince ilk düğmeler: 50/10 ve 2 saat (2 tur), sesler açık. */
+const DEFAULT_POMODORO: PomodoroChoice = { workMinutes: 50, breakMinutes: 10, rounds: 2, sounds: true };
+
+// Görsel kaynağı (tek resim / döngü videosu) burada sorulmaz: tek yeri
+// workspace'in 2. adımı (VideoStage). Proje varsayılan `clip` ile kurulur;
+// kırpma o adımda "kaydet" denince açıkça yazılır.
 
 const PROJECT_DRAFT_KEY = 'lofi_new_project_draft';
 
@@ -37,9 +38,11 @@ export function NewProject({
 
   const [name, setName] = useState('');
   const [concept, setConcept] = useState('');
+  // Bilerek başlangıç değeri yok: tür her projede AÇIKÇA seçilir.
+  const [mode, setMode] = useState<VideoMode | null>(null);
+  const [pomodoro, setPomodoro] = useState<PomodoroChoice>(DEFAULT_POMODORO);
   const [parentId, setParentId] = useState<string>(presetParentId);
   const [isEditingParent, setIsEditingParent] = useState(!presetParentId);
-  const [videoSource, setVideoSource] = useState<VideoSource>('clip');
   const [errors, setErrors] = useState<FormErrors>({});
   const [existingNames, setExistingNames] = useState<string[]>([]);
   const [namesState, setNamesState] = useState<LoadState>('loading');
@@ -57,11 +60,12 @@ export function NewProject({
       if (!draft) return;
       if (draft.name) setName(draft.name);
       if (draft.concept) setConcept(draft.concept);
+      if (draft.mode === 'ambiance' || draft.mode === 'pomodoro') setMode(draft.mode);
+      if (draft.pomodoro) setPomodoro({ ...DEFAULT_POMODORO, ...draft.pomodoro });
       if (draft.parentId && !presetParentId) {
         setParentId(draft.parentId);
         setIsEditingParent(true);
       }
-      if (draft.videoSource === 'clip' || draft.videoSource === 'image') setVideoSource(draft.videoSource);
       setRestoredDraftTime(draft.savedAt || 'Önceki oturum');
     } catch {}
   }, []);
@@ -105,8 +109,9 @@ export function NewProject({
           JSON.stringify({
             name,
             concept,
+            mode,
+            pomodoro,
             parentId,
-            videoSource,
             savedAt: new Date().toLocaleTimeString(),
           }),
         );
@@ -121,16 +126,18 @@ export function NewProject({
     setRestoredDraftTime(null);
     setName('');
     setConcept('');
+    setMode(null);
+    setPomodoro(DEFAULT_POMODORO);
     setParentId(presetParentId);
     setIsEditingParent(!presetParentId);
-    setVideoSource('clip');
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (isSubmitting) return;
 
-    const nextErrors = validate({ name, existingNames });
+    const nextErrors: FormErrors = validate({ name, existingNames });
+    if (mode === null) nextErrors.mode = 'Önce videonun türünü seç: Ambiance ya da Pomodoro.';
     setErrors(nextErrors);
     setServerProblems([]);
 
@@ -140,9 +147,19 @@ export function NewProject({
     try {
       const response = await createProject({
         name: name.trim(),
-        videoSource,
         concept: concept.trim() || undefined,
         parentId: parentId || undefined,
+        // Ambiance'ta hiç gönderilmez: proje bugünkü gibi kurulur.
+        ...(mode === 'pomodoro'
+          ? {
+            pomodoro: {
+              workMinutes: pomodoro.workMinutes,
+              breakMinutes: pomodoro.breakMinutes,
+              rounds: pomodoro.rounds,
+              ...(pomodoro.sounds ? {} : { countdownBeep: false, workStartSound: false, breakStartSound: false }),
+            },
+          }
+          : {}),
       });
 
       try {
@@ -184,9 +201,6 @@ export function NewProject({
 
   const parentName =
     availableProjects.find((project) => project.id === parentId)?.name || parentId;
-
-  const selectedVideoSource =
-    VIDEO_SOURCE_OPTIONS.find((option) => option.id === videoSource) ?? VIDEO_SOURCE_OPTIONS[0];
 
   return (
     <section className="page narrow">
@@ -236,6 +250,44 @@ export function NewProject({
             ) : null}
           </div>
         ) : null}
+
+        <fieldset className="field" style={{ border: 0, padding: 0, margin: 0 }}>
+          <legend>Bu video nasıl olacak?</legend>
+          <div className="choice-cards" role="radiogroup" aria-label="Video türü">
+            {([
+              ['ambiance', 'Ambiance', 'Sakin lofi: müzik ve arka plan sesi. Video, müziğin süresi kadar olur.'],
+              ['pomodoro', 'Pomodoro', 'Çalışma ve mola oturumları: ekranda STUDY/BREAK yazısı, sayaç ve bip sesleri.'],
+            ] as const).map(([value, title, text]) => (
+              <label key={value} className={mode === value ? 'choice-card selected' : 'choice-card'}>
+                <span className="choice-card-head">
+                  <strong>{title}</strong>
+                  <input
+                    type="radio"
+                    name="video-mode"
+                    checked={mode === value}
+                    disabled={isSubmitting}
+                    onChange={() => edit(setMode)(value)}
+                  />
+                </span>
+                <span className="muted">{text}</span>
+              </label>
+            ))}
+          </div>
+          {errors.mode ? <p className="field-error" role="alert">{errors.mode}</p> : null}
+          {mode === 'pomodoro' ? (
+            <div style={{ marginTop: 8 }}>
+              <PomodoroSetup
+                presets={[...POMODORO_PRESETS]}
+                value={pomodoro}
+                disabled={isSubmitting}
+                onChange={edit(setPomodoro)}
+              />
+              <p className="field-hint" style={{ marginTop: 8 }}>
+                Çalışma ve mola için ayrı görüntü sonraki adımda (Video) seçilir. Bunları sonradan da değiştirebilirsin.
+              </p>
+            </div>
+          ) : null}
+        </fieldset>
 
         <div className="field">
           <label htmlFor="project-name">Proje adı</label>
@@ -307,27 +359,8 @@ export function NewProject({
             disabled={isSubmitting}
           />
           <p className="field-hint">
-            Opsiyonel · parça başlıkları ve Suno prompt'ları buradan üretilir
+            Opsiyonel · albümün kısa tanımı
           </p>
-        </div>
-
-        {/* Dropdown: iki seçenek iki büyük kart yerine tek satır. Seçilenin
-            kırpma etkisi altta tek satır olarak görünür. */}
-        <div className="field">
-          <label htmlFor="project-video-source">Görsel kaynağı</label>
-          <select
-            id="project-video-source"
-            value={videoSource}
-            onChange={(event) => edit(setVideoSource)(event.target.value as VideoSource)}
-            disabled={isSubmitting}
-          >
-            {VIDEO_SOURCE_OPTIONS.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.name}
-              </option>
-            ))}
-          </select>
-          <p className="field-hint">{selectedVideoSource.description}</p>
         </div>
 
         <div className="form-actions" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>

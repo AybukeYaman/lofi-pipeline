@@ -133,6 +133,16 @@ export type ProjectReadiness = {
     watermark: boolean | null;
     defaultCropBottom: number;
   };
+  /** Pomodoro açık mı ve hangi düzen — süre/müzik doğrulaması ayrı uçta (GET .../pomodoro). */
+  pomodoro?: {
+    enabled: boolean;
+    preset?: string | null;
+    workMinutes?: number;
+    breakMinutes?: number;
+    rounds?: number;
+    totalMinutes?: number;
+    breakClip?: string | null;
+  };
   build: {
     ready: boolean;
     missing: string[];
@@ -165,6 +175,9 @@ export type ProjectDetail = {
   videoSourceCandidates?: Record<VideoSource, { count: number; dir: string }>;
   clips?: string[];
   clip?: ProjectFileEvidence;
+  /** Pomodoro mola görüntüsü için seçilebilecek dosyalar (proje klasörüne göreli, iki klasörden). */
+  breakCandidates?: string[];
+  breakClip?: { value: string; exists: boolean };
   audioDir?: string;
   audioCount?: number;
   output?: ProjectFileEvidence;
@@ -256,6 +269,8 @@ export type PomodoroSettings = {
   breakStartSound: boolean;
   /** Fazla müziğin kırpılması kullanıcı tarafından onaylandı mı. */
   trimExcess: boolean;
+  /** Mola görüntüsü (proje klasörüne göreli yol); null → mola da çalışma görüntüsünü kullanır. */
+  breakClip: string | null;
   cue: {
     volumeDb: number;
     beepFile: string | null;
@@ -263,6 +278,38 @@ export type PomodoroSettings = {
     breakStartFile: string | null;
   };
 };
+
+/** Video üstü etiket türü — core/label-plan.js `LABEL_KINDS` aynası. */
+export type LabelKind = 'text' | 'pomodoro-status' | 'pomodoro-countdown';
+
+/** Bir etiketin GÖRSEL durumu. `x`/`y` 0–1, etiketin MERKEZİ; `size` kare yüksekliğinin oranı. */
+export type VideoLabel = {
+  id: string;
+  kind: LabelKind;
+  /** Yalnızca `text` türünde anlamlı; sistem etiketlerinin metni Pomodoro'dan gelir. */
+  text: string;
+  x: number;
+  y: number;
+  size: number;
+  color: string;
+  /** Yalnızca `text` türünde: ikisi birlikte dolu ya da null (tüm video). */
+  start: number | null;
+  end: number | null;
+};
+
+export type ProjectLabels = {
+  labels: VideoLabel[];
+  problems: string[];
+  warnings: string[];
+  /** Çıktı kadrajının oranı, ör. "16:9". */
+  aspect: string;
+  /** Önizleme arka planı: sunucunun verdiği adres (klip, görsel ya da Shorts kaynağı). */
+  preview: { url: string; kind: 'image' | 'video' } | null;
+  /** Yalnızca OKUNUR — oturum zamanlarını gösterir, Pomodoro ayarı burada değişmez. */
+  pomodoro: { enabled: boolean; totalSeconds: number; sessions: PomodoroSession[] };
+};
+
+export type UpdateLabelsPayload = { labels: Array<Partial<VideoLabel> & { id: string }> };
 
 /** Bir WORK ya da BREAK oturumu. */
 export type PomodoroSession = {
@@ -344,6 +391,8 @@ export type UpdatePomodoroPayload = {
   workStartSound?: boolean;
   breakStartSound?: boolean;
   trimExcess?: boolean;
+  /** Proje klasörüne göreli yol; boş metin mola görüntüsünü kaldırır. */
+  breakClip?: string;
 };
 
 /** PUT /api/projects/:id/ambient gövdesi. */
@@ -377,6 +426,15 @@ export type CreateProjectPayload = {
   parentId?: string;
   selectedTracks?: string[];
   aspect?: string;
+  /** Yalnızca "Pomodoro" seçildiyse; Ambiance'ta hiç gönderilmez. */
+  pomodoro?: {
+    workMinutes: number;
+    breakMinutes: number;
+    rounds: number;
+    countdownBeep?: boolean;
+    workStartSound?: boolean;
+    breakStartSound?: boolean;
+  };
 };
 
 export type CreateProjectResponse = {
@@ -437,27 +495,6 @@ export type MusicLibraryResponse = {
   musicDir: string;
   albums: MusicLibraryAlbum[];
   projects: Array<{ id: string; name: string; step?: ProjectStep }>;
-};
-
-export type SunoIngestPayload = {
-  url: string;
-  targetType: 'album' | 'project';
-  targetId?: string;
-  newAlbumName?: string;
-};
-
-export type SunoIngestResponse = {
-  ok: boolean;
-  targetType: 'album' | 'project';
-  albumId?: string;
-  projectId?: string;
-  downloadedCount: number;
-  tracks: Array<{
-    index: number;
-    title: string;
-    file: string;
-    duration?: number;
-  }>;
 };
 
 

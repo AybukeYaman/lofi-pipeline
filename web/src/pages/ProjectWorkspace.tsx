@@ -5,6 +5,7 @@ import { EmptyState } from '../components/Feedback';
 import { PageHeader } from '../components/PageHeader';
 import { ProjectTabs } from '../components/ProjectTabs';
 import { StatusBadge } from '../components/StatusBadge';
+import { pomodoroSummary } from '../pomodoroSetup';
 import type { LoadState, ProjectDetail, ProjectSummary } from '../types';
 import { isStepReachable, nextStepId, previousStep, stepInfo, viewWorkflow, type ViewStepId } from '../workflow';
 import { ShortsWorkspace } from './ShortsWorkspace';
@@ -213,6 +214,7 @@ function WorkspaceContent({
     }
   };
 
+  const pomodoroInfo = project.readiness?.pomodoro?.enabled ? project.readiness.pomodoro : null;
   const active = stepInfo(workflow, activeStep);
   const Stage = stageComponents[activeStep];
   const previous = previousStep(activeStep);
@@ -268,7 +270,23 @@ function WorkspaceContent({
         </nav>
 
         <div className="workspace-main">
-          <StepGuide stepId={activeStep} />
+          {pomodoroInfo ? (
+            <p className="pomodoro-chip field-hint" role="note">
+              <strong>Pomodoro</strong> · {pomodoroSummary(
+                pomodoroInfo.workMinutes ?? 50, pomodoroInfo.breakMinutes ?? 10, pomodoroInfo.rounds ?? 1,
+              )}
+              {activeStep !== 'music' ? (
+                <>
+                  {' '}·{' '}
+                  <button type="button" className="button button-compact" onClick={() => goTo('music')}>
+                    düzeni değiştir
+                  </button>
+                </>
+              ) : null}
+            </p>
+          ) : null}
+
+          <StepGuide stepId={activeStep} pomodoro={pomodoroInfo !== null} />
 
           <Stage
             key={activeStep}

@@ -285,105 +285,9 @@ Ardından panel kabulü: `npm start` → ok tuşlarıyla yeni proje → devam et
 
 **Not (2026-09-16, kullanıcı):** ink TUI yerine web/localhost tabanlı bir panel (ACE-Step UI'nin React+Vite yapısına benzer) daha iyi olabilirdi düşüncesi belirtildi. Aşama 10 yeniden açılırsa bu alternatif de değerlendirilecek — henüz karar verilmedi, yalnızca not düşüldü.
 
-## 14. Aşama 11 — Suno Entegrasyonu (Prompt Motoru + Ingest + Üretim) · 11a–11d ✅ · 11e ✅ · 11f ✅
+## 14. Aşama 11 — Suno Entegrasyonu · ⏹ KALDIRILDI (2026-10-11)
 
-**Karar (2026-09-15):** Aşama 10 (ink TUI) beklemede kaldığı sürece üretim akışı `npm start` (enquirer, Aşama 9) üzerinden devam ediyor. Bu doğrultuda, üretim öncesi manuel adımların (albüm konsepti, Suno prompt yazımı, şarkı indirme) otomasyonu **Aşama 10'un önüne alınarak Aşama 11 olarak** planlandı — TUI görsel cila, bu üretim darboğazını çözmüyor.
-
-Araştırma dokümanı: `docs/research/suno-integration.md` (tam mekanizma analizi, karar tabloları, risk notları orada; burada yalnızca bu projeye uygulanan tasarım kararları var).
-
-### 14.1 Kapsam
-
-Üç alt-aşamaya bölünür, her biri bağımsız commit edilebilir:
-
-| Alt-aşama | İş | Bağımlılık |
-|---|---|---|
-| 11a | `prep/style-cleaner.js`, `prep/style-exclude.js` — saf fonksiyonlar, Suno Style/Exclude string temizliği. (`prep/style-builder.js` 2026-09-16'da silindi: işlevini 11f `album-prompt.js` devraldı, bkz. bölüm 15) | Yok |
-| 11b | `prep/album-planner.js` — Gemini (mevcut `prep/gemini.js` client'ı, `x-goog-api-key`) ile konsept → track listesi → atmosfer arkı; çıktı 11a'dan geçirilir | 11a, `prep/gemini.js` |
-| 11c | `prep/suno-ingest.js` — public playlist/song linkinden clip listesi + metadata + mp3 indirme | Yok (bağımsız yazılabilir) |
-
-### 14.2 Mimari kararları (mevcut projeyle tutarlılık)
-
-- Katman aynı: iş mantığı `prep/` altında, saf ve test edilebilir (Aşama 7 kuralı — bölüm 9, not 4 ile aynı).
-- Hata sınıfları: `StyleBuildError`, `AlbumPlanError`, `SunoIngestError` — mevcut `StyleError`/`AddStyleError`/`GeminiError` deseniyle aynı satırda (bölüm 10, not 3).
-- `prep/suno-ingest.js` HTTP için `node:https`/`fetch` kullanır, ek paket eklenmez (bölüm 10, not 1 — yeni bağımlılık önce konuşulur).
-- Panel entegrasyonu: yeni menü adımları `ui/actions.js`'e, enquirer soruları `ui/prompt.js` adaptörü üzerinden — Aşama 9 mimarisine ek dosya değil, mevcut dosyalara fonksiyon eklenir (bölüm 12.3).
-- `.env`'e yeni anahtar **eklenmez** — Suno ingest login gerektirmiyor (yalnızca public link), Gemini zaten `GEMINI_API_KEY` kullanıyor.
-
-### 14.3 Ingest tasarımı (11c detay)
-
-- Kabul edilen linkler: `suno.com/song/…`, `suno.com/s/…`, `suno.com/playlist/…`
-- Akış: link → public sayfa fetch → embedded JSON'dan clip ID + metadata (title, style, süre) çıkar → `https://cdn1.suno.ai/{clipId}.mp3` indir → proje klasörüne (`audio/`) mevcut isimlendirme kuralına göre yaz
-- Rate limit: ardışık indirmeler arası 1-2 sn bekleme
-- Kısmi hata: bir track indirilemezse diğerleri devam eder, özet raporda "atlandı (sebep)" olarak listelenir — Aşama 9'daki toplu montaj hata toleransıyla aynı desen (bölüm 12.3, "bir projenin hatası diğerlerini durdurmaz")
-- **Ön koşul:** albüm Suno'da public/paylaşılmış olmalı. Değilse bu aşama atlanır, mevcut manuel indirme yolu kullanılır — private şarkı ingest'i (oturum tabanlı kayıt) kapsam dışı bırakıldı, gerek görülürse ayrı doküman edilir.
-
-### 14.4 Test stratejisi
-
-- 11a: saf fonksiyon testleri, mevcut `test/unit/` desenine uyar
-- 11b: `prep/gemini.js` testlerindeki gibi sahte `fetch`, network bağımsız
-- 11c: sahte HTTP response'larla test edilir; gerçek Suno erişimi yalnızca elle kabul testinde (bölüm 11.5 / 12.6 desenindeki gibi kullanıcı terminalinde doğrulanır, çünkü asistan gerçek Suno hesabına erişemez)
-
-### 14.5 Kapsam dışı (bilinçli olarak ertelendi)
-
-- Suno üretimini API ile tetikleme (resmi API yok, üçüncü parti ücretli/riskli — araştırma dokümanı Bölüm 6)
-- Private şarkı ingest / oturum tabanlı kayıt (araştırma dokümanı Bölüm 2.2 / 14.3 ön koşul notu)
-- Websocket — gerek yok, HTTP GET yeterli (araştırma dokümanı Bölüm 7)
-
-### 14.6 Aşama 11f — Albüm üretim zinciri · ✅ TAMAM (commit `70733cf`, `57a2eda`)
-
-**Karar (2026-09-16):** Albüm planı → parça parça Suno stil dizesi → üretim (11e provider arayüzü) → indirme tek zincirde. Albüm tutarlılığı (ortak "DNA") ile parçalar arası akış (enerji yayı) ayrı, deterministik katmanlarda. **LLM (Gemini) yalnızca parça başlığı ve 2-5 kelimelik atmosfer üretir; ham Suno prompt'u asla yazmaz.**
-
-| Parça | Dosya | İş |
-|---|---|---|
-| 11f-1 | `prep/album-arc.js` | Deterministik enerji yayı. `ARC_PHASES`: opening 0–15% (0.45) → descent 15–40% (0.35) → **trough 40–60% (0.20)** → ascent 60–85% (0.45) → resolution 85–100% (0.60); yarı açık `[rangeStart, rangeEnd)`, son faz 1.00'i kapsar. `phaseFor(index, trackCount)` (p = index/(n-1); tek parça → opening), `energyModifiers(energy)` → `{ rhythm, tempo, density }` (eşikler 0.25 / 0.40 / 0.55), `describeArcPhases()` → LLM prompt'larına gömülen tek yay tarifi |
-| 11f-2 | `prep/album-prompt.js` | **DNA / varyant ayrımı.** `buildAlbumDna(style)`: stilin `music` bloğundan tür → prodüksiyon → çekirdek enstrümanlar → estetik; her parçada birebir aynı. `buildTrackStyle({ dna, atmosphere, energyMods })`: `"[Instrumental] " + dna + atmosfer + rhythm + tempo + density + ". No vocals, no lyrics. [No Vocals]"` — DNA önde çünkü Suno erken token'lara daha çok ağırlık veriyor. `buildNegativeTags(style)`: `music.exclude`'dan. `SUNO_LIMITS` + `assertSunoLimits`: style 1000 / negative_tags 200 / title 80 (V4.5+/V5/V5.5), aşılırsa `AlbumPromptError` ve **istek gönderilmez** |
-| 11f-3 | `prep/album-chain.js` | Orkestratör. `planAlbum({ concept, styleName, trackCount })` → `{ albumTitle, tracks: [{ index, title, atmosphere, phase, styleString, negativeTags }] }`; stil uygun değilse Gemini hiç çağrılmaz. `generateAlbum(tracks, options)`: sırayla `generateSong → waitForSong → downloadAudio`; dosya adı `03-Quiet-Moments.mp3` (`suno-ingest` `sanitizeFilename` kuralı); aynı adlı dosya varsa atlanır (kredi harcanmaz). Parametreler `GENERATION_PARAMS`: styleWeight 0.75, weirdness 0.3, instrumental true; `modelVersion` varsayılan `V5_5`. `formatAlbumSummary` → başarılı / başarısız / atlandı |
-
-**Instrumental üçlü kilit:** `[Instrumental]` stil dizesinin başında + `No vocals, no lyrics. [No Vocals]` sonunda + API'de `instrumental: true`. Tek başına hiçbiri güvenilir değil.
-
-**Yay kararı — ortada zirve değil DİP:** 11b'deki ilk Gemini prompt'u "intro, build, peak, wind-down, outro" diyordu (ortada zirve). Bu yanlış: kullanıcının yayınlanmış albümünde en sessiz nokta tam ortada — **Somnambule, 26:52** (`test/baseline.json` tracklist'i; `test/regression.js` ambient kesitleri de bu noktayı ölçer). Albüm gece→sabah yayı: orta ölçüde açılır, çöker, ortada en durgun an, sonra daha sıcak/parlak bir çözülmeye yükselir. Bu yüzden:
-- `album-planner.js` yayı kendisi tarif etmez; `describeArcPhases()` ve `phaseFor` kullanır, parça sayısı tutmazsa hata verir (yay kaymasın).
-- `music-planner.js` sahneleri `phase` alanıyla fazlara bağlandı, seçim `phaseFor` ile; trough sahneleri sadeleşti, resolution sahneleri parlaklaştı; fallback prompt'lara `Energy: <tempo>, <density>` eklendi.
-
-**Manifest ve varyantlar:** Suno üretim başına genelde 2 varyant döndürür. İlki indirilir; diğerlerinin URL'i proje klasöründeki `album-manifest.json`'a (`audio/`'nun bir üstü) `alternateUrls` olarak yazılır — kullanıcı beğenmezse elle değiştirir. Manifest her parçadan sonra yeniden yazılır; süreç yarıda kesilse de o ana kadarki kayıt kalır.
-
-**Sözleşme genişlemesi (geriye uyumlu):** `SunoGenerateProvider` request'ine `negativeTags`, `styleWeight`, `weirdness`; RawStatus'a `audioUrls[]` eklendi. `checkStatus`/`waitForSong` artık `audioUrls` da döner (`audioUrl` = ilk varyant).
-
-**Stil şeması:** `styles/<ad>.json` görsel stil dosyası; müzik kimliği opsiyonel `"music": { genre, production, instruments, aesthetic, exclude }` bloğunda (`styles.js` `ROOT_KEYS`'e eklendi, uyarı vermez). **Mevcut üç stilde bu blok yok** — albüm üretimi için kullanıcı doldurmalı; yoksa `AlbumPromptError`.
-
-**Paylaşılan kod:** `suno-ingest.js`'ten `downloadAudio` ve `audioExtension` çıkarıldı; ingest ve zincir aynı indirme kodunu kullanır.
-
-**Kapsam dışı / sonraki:** panel adımı (`ui/actions.js`) henüz yok.
-
-### 14.7 Aşama 11e — apiframe Suno provider · ✅ YAZILDI (canlı kabul testi kullanıcıda)
-
-`prep/providers/apiframe-suno.js` — `SunoGenerateProvider` sözleşmesinin somut hali; sözleşme değişmedi. `createApiframeSunoProvider({ fetchFn, baseUrl, timeoutMs, log })` + varsayılan `apiframeProvider`.
-
-Şema dokümandan doğrulandı (2026-09-16: `apiframe.ai/docs/music/suno.mdx`, `/docs/music.mdx`, `/docs/jobs/get.mdx`):
-
-| | Değer |
-|---|---|
-| Taban adres | `https://api.apiframe.ai/v2` |
-| Üretim | `POST /music/generate` → `202 { jobId, status: "QUEUED" }`; gövde `{ prompt, model: "suno", sunoParams: { custom_mode, instrumental, model_version, title, style, negative_tags, style_weight, weirdness_constraint } }` |
-| Durum | `GET /jobs/{id}` → `{ status: QUEUED\|PROCESSING\|COMPLETED\|FAILED, result: { tracks: [{ id, audioUrl, imageUrl, title, tags, duration }] }, error }` |
-| Auth | **`X-API-Key: <key>`** (dokümandaki başlık; ilk brifteki "Bearer" dokümanla uyuşmadı) |
-| model_version | V4, V4_5, V4_5ALL, V4_5PLUS, V5, V5_5 — varsayılan V5_5, geçersiz değer istek atılmadan reddedilir |
-| Maliyet | üretim başına 11 kredi (doküman) |
-
-**Kararlar:**
-- İş kimliği dokümanda `jobId` (brifteki `task_id` değil). Ses adresi `result.tracks[].audioUrl`. Şema değişirse diye yedek alanlar (`id`/`job_id`/`task_id`, `audio_url`/`url`/`streamAudioUrl`) denenir; yedek alan kullanılırsa ya da COMPLETED işte adres bulunamazsa `log` ile bildirilir.
-- `custom_mode`: style veya title verildiyse `true`. Enstrümantal custom modda `prompt` (zincirde `"[Instrumental] <başlık>"`) Suno tarafından kullanılmaz.
-- Hatalar: 401 (key) / 402 (kredi) / 400 kalıcı; 408, 425, 429, 5xx ve ağ hataları `retryable` (Retry-After okunur). `generateSong` hiçbir zaman tekrar denemez — çift kredi harcanmasın.
-- apiframe `negative_tags` için 500 karakter kabul ediyor; yerel sınır bilinçli olarak 200 (Suno arayüz sınırı, `SUNO_LIMITS`).
-- `afk_…` key biçimi `suno-generate-errors.js` maskeleme kalıplarına eklendi.
-
-**Canlı kabul:** `scripts/album-try.js` (elle; `npm test`'e dahil değil):
-1. `lofi/lofi/.env` → `SUNO_GENERATE_API_KEY=afk_...` (`GEMINI_API_KEY` zaten orada)
-2. Seçilen stile `"music"` bloğu (bölüm 14.6)
-3. `node scripts/album-try.js --style <stil> --concept "<konsept>" --plan-only` → yalnızca Gemini, kredi yok
-4. `node scripts/album-try.js --style <stil> --concept "<konsept>" --tracks 1` → 1 üretim (11 kredi), çıktı `videolar/_album-deneme/audio/01-<Başlık>.mp3` + `videolar/_album-deneme/album-manifest.json`
-
----
+Kullanıcı kararı: müzik artık Suno dışında üretiliyor. Prompt motoru/ingest/üretim sağlayıcıları ve ilgili testler silindi (ayrıntı: kök `CLAUDE.md` "Suno entegrasyonu KALDIRILDI" notu). Müzik `audio/` klasörüne yükleme ya da albüm kütüphanesiyle gelir.
 
 ## 15. Paralel Oturum Toparlaması ve Açık İşler (2026-09-16)
 
@@ -412,24 +316,9 @@ Tekrar denenecekse bilinmesi gerekenler:
 
 ---
 
-## 17. Suno tarayıcı botu (Playwright) · ✅ YAZILDI (mock testli, canlı kabul kullanıcıda)
+## 17. Suno tarayıcı botu · ⏹ KALDIRILDI (2026-10-11)
 
-`prep/providers/suno-browser-bot.js` — `SunoGenerateProvider` sözleşmesinin ikinci somut hali; sözleşme ve `suno-generate.js` değişmedi. `createSunoBrowserBot({ launchContext, profileDir, cookie, notify, log, sleepFn, now, …timeouts })` → `{ name, generateSong, checkStatus, login, close }`.
-
-- **Oturum (2026-09-16'dan beri): kalıcı Playwright profili** — `chromium.launchPersistentContext(.auth/suno-profile)` (`SUNO_PROFILE_DIR` ile değişir, göreliyse repo köküne göre; `.gitignore`: `.auth/`). İlk kez `node scripts/suno-login.js` ile tarayıcıda elle giriş yapılır; oturum profilde kalır. Neden: Clerk'in asıl oturum cookie'si `__client` (`auth.suno.com`, HttpOnly) suno.com isteklerinin `Cookie:` başlığında görünmez → `SUNO_COOKIE` tek başına oturum açmıyordu (sayfa `/create`'te "Giriş yap" gösteriyor ya da `/`'e yönleniyordu).
-- **Oturum kontrolü:** URL yetmez. Mod sekmeleri (form) / görünür "Log in"/"Giriş yap" düğmesi / captcha beklenir (`locator.or`). Oturum yoksa → `SUNO_COOKIE` verilmişse yedek olarak eklenip sayfa yenilenir → yine yoksa `notify(LOGIN_MESSAGE)` ve 10 dk elle giriş beklenir (giriş sonrası suno.com'da başka sayfadaysa `/create`'e dönülür; Google/Clerk sayfalarına dokunulmaz) → olmazsa 401 + `suno-login` ipucu.
-- **SUNO_COOKIE:** artık yalnızca yedek, zorunlu değil (`resolveSunoCookie({ required: false })`). Cookie yoksa `suno-generate`'in zorunlu `apiKey`'i `PROFILE_API_KEY` yer tutucusuyla karşılanır (bot bunu cookie saymaz). Cookie varsa hâlâ `apiKey` olarak geçer ve hata mesajlarından silinir.
-- **Aynı profil iki süreçle aynı anda açılamaz** (Chromium profil kilidi): `suno-login.js` ile bot aynı anda çalıştırılmaz. Açık olan normal Chrome'u etkilemez (ayrı Chromium, ayrı klasör).
-- **Akış:** görünür Chromium (`LAUNCH_OPTIONS.headless=false`) → `suno.com/create` → Custom Mode → Style / (More Options →) Exclude styles / Title / Instrumental → Create → Create'ten önce ve sonraki `/song/<uuid>` bağlantılarının farkı = yeni clip'ler. `jobId = "uuid1,uuid2"`.
-- **Custom Mode = Gelişmiş sekmesi** (`[role=tablist]` içinde iki `role=tab`, durum `aria-selected`). Metin/sıra kullanılmaz: style alanı 5 sn içinde görünmüyorsa (Basit modda yok) seçili olmayan sekmeye tıklanır. `setToggle` artık `aria-selected`'ı da okur.
-- **checkStatus:** aynı sayfada her clip'in satır metni okunur; `m:ss` süre → done, hata metni → failed, aksi pending. Ses adresi `https://cdn1.suno.ai/<uuid>.mp3`. İndirme zincirde `suno-ingest.downloadAudio` ile.
-- **hCaptcha:** otomatik çözülmez. Görünürse `notify("captcha bekleniyor, elle çöz …")`, kaybolana kadar beklenir (10 dk). Captcha süresi clip bekleme süresinden düşülmez.
-- **Seçiciler (`SELECTORS`):** `[canlı]` işaretliler (form sekmeleri, giriş düğmesi, style `[data-testid="create-form-styles-wrapper"] textarea`, Create `aria-label="Şarkı oluştur"`) 2026-09-16'da Türkçe arayüzde DOM'dan doğrulandı; `:visible` şart (Suno gizli kopyalar render ediyor). Hesap arayüzü Türkçe; İngilizce `aria-label="Create song"` doğrulanmadı.
-  - **Doğrulanmamış / bilinen açıklar:** güncel arayüzde **Exclude styles alanı ve Instrumental düğmesi yok** ("Daha fazla seçenek": vokal cinsiyeti, süre, Maks mod, tuhaflık, stil etkisi, çeşitlilik, kişiselleştir). Instrumental = sözleri boş bırakmak (sayfadaki ipucu); bot instrumental'de söz doldurmadığı için sonuç aynı, yalnızca "bulunamadı" logu düşer. `--negative` verilirse Exclude alanı bulunamadığı için hata verir. Başlık (`placeholder` tr: "Şarkı adı (isteğe bağlı)") ve söz editörü (`[data-lexical-editor][role=textbox]`, textarea değil) seçicileri eşleşmez → atlanır (log).
-- **Bağımlılık:** `playwright` 1.63.0 (sabit). Tarayıcı ikilisi ayrıca: `npx playwright install chromium`.
-- **Canlı deneme:** önce bir kez `node scripts/suno-login.js` (yalnızca giriş; üretim yok), sonra `node scripts/suno-bot-try.js --style "<style>" --title "<başlık>"` (elle; kredi harcar; `npm test`'e dahil değil).
-- **Testler:** `test/unit/suno-browser-bot.test.js` + `test/helpers/fake-playwright.js` (sahte Playwright, sanal saat; ağ/tarayıcı yok).
-- **Not:** `FORCE_COLOR=3` olan kabukta `regression-compare.test.js` "kırpma filtresi" testi renk kodları yüzünden düşüyor (bu işten bağımsız, önceden var); `FORCE_COLOR=0` ile 481/481.
+Bot, `scripts/suno-*.js`, kalıcı tarayıcı profili ve `playwright` bağımlılığı kaldırıldı.
 
 ## 18. Web UI backend (`server/`) · ✅ (2026-09-16)
 

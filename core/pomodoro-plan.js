@@ -24,6 +24,7 @@
  *     "workStartSound": true,
  *     "breakStartSound": true,
  *     "trimExcess": false,      // fazla müzik kullanıcı onayıyla kırpılır
+ *     "breakClip": null,        // mola görüntüsü (resim ya da döngü videosu); boşsa mola da çalışma görüntüsünü kullanır
  *     "cue": { "volumeDb": -10, "beepFile": null, "workStartFile": null, "breakStartFile": null }
  *   }
  */
@@ -52,6 +53,12 @@ export const POMODORO_DEFAULTS = {
   breakStartSound: true,
   /** Fazla müzik sorulmadan kırpılmaz; kullanıcı onayı bu bayrağı açar. */
   trimExcess: false,
+  /**
+   * Mola görüntüsü (resim ya da döngü videosu, proje klasörüne göreli yol).
+   * null → mola da çalışma görüntüsünü (`clip`) kullanır. Çalışma görüntüsü
+   * için ayrı alan yok: o `project.json` → `clip`.
+   */
+  breakClip: null,
   cue: {
     /** İşaret seslerinin müziğe göre seviyesi (LU). Müziği bastırmaz, duyulur. */
     volumeDb: -10,
@@ -92,6 +99,7 @@ export const MATCH_TOLERANCE_SECONDS = 1;
  * @property {boolean} workStartSound
  * @property {boolean} breakStartSound
  * @property {boolean} trimExcess
+ * @property {string|null} breakClip Mola görüntüsünün yolu, yoksa null (mola = çalışma görüntüsü).
  * @property {{ volumeDb: number, beepFile: string|null, workStartFile: string|null, breakStartFile: string|null }} cue
  */
 
@@ -151,6 +159,7 @@ export function normalizePomodoroSelection(raw, field = 'pomodoro') {
     workStartSound: readBoolean(raw.workStartSound, `${field}.workStartSound`, POMODORO_DEFAULTS.workStartSound, problems),
     breakStartSound: readBoolean(raw.breakStartSound, `${field}.breakStartSound`, POMODORO_DEFAULTS.breakStartSound, problems),
     trimExcess: readBoolean(raw.trimExcess, `${field}.trimExcess`, POMODORO_DEFAULTS.trimExcess, problems),
+    breakClip: readBreakClip(raw.breakClip, `${field}.breakClip`, problems),
     cue: readCue(raw.cue, `${field}.cue`, problems),
   };
 
@@ -526,7 +535,7 @@ export function serializePomodoroPlan(plan) {
   };
 
   const defaults = POMODORO_DEFAULTS;
-  for (const key of ['countdownSeconds', 'countdownBeep', 'workStartSound', 'breakStartSound', 'trimExcess']) {
+  for (const key of ['countdownSeconds', 'countdownBeep', 'workStartSound', 'breakStartSound', 'trimExcess', 'breakClip']) {
     if (plan[key] !== defaults[key]) out[key] = plan[key];
   }
 
@@ -577,6 +586,15 @@ function readBoolean(value, key, fallback, problems) {
   if (typeof value !== 'boolean') {
     problems.push(`${key}: true ya da false olmalı (verilen: ${JSON.stringify(value)})`);
     return fallback;
+  }
+  return value;
+}
+
+function readBreakClip(value, key, problems) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string' || value.trim() === '') {
+    problems.push(`${key}: boş olmayan bir dosya yolu olmalı (mola da aynı görüntüyü kullansın diye alanı hiç yazma)`);
+    return null;
   }
   return value;
 }

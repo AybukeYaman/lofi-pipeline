@@ -1,11 +1,19 @@
 /** 5. adım — Montaj: otomatik işlemler, ilerleme ve başlatma. */
 import { useEffect, useState } from 'react';
-import { fetchBuildStatus, fetchProject, openProjectFolder, startBuild, ApiError } from '../../api';
-import { AmbientPicker } from '../../components/AmbientPicker';
-import { PomodoroPicker } from '../../components/PomodoroPicker';
-import { paths } from '../../router';
+import {
+  fetchBuildStatus,
+  fetchProject,
+  fetchProjectAmbient,
+  fetchProjectLabels,
+  fetchProjectPomodoro,
+  openProjectFolder,
+  startBuild,
+  ApiError,
+} from '../../api';
+import { LabelEditor } from '../../components/LabelEditor';
 import { StatusBadge } from '../../components/StatusBadge';
-import type { BuildJob, ProjectPomodoro } from '../../types';
+import { pomodoroSummary } from '../../pomodoroSetup';
+import type { BuildJob, ProjectAmbient, ProjectPomodoro } from '../../types';
 import { StagePanel, type StageProps } from './StagePanel';
 
 type BuildOpState = 'pending' | 'running' | 'done' | 'failed';
@@ -69,11 +77,31 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
 
   // Pomodoro doğrulaması montajın ön koşulu: sunucu da reddediyor (409), ama
   // düğmeyi burada kapatmak kullanıcıyı bir hata turuna sokmadan uyarıyor.
-  // Kutu yüklenene kadar (null) montaj engellenmez — Pomodoro kapalı
-  // projelerde ekstra bir bekleme olmasın.
+  // Yüklenene kadar (null) montaj engellenmez — Pomodoro kapalı projelerde
+  // ekstra bir bekleme olmasın. Ayar burada DÜZENLENMEZ (3. adımda); burada
+  // yalnızca okunur, adıma her girişte tazelenir.
   const [pomodoro, setPomodoro] = useState<ProjectPomodoro | null>(null);
+  const [ambient, setAmbient] = useState<ProjectAmbient | null>(null);
   const pomodoroBlocks = pomodoro?.enabled === true && !pomodoro.validation.ok;
   const canBuild = isBuildReady && !pomodoroBlocks;
+
+  // Etiket sayısı özet satırı için; editör yalnızca istenince açılır.
+  const [labelCount, setLabelCount] = useState<number | null>(null);
+  const [labelsOpen, setLabelsOpen] = useState(false);
+
+  useEffect(() => {
+    let isActive = true;
+    fetchProjectLabels(project.id)
+      .then((loaded) => { if (isActive) setLabelCount(loaded.labels.length); })
+      .catch(() => {});
+    fetchProjectPomodoro(project.id)
+      .then((loaded) => { if (isActive) setPomodoro(loaded); })
+      .catch(() => {});
+    fetchProjectAmbient(project.id)
+      .then((loaded) => { if (isActive) setAmbient(loaded); })
+      .catch(() => {});
+    return () => { isActive = false; };
+  }, [project.id]);
 
   const [buildJob, setBuildJob] = useState<BuildJob | null>(null);
   const [isStarting, setIsStarting] = useState(false);
@@ -228,26 +256,68 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
         </p>
       ) : null}
 
-      {/* Arka plan sesi burada da duruyor: "Ambiance eklemeyi unuttum" asıl
-          montaj anında fark ediliyor ve o an 5. adıma dönmek akla gelmiyor.
-          Aynı bileşen, aynı uç — iki yerden de aynı seçimi yazar. */}
-      {ambientMissing ? (
-        <p className="field-hint">
-          ⚠ Ambiance seçilmemiş — aşağıdan ekleyebilirsin
-        </p>
+      {/* Ambiance ve Pomodoro burada yalnızca ÖZET: "unuttum" asıl montaj anında
+          fark ediliyor, o yüzden durum görünür; ama düzenleme tek yerde,
+          3. adımda ("Değiştir"). Pomodoro uymuyorsa Başlat zaten kapalı. */}
+      <dl className="readiness-list">
+        <div>
+          <dt>Arka plan sesi (Ambiance)</dt>
+          <dd>
+            {ambientMissing
+              ? '⚠ Seçilmemiş'
+              : ambient && ambient.selected.length > 0
+                ? ambient.selected.map((track) => track.name).join(', ')
+                : 'Seçili'}
+          </dd>
+        </div>
+        <div>
+          <dt>Pomodoro</dt>
+          <dd>
+            {pomodoro === null
+              ? '…'
+              : !pomodoro.enabled || !pomodoro.settings
+                ? 'Kapalı'
+                : `${pomodoroSummary(pomodoro.settings.workMinutes, pomodoro.settings.breakMinutes, pomodoro.settings.rounds)} · ` +
+                  (pomodoro.validation.ok ? '✓ Müzik süreye uyuyor' : '⚠ Müzik uymuyor')}
+          </dd>
+        </div>
+      </dl>
+      {pomodoroBlocks
+        ? pomodoro?.validation.problems.map((problem) => (
+            <p className="field-hint field-error" key={problem}>{problem}</p>
+          ))
+        : null}
+      <button
+        type="button"
+        className="button button-compact"
+        style={{ justifySelf: 'start' }}
+        onClick={() => onGoToStep?.('music')}
+      >
+        Müzik adımında değiştir
+      </button>
+
+      {/* Video üstü yazılar: yerleşim burada, ama STUDY/BREAK ve geri sayımın
+          zamanı Pomodoro'dan gelir — editör onu yalnızca okur. */}
+      <dl className="readiness-list">
+        <div>
+          <dt>Video üstü yazılar</dt>
+          <dd>
+            {labelCount === null ? '…' : labelCount === 0 ? 'Yok' : `${labelCount} yazı`}
+          </dd>
+        </div>
+      </dl>
+      <button
+        type="button"
+        className="button button-compact"
+        style={{ justifySelf: 'start' }}
+        aria-expanded={labelsOpen}
+        onClick={() => setLabelsOpen((open) => !open)}
+      >
+        {labelsOpen ? 'Kapat' : 'Yazıları yerleştir'}
+      </button>
+      {labelsOpen ? (
+        <LabelEditor projectId={project.id} onSaved={setLabelCount} />
       ) : null}
-      {/* Pomodoro doğrulaması montajın ÖN KOŞULU: fazla/eksik müzik burada,
-          Başlat'a basılmadan görünür. Aynı bileşen, aynı uç — iki yerden de
-          aynı ayarı yazar. Kapalı başlıyor: "başlatabilir miyim" sorusunun
-          cevabı (düzen özeti + ✓/⚠ durumu) kutuyu açmadan başlıkta zaten
-          duruyor, açık başlasa dropdown Başlat düğmesinin üstüne binerdi. */}
-      <div className="picker-group">
-        <PomodoroPicker projectId={project.id} onChange={setPomodoro} />
-        <AmbientPicker
-          projectId={project.id}
-          onManage={() => { window.location.href = paths.ambient; }}
-        />
-      </div>
 
       {buildError ? (
         <p className="field-hint field-error" role="alert">

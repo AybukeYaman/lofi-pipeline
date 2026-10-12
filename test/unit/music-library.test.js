@@ -12,7 +12,6 @@ import {
   deleteAlbumTrack,
   getMusicAsset,
   getMusicLibrary,
-  ingestSuno,
   openMusicFolder,
   uploadAlbumTrack,
 } from '../../server/music-library-api.js';
@@ -65,7 +64,7 @@ async function startServer(api) {
   };
 }
 
-describe('music-library API & Suno ingest', () => {
+describe('music-library API', () => {
   test('createAlbum and getMusicLibrary list albums and statistics', async () => {
     const fixture = await createLibraryFixture();
     try {
@@ -123,52 +122,6 @@ describe('music-library API & Suno ingest', () => {
     }
   });
 
-  test('ingestSuno downloads tracks to an album or a project', async () => {
-    const fixture = await createLibraryFixture();
-    const mockIngestFn = async ({ outputDir }) => {
-      await writeFile(join(outputDir, '01-Sun-Dance.mp3'), Buffer.from('mp3 content'));
-      return {
-        tracks: [
-          { index: 1, title: 'Sun Dance', localPath: join(outputDir, '01-Sun-Dance.mp3'), duration: 180 },
-        ],
-      };
-    };
-
-    try {
-      // 1. Ingest into New Album
-      const resAlbum = await ingestSuno({
-        url: 'https://suno.com/playlist/test-id',
-        targetType: 'album',
-        newAlbumName: 'Summer Suno',
-      }, {
-        musicDir: fixture.musicDir,
-        videosDir: fixture.videosDir,
-        ingestFn: mockIngestFn,
-      });
-
-      assert.equal(resAlbum.ok, true);
-      assert.equal(resAlbum.albumId, 'Summer-Suno');
-      assert.equal(resAlbum.downloadedCount, 1);
-
-      // 2. Ingest directly into a project
-      const resProject = await ingestSuno({
-        url: 'https://suno.com/song/test-song',
-        targetType: 'project',
-        targetId: fixture.projectName,
-      }, {
-        musicDir: fixture.musicDir,
-        videosDir: fixture.videosDir,
-        ingestFn: mockIngestFn,
-      });
-
-      assert.equal(resProject.ok, true);
-      assert.equal(resProject.projectId, fixture.projectName);
-      assert.equal(resProject.downloadedCount, 1);
-    } finally {
-      await fixture.cleanup();
-    }
-  });
-
   test('assignAlbumToProject copies tracks and updates project.json', async () => {
     const fixture = await createLibraryFixture();
     try {
@@ -205,14 +158,6 @@ describe('music-library API & Suno ingest', () => {
       deleteAlbumTrack: (albumId, filename) => deleteAlbumTrack(albumId, filename, { musicDir: fixture.musicDir }),
       uploadAlbumTrack: (albumId, body) => uploadAlbumTrack(albumId, body, { musicDir: fixture.musicDir }),
       openMusicFolder: (body) => openMusicFolder(body, { musicDir: fixture.musicDir, openFn: () => true }),
-      ingestSuno: (body) => ingestSuno(body, {
-        musicDir: fixture.musicDir,
-        videosDir: fixture.videosDir,
-        ingestFn: async ({ outputDir }) => {
-          await writeFile(join(outputDir, '01-Song.mp3'), Buffer.from('audio'));
-          return { tracks: [{ index: 1, title: 'Song', localPath: join(outputDir, '01-Song.mp3') }] };
-        },
-      }),
       assignAlbumToProject: (body) => assignAlbumToProject(body, { musicDir: fixture.musicDir, videosDir: fixture.videosDir }),
       getMusicAsset: (albumId, filename) => getMusicAsset(albumId, filename, { musicDir: fixture.musicDir }),
     });
@@ -234,20 +179,6 @@ describe('music-library API & Suno ingest', () => {
       const lib = await getRes.json();
       assert.equal(lib.albums.length, 1);
       assert.equal(lib.albums[0].id, 'Future-Funk');
-
-      // Ingest Suno URL
-      const sunoRes = await fetch(`${server.url}/api/music-library/ingest-suno`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          url: 'https://suno.com/playlist/dummy',
-          targetType: 'album',
-          targetId: 'Future-Funk',
-        }),
-      });
-      assert.equal(sunoRes.status, 200);
-      const sunoData = await sunoRes.json();
-      assert.equal(sunoData.downloadedCount, 1);
     } finally {
       await server.close();
       await fixture.cleanup();

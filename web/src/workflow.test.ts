@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ProjectWorkflow, WorkflowStepInfo } from './types';
-import { isStepReachable, nextStepId, previousStep, STEP_ORDER, viewWorkflow } from './workflow';
+import { isStepReachable, nextStepId, previousStep, STEP_GUIDE, STEP_ORDER, stepGuide, viewWorkflow } from './workflow';
 
 type Status = WorkflowStepInfo['status'];
 
@@ -79,5 +79,23 @@ describe('adım gezintisi (5 adım)', () => {
     const view = viewWorkflow(serverWorkflow(['done', 'done', 'done', 'current', 'pending', 'pending'], 'order'))!;
     expect(isStepReachable(view, 'music')).toBe(true);
     expect(isStepReachable(view, 'build')).toBe(false);
+  });
+});
+
+describe('stepGuide', () => {
+  it('Ambiance projesinde bugünkü rehber metni aynen gelir', () => {
+    for (const id of STEP_ORDER) expect(stepGuide(id, false)).toBe(STEP_GUIDE[id]);
+  });
+
+  it('Pomodoro projesinde proje/video/müzik/montaj adımlarının metni değişir', () => {
+    for (const id of ['project', 'video', 'music', 'build'] as const) {
+      expect(stepGuide(id, true)).not.toBe(STEP_GUIDE[id]);
+    }
+    expect(stepGuide('video', true).lines.join(' ')).toMatch(/Mola/);
+    expect(stepGuide('build', true).who).toBe('system');
+  });
+
+  it('metni değişmeyen adım (yayın) Pomodoro için de aynı kalır', () => {
+    expect(stepGuide('publish', true)).toBe(STEP_GUIDE.publish);
   });
 });

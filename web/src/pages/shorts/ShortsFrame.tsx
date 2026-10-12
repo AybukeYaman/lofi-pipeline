@@ -5,7 +5,6 @@ import {
   computeShortsCrop,
   MAX_ZOOM,
   MIN_ZOOM,
-  SHORTS_TARGET,
   type Crop,
   type Frame,
 } from '../../shortsFrame';
@@ -118,23 +117,6 @@ export function ShortsFramePicker({
             />
             <span className="muted">{frame.zoom.toFixed(2)}×</span>
           </label>
-          <div className="shorts-frame-buttons">
-            <button className="button" type="button" onClick={() => onChange({ ...frame, x: 0 })}>Sol</button>
-            <button className="button" type="button" onClick={() => onChange({ ...frame, x: 0.5 })}>Orta</button>
-            <button className="button" type="button" onClick={() => onChange({ ...frame, x: 1 })}>Sağ</button>
-            <button
-              className="button"
-              type="button"
-              onClick={() => onChange({ zoom: 1, x: 0.5, y: 0.5 })}
-              title="Kadrajı sıfırla"
-            >
-              Sıfırla
-            </button>
-          </div>
-          <p className="field-hint">
-            Kırpılan alan: {crop.width}×{crop.height} px (kaynak {sourceWidth}×{sourceHeight}) →{' '}
-            {SHORTS_TARGET.width}×{SHORTS_TARGET.height}
-          </p>
         </div>
       </div>
     </div>

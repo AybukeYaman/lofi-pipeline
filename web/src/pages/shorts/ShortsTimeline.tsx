@@ -141,8 +141,7 @@ export function ShortsTimeline({
   }, [drag, end, minSeconds, onChange, safeDuration, secondsAt, start]);
 
   /**
-   * Uçları `delta` saniye oynatır — hem ok tuşları hem ince ayar düğmeleri
-   * buradan geçiyor, sınır kuralı tek yerde kalsın.
+   * Uçları `delta` saniye oynatır (klavyedeki ok tuşları); sınır kuralı tek yerde.
    */
   const shift = useCallback(
     (mode: 'start' | 'end', delta: number) => {
@@ -247,27 +246,6 @@ export function ShortsTimeline({
           {sourceUrl && !filmstrip.done && !filmstrip.failed ? ' · şerit hazırlanıyor...' : ''}
         </span>
         <span className="shorts-range-pill">{formatTimecode(end)}</span>
-      </div>
-
-      {/* Milisaniye seviyesinde ince ayar — sürüklemenin piksel hassasiyeti
-          uzun videoda yetmiyor (1 px = saniyeler). */}
-      <div className="shorts-nudge-bar">
-        {(['start', 'end'] as const).map((mode) => (
-          <div className="shorts-nudge-group" key={mode}>
-            <span className="muted">{mode === 'start' ? 'Başlangıç' : 'Bitiş'}</span>
-            {[-1, -0.1, -0.01, 0.01, 0.1, 1].map((delta) => (
-              <button
-                key={delta}
-                className="button shorts-nudge"
-                type="button"
-                onClick={() => shift(mode, delta)}
-                title={`${mode === 'start' ? 'Başlangıcı' : 'Bitişi'} ${delta > 0 ? '+' : ''}${delta} sn oynat`}
-              >
-                {delta > 0 ? `+${delta}` : delta}
-              </button>
-            ))}
-          </div>
-        ))}
       </div>
     </div>
   );

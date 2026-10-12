@@ -323,6 +323,29 @@ describe('validatePomodoro', () => {
   });
 });
 
+describe('breakClip (mola görüntüsü)', () => {
+  it('varsayılan null: mola da çalışma görüntüsünü kullanır', () => {
+    assert.equal(planOf({}).breakClip, null);
+    assert.equal(POMODORO_DEFAULTS.breakClip, null);
+  });
+
+  it('verilen yol plana geçer', () => {
+    assert.equal(planOf({ breakClip: 'resimler/mola.png' }).breakClip, 'resimler/mola.png');
+  });
+
+  it('boş ya da metin olmayan değer anlaşılır hata verir', () => {
+    for (const bad of ['', '  ', 5, {}]) {
+      const { problems } = normalizePomodoroSelection({ enabled: true, breakClip: bad });
+      assert.equal(problems.length, 1, JSON.stringify(bad));
+      assert.match(problems[0], /pomodoro\.breakClip/);
+    }
+  });
+
+  it('Pomodoro kapalıyken doğrulanmaz', () => {
+    assert.deepEqual(normalizePomodoroSelection({ enabled: false, breakClip: 5 }).problems, []);
+  });
+});
+
 describe('formatClock', () => {
   it('dakikayı saate çevirmez', () => {
     assert.equal(formatClock(240 * 60), '240:00');
@@ -350,6 +373,14 @@ describe('serializePomodoroPlan', () => {
 
   it('plan yoksa anahtar silinir', () => {
     assert.equal(serializePomodoroPlan(null), undefined);
+  });
+
+  it('mola görüntüsü yazılır, yoksa hiç yazılmaz', () => {
+    assert.equal('breakClip' in serializePomodoroPlan(planOf({ preset: '50/10' })), false);
+    assert.equal(
+      serializePomodoroPlan(planOf({ preset: '50/10', breakClip: 'videolar/mola.mp4' })).breakClip,
+      'videolar/mola.mp4',
+    );
   });
 
   it('yazılan şekil geri okunduğunda aynı planı verir', () => {

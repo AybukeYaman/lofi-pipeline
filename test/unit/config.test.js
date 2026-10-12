@@ -53,6 +53,11 @@ describe('project.json', () => {
     assert.deepEqual(c.warnings, []);
   });
 
+  test('labels bilinen kök anahtar: uyarı üretmez (etiket konumları project.json\'da durur)', async () => {
+    const c = await loadProject(await write('labels', { labels: [{ id: 'a', text: 'Merhaba', x: 0.5, y: 0.9 }] }));
+    assert.deepEqual(c.warnings, []);
+  });
+
   test('crossfadeSeconds konfigden okunur', async () => {
     const c = await loadProject(await write('set', { video: { crossfadeSeconds: 1.5 } }));
     assert.equal(c.video.crossfadeSeconds, 1.5);

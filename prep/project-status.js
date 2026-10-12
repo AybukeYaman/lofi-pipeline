@@ -10,7 +10,7 @@
  */
 
 import { readdir, stat } from 'node:fs/promises';
-import { basename, isAbsolute, join, resolve } from 'node:path';
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { CONFIG_DEFAULTS } from '../core/config.js';
 import { AUDIO_EXTENSIONS, isImagePath, listFiles, matchOrder } from '../core/files.js';
@@ -52,6 +52,14 @@ export async function inspectProject(dir) {
   const clipCandidates = await filesOrEmpty(join(dir, 'videolar'), ['.mp4']);
   const clips = videoSource === 'image' ? imageCandidates : clipCandidates;
 
+  // Pomodoro mola görüntüsü: çalışma görüntüsünden bağımsız, İKİ klasörden de
+  // seçilebilir (resim ya da döngü videosu) — tür uzantıdan türer. Yollar proje
+  // klasörüne göreli ("videolar/mola.mp4"), project.json'daki `breakClip` ile aynı biçim.
+  const breakCandidates = [...clipCandidates, ...imageCandidates]
+    .map((path) => relative(dir, path).split(sep).join('/'));
+  const breakClipValue = typeof data.pomodoro?.breakClip === 'string' ? data.pomodoro.breakClip.trim() : '';
+  const breakClipPath = breakClipValue ? at(breakClipValue) : null;
+
   // Proje türü: 'shorts' alt projesi kendi ekranını ve adımlarını kullanır
   // (kaynak videoyu KOPYALAMAZ, ana projedeki dosyaya yol tutar); 'video'
   // bugünkü montaj projesidir. Bilinmeyen değer 'video' sayılır — eski
@@ -85,6 +93,13 @@ export async function inspectProject(dir) {
       image: { count: imageCandidates.length, dir: join(dir, 'resimler') },
     },
     clip: { value: clipValue, path: clipPath, exists: clipExists },
+    /** Pomodoro mola görüntüsünün seçilebilecek dosyaları (proje klasörüne göreli). */
+    breakCandidates,
+    /** project.json → pomodoro.breakClip; yoksa value boş (mola = çalışma görüntüsü). */
+    breakClip: {
+      value: breakClipValue,
+      exists: breakClipPath ? await isFile(breakClipPath) : false,
+    },
     // Proje listesindeki küçük resim — kullanıcı seçmez: videoda görünen
     // görsel, yoksa resimler\ altındaki ilk görsel.
     thumbnail: (clipExists && isImagePath(clipPath) ? clipPath : null)
@@ -149,8 +164,8 @@ export function nextStep(s, { skipped = new Set() } = {}) {
   const musicCompleted = isMusicCompleted(s);
 
   if (!musicCompleted) {
-    return step('audio', 'manual', 'Müzik (Suno)',
-      `Suno parçalarını şu klasöre koy: ${s.audioDir}\n` +
+    return step('audio', 'manual', 'Müzik',
+      `Müzik parçalarını şu klasöre koy: ${s.audioDir}\n` +
       'Sıra için project.json\'a "order" eklenebilir; yoksa alfabetik sıralanır.');
   }
 
@@ -443,19 +458,36 @@ export async function listProjects(videosDir) {
 
 // ---------------------------------------------------------------- yardımcılar
 
+/** Yarım yazılmış dosyayı tekrar okuma: deneme sayısı ve aralık (ms). */
+const READ_ATTEMPTS = 4;
+const READ_RETRY_MS = 25;
+
+/**
+ * project.json'u okur. Dosya o anda yazılıyorsa (writeFile önce boşaltır, sonra
+ * doldurur) okuyan yarım/boş içerik görüp JSON hatası alabilir — ör. Shorts render
+ * bitişinde `project.json` güncellenirken arayüzün 1,5 sn'lik yoklaması. Bu yüzden
+ * JSON hatasında birkaç kez kısa aralıkla yeniden okunur; gerçekten bozuk dosya
+ * yine hata verir (yalnızca ~75 ms gecikmeyle).
+ */
 async function readProjectJson(path) {
-  try {
-    const data = await readJsonFile(path);
-    if (data === null || typeof data !== 'object' || Array.isArray(data)) {
-      return { ok: false, data: null, error: 'kök bir nesne olmalı' };
+  let last = null;
+  for (let attempt = 0; attempt < READ_ATTEMPTS; attempt++) {
+    try {
+      const data = await readJsonFile(path);
+      if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+        return { ok: false, data: null, error: 'kök bir nesne olmalı' };
+      }
+      return { ok: true, data, error: null };
+    } catch (cause) {
+      last = cause;
+      if (!(cause instanceof SyntaxError)) break;
+      await new Promise((resolve) => setTimeout(resolve, READ_RETRY_MS));
     }
-    return { ok: true, data, error: null };
-  } catch (cause) {
-    const error = cause.code === 'ENOENT'
-      ? 'dosya yok'
-      : cause instanceof SyntaxError ? `JSON ayrıştırılamadı: ${cause.message}` : `okunamadı: ${cause.code ?? cause.message}`;
-    return { ok: false, data: null, error };
   }
+  const error = last.code === 'ENOENT'
+    ? 'dosya yok'
+    : last instanceof SyntaxError ? `JSON ayrıştırılamadı: ${last.message}` : `okunamadı: ${last.code ?? last.message}`;
+  return { ok: false, data: null, error };
 }
 
 function nonEmpty(value) {

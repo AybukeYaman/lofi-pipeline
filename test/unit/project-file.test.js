@@ -10,7 +10,7 @@ import { after, before, describe, test } from 'node:test';
 import { loadProject } from '../../core/config.js';
 import {
   DEFAULT_CROP_BOTTOM, ProjectFileError, cropForWatermark, recordAudioAdded, setProjectClip, setProjectCropBottom,
-  setVideoSource, videoSourceForClip,
+  setProjectPomodoro, setVideoSource, videoSourceForClip,
 } from '../../prep/project-file.js';
 import { tempDir } from '../helpers/fixtures.js';
 
@@ -277,5 +277,73 @@ describe('recordAudioAdded', () => {
     assert.deepEqual(json.workflow, { order: 'manual', audioAdded: ['a.mp3', 'c.mp3', 'b.mp3'] });
     assert.equal(json.clip, '');
     assert.deepEqual(await recordAudioAdded(projectPath, []), []);
+  });
+});
+
+describe('setProjectPomodoro — sistem etiketleri', () => {
+  let root;
+  let n = 0;
+
+  const makeProject = async (extra = {}) => {
+    const dir = root.path(`q${n++}`);
+    await mkdir(dir, { recursive: true });
+    const projectPath = join(dir, 'project.json');
+    await writeFile(projectPath, JSON.stringify({ clip: '', audioDir: './audio', ...extra }));
+    return projectPath;
+  };
+  const read = async (projectPath) => JSON.parse(await readFile(projectPath, 'utf8'));
+
+  before(async () => { root = await tempDir('project-file-pomodoro-labels'); });
+  after(() => root?.cleanup());
+
+  test('Pomodoro AÇILINCA çalışma/mola yazısı ve sayaç kendiliğinden eklenir', async () => {
+    const projectPath = await makeProject();
+    const result = await setProjectPomodoro(projectPath, { enabled: true, preset: '50/10', rounds: 2 });
+
+    assert.deepEqual((await read(projectPath)).labels.map((l) => l.kind), ['pomodoro-status', 'pomodoro-countdown']);
+    assert.ok(result.warnings.some((w) => w.includes('yazısı ve kalan süre sayacı')));
+  });
+
+  test('ayar sonradan değişince etiketler yeniden eklenmez (silinen etiket geri gelmez)', async () => {
+    const projectPath = await makeProject();
+    await setProjectPomodoro(projectPath, { enabled: true, rounds: 2 });
+    const json = await read(projectPath);
+    json.labels = json.labels.filter((l) => l.kind !== 'pomodoro-status');
+    await writeFile(projectPath, JSON.stringify(json));
+
+    const again = await setProjectPomodoro(projectPath, { enabled: true, rounds: 3 });
+    assert.deepEqual((await read(projectPath)).labels.map((l) => l.kind), ['pomodoro-countdown']);
+    assert.equal(again.warnings.some((w) => w.includes('sayacı eklendi')), false);
+  });
+
+  test('var olan etiketler ve yerleri korunur, yalnızca eksik olan eklenir', async () => {
+    const projectPath = await makeProject({
+      labels: [
+        { id: 'etiket-01', text: 'Merhaba', x: 0.5, y: 0.9 },
+        { id: 'etiket-02', kind: 'pomodoro-status', x: 0.2, y: 0.2 },
+      ],
+    });
+    await setProjectPomodoro(projectPath, { enabled: true, rounds: 2 });
+    const { labels } = await read(projectPath);
+
+    assert.deepEqual(labels.map((l) => l.id), ['etiket-01', 'etiket-02', 'etiket-03']);
+    assert.deepEqual([labels[1].x, labels[1].y], [0.2, 0.2]);
+    assert.equal(labels[2].kind, 'pomodoro-countdown');
+  });
+
+  test('Pomodoro kapatılınca etiketlere dokunulmaz (yerleri kaybolmasın)', async () => {
+    const projectPath = await makeProject();
+    await setProjectPomodoro(projectPath, { enabled: true, rounds: 2 });
+    await setProjectPomodoro(projectPath, null);
+
+    const json = await read(projectPath);
+    assert.equal(Object.hasOwn(json, 'pomodoro'), false);
+    assert.equal(json.labels.length, 2);
+  });
+
+  test('bozuk etiket kaydı varsa ezilmez, hiç eklenmez', async () => {
+    const projectPath = await makeProject({ labels: [{ id: 'x y', text: 'bozuk' }] });
+    await setProjectPomodoro(projectPath, { enabled: true, rounds: 2 });
+    assert.deepEqual((await read(projectPath)).labels, [{ id: 'x y', text: 'bozuk' }]);
   });
 });

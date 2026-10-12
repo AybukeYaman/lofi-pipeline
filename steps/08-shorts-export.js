@@ -35,6 +35,7 @@ export const SHORTS_ENCODE = { crf: 20, preset: 'medium', audioBitrate: '192k' }
  *   clip: { start: number, end: number, frame: { zoom: number, x: number, y: number } },
  *   outputPath: string,
  *   sourceInfo?: { width: number, height: number, hasAudio?: boolean },
+ *   labelFilter?: string|null,  // core/label-filter.js — yoksa çıktı eskisi gibi
  *   ffmpegFn?: typeof runFfmpeg,
  *   probeFn?: typeof runProbe,
  *   onProgress?: (seconds: number) => void,
@@ -51,6 +52,7 @@ export async function exportShortsClip({
   clip,
   outputPath,
   sourceInfo,
+  labelFilter = null,
   ffmpegFn = runFfmpeg,
   probeFn = runProbe,
   onProgress,
@@ -84,7 +86,8 @@ export async function exportShortsClip({
     '-ss', String(clip.start),
     '-i', sourcePath,
     '-t', String(duration),
-    '-vf', buildShortsFilter(crop),
+    // Etiketler kırpma+ölçekten SONRA: konum 1080×1920 çıktının oranıdır.
+    '-vf', [buildShortsFilter(crop), labelFilter].filter(Boolean).join(','),
     '-c:v', 'libx264',
     '-crf', String(SHORTS_ENCODE.crf),
     '-preset', SHORTS_ENCODE.preset,

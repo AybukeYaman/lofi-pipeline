@@ -35,6 +35,7 @@ import { CropNotConfirmedError, prepareVideo } from './steps/01-video-prep.js';
 import { concatAudio } from './steps/02-audio-concat.js';
 import { mixAmbient } from './steps/03-ambient-mix.js';
 import { assembleVideo } from './steps/04-assemble.js';
+import { prepareLabelOverlay } from './steps/04a-label-overlay.js';
 import { writeTracklist } from './steps/05-tracklist.js';
 import { mixPomodoroCues } from './steps/06-pomodoro-cues.js';
 import { buildStreamPackage } from './steps/07-stream-package.js';
@@ -222,6 +223,34 @@ export async function runBuild(config, options = {}) {
       logger,
     })).catch((error) => keepCropFrame(error, config.output.dir));
 
+    // --- 1b: Pomodoro mola görüntüsü (opsiyonel). Çalışma görüntüsünün BOYUTUNA ve
+    // kare hızına getirilir: oturumlar kopyayla birleşebilsin. Kırpma değerleri
+    // aynı; çalışma klibi için verilen onay burada yeniden sorulmaz.
+    const breakVideo = config.pomodoro?.breakClip
+      ? await step('01b', 'Mola görüntüsü hazırlığı', (logger) => prepareVideo({
+        clipPath: config.pomodoro.breakClip,
+        source: config.pomodoro.breakSource,
+        outputPath: workspace.path('base.break.mp4'),
+        workspace,
+        cropBottom: config.video.cropBottom,
+        cropTop: config.video.cropTop,
+        cropLeft: config.video.cropLeft,
+        cropRight: config.video.cropRight,
+        cropFromConfig: true,
+        aspect: config.video.aspect,
+        matchTo: {
+          width: video.result.width,
+          height: video.result.height,
+          fps: video.result.fps,
+        },
+        crf: config.video.crf,
+        preset: config.video.preset,
+        crossfadeSeconds: config.video.crossfadeSeconds,
+        loopTest: false,
+        logger,
+      }))
+      : null;
+
     let configLine = null;
     if (video.crop.approval.required && !config.video.cropFromConfig) {
       configLine = `"video": { "cropBottom": ${config.video.cropBottom} }`;
@@ -313,12 +342,28 @@ export async function runBuild(config, options = {}) {
       log.info('Pomodoro açık ama işaret sesi kapalı — 06 atlandı.');
     }
 
+    // --- 4a: etiket katmanı (opsiyonel). Etiket yoksa filter null → montaj eski
+    // hızlı yoldan gider. Pomodoro oturumları 02'de üretilen plandan yalnızca OKUNUR.
+    const labelOverlay = await prepareLabelOverlay({
+      labels: config.labels,
+      videoPath: video.output,
+      sessions: pomodoro ? pomodoro.timeline.sessions : null,
+      workspace,
+      logger: log,
+    });
+
     // --- 4: montaj (04) — gövde kopya, kuyruk (fade) encode; ses son karışım.
+    // Etiket varsa gövde kopyalanamaz: tam encode.
     const finalVideo = workspace.path('final.mp4');
     const assembled = await step('04', 'Montaj', (logger) => assembleVideo({
       videoPath: video.output,
       audioPath: finalAudio,
       outputPath: finalVideo,
+      overlayFilter: labelOverlay.filter,
+      // Çalışma ve mola ayrı görüntüyse her oturum kendi görüntüsüyle kurulur.
+      sessionVideo: pomodoro && breakVideo
+        ? { sessions: pomodoro.timeline.sessions, breakVideoPath: breakVideo.output }
+        : null,
       workspace,
       fadeOut: config.video.fadeOut,
       crf: config.video.crf,
@@ -389,6 +434,8 @@ export async function runBuild(config, options = {}) {
       // Düz metin alanı Ambiance ile aynı gerekçeyle: okuyan taraf tek bakışta
       // açık mı kapalı mı görsün, ayrıntı ayrı alanda.
       pomodoro: pomodoro ? 'applied' : 'off',
+      // Videoya yakılan etiket sayısı (0 = etiket yok, montaj eski hızlı yoldan geçti).
+      labels: labelOverlay.labelCount,
       pomodoroPlan: pomodoro
         ? {
           workMinutes: config.pomodoro.workMinutes,

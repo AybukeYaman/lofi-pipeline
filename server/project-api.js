@@ -15,6 +15,7 @@ import {
 } from '../core/ambient-plan.js';
 import { CONFIG_DEFAULTS, VIDEO_SOURCES } from '../core/config.js';
 import { AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, imageMimeType, listFiles, uniqueFileName } from '../core/files.js';
+import { normalizeLabelPlan } from '../core/label-plan.js';
 import {
   POMODORO_DEFAULTS, POMODORO_PRESETS, buildTimeline, normalizePomodoroSelection, validatePomodoro,
 } from '../core/pomodoro-plan.js';
@@ -25,7 +26,7 @@ import { NewVideoError, runNewVideo } from '../new-video.js';
 import { AmbientError, DEFAULT_AMBIENT_DIR, findAmbient, listAmbients } from '../prep/ambients.js';
 import {
   DEFAULT_CROP_BOTTOM, ProjectFileError, completeMusicByUser, cropForWatermark, recordAudioAdded, setProjectAmbient, setProjectClip, setProjectCrop,
-  setProjectCropBottom, setProjectField, setProjectPomodoro, setVideoSource,
+  setProjectCropBottom, setProjectField, setProjectLabels, setProjectPomodoro, setVideoSource,
 } from '../prep/project-file.js';
 import {
   audioAddedOrder, inspectProject, isMusicCompleted, projectWorkflow,
@@ -150,6 +151,12 @@ export async function createProject(body, {
     throw new ApiError(409, 'Project already exists');
   }
 
+  // Pomodoro düzeni klasör kurulmadan ÖNCE doğrulanır: geçersiz bir seçim yarım proje bırakmasın.
+  if (input.pomodoro) {
+    const { problems } = normalizePomodoroSelection(input.pomodoro);
+    if (problems.length > 0) throw new ApiError(422, 'Project could not be created', { problems });
+  }
+
   let parentDir = null;
   if (input.parentId) {
     try {
@@ -180,6 +187,20 @@ export async function createProject(body, {
       throw new ApiError(409, 'Project already exists');
     }
     throw error;
+  }
+
+  // "Ambiance mı, Pomodoro mu?" sorusunun cevabı: Pomodoro seçildiyse düzen proje
+  // kurulurken yazılır (tek karar noktası setProjectPomodoro, sonradan da aynısı
+  // değiştirir). Ambiance'ta hiçbir şey yazılmaz — proje bugünkü gibi kalır.
+  if (input.pomodoro) {
+    try {
+      await setProjectPomodoro(join(videosDir, input.name, 'project.json'), input.pomodoro);
+    } catch (error) {
+      if (!(error instanceof ProjectFileError)) throw error;
+      throw new ApiError(422, 'Project was created but Pomodoro settings are invalid', {
+        problems: [error.message],
+      });
+    }
   }
 
   // Kopyalama mantığı copyTracksFromProject'te: kopyalama + audioAdded kaydı +
@@ -571,6 +592,73 @@ export async function updateAmbient(
 }
 
 /**
+ * Etiket editorunun verisi: kayitli etiketler, onizleme kadrajinin orani, arka
+ * plan olarak gosterilecek klip ve — Pomodoro aciksa — oturum zamanlari.
+ *
+ * Oturumlar yalnizca OKUNUR (`buildTimeline`): editor "STUDY su aralikta, BREAK bu
+ * aralikta" diye gosterebilsin diye. Pomodoro ayari buradan degismez.
+ */
+export async function getLabels(id, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
+  const projectDir = await resolveProjectDir(id, videosDir);
+  const status = await inspectProject(projectDir);
+
+  const json = status.projectJson.data ?? {};
+  const { labels, problems, warnings } = normalizeLabelPlan(json.labels);
+  const { plan } = normalizePomodoroSelection(json.pomodoro);
+  // Shorts alt projesi: dikey 9:16 çıktı, arka plan olarak ana projenin kaynak
+  // videosu, Pomodoro yok. Normal proje: seçili klip ya da görsel.
+  const isShorts = status.kind === 'shorts';
+  let preview = null;
+  if (isShorts) {
+    if (status.shorts?.source?.exists) {
+      preview = { url: `/api/projects/${encodeURIComponent(id)}/shorts/source`, kind: 'video' };
+    }
+  } else if (status.clip.exists) {
+    preview = {
+      url: assetUrl(id, 'video', basename(status.clip.path)),
+      kind: status.videoSource === 'image' ? 'image' : 'video',
+    };
+  }
+  const timeline = plan && !isShorts ? buildTimeline(plan) : null;
+
+  return {
+    labels,
+    problems,
+    warnings,
+    aspect: isShorts ? '9:16' : (json.video?.aspect || CONFIG_DEFAULTS.video.aspect || '16:9'),
+    preview,
+    pomodoro: timeline
+      ? { enabled: true, totalSeconds: timeline.totalSeconds, sessions: timeline.sessions }
+      : { enabled: false, totalSeconds: 0, sessions: [] },
+  };
+}
+
+/**
+ * Etiketleri yazar — montaj oncesi her an degistirilebilir. Gövde `{ labels: [] }`;
+ * bos dizi etiketleri kaldirir (anahtar silinir, sistem eskisi gibi calisir).
+ * Gecersiz kayit 422 ve sebepleriyle reddedilir: yarim kayit yazilmaz.
+ *
+ * @param {unknown} body
+ */
+export async function updateLabels(id, body, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
+  const projectDir = await resolveProjectDir(id, videosDir);
+  const input = parseBody(body, { labels: 'array' }, ['labels']);
+
+  const status = await inspectProject(projectDir);
+  if (!status.projectJson.ok) {
+    throw new ApiError(409, 'project.json is invalid', { problem: status.projectJson.error });
+  }
+
+  try {
+    await setProjectLabels(status.projectPath, input.labels);
+  } catch (error) {
+    if (!(error instanceof ProjectFileError)) throw error;
+    throw new ApiError(422, error.message);
+  }
+  return getLabels(id, { videosDir });
+}
+
+/**
  * Pomodoro ayari + MONTAJ ONCESI dogrulama.
  *
  * Ayni dogrulama build icinde de calisiyor (steps/02-audio-concat.js, parcalar
@@ -643,7 +731,10 @@ export async function updatePomodoro(id, body, { videosDir = DEFAULT_VIDEOS_DIR,
     workStartSound: 'boolean',
     breakStartSound: 'boolean',
     trimExcess: 'boolean',
+    // Mola görüntüsü (proje klasörüne göreli yol); '' → mola da çalışma görüntüsünü kullanır.
+    breakClip: 'string',
   }, ['enabled']);
+  if (input.breakClip === '') delete input.breakClip;
 
   const status = await inspectProject(projectDir);
   if (!status.projectJson.ok) {
@@ -1074,6 +1165,7 @@ export function describeReadiness(status) {
         breakMinutes: pomodoroPlan.breakMinutes,
         rounds: pomodoroPlan.rounds,
         totalMinutes: buildTimeline(pomodoroPlan).totalMinutes,
+        breakClip: pomodoroPlan.breakClip,
       },
     build: { ready: missing.length === 0, missing },
     output: { exists: status.output.exists },
@@ -1187,9 +1279,16 @@ async function exists(path) {
 function parseCreateBody(body) {
   const input = parseBody(
     body,
-    { name: 'string', ambient: 'array', videoSource: 'string', concept: 'string', totalTracks: 'number', parentId: 'string', selectedTracks: 'array', aspect: 'string' },
+    { name: 'string', ambient: 'array', videoSource: 'string', concept: 'string', totalTracks: 'number', parentId: 'string', selectedTracks: 'array', aspect: 'string', pomodoro: 'object' },
     ['name'],
   );
+  if (input.pomodoro !== undefined && (input.pomodoro === null || Array.isArray(input.pomodoro))) {
+    throw new ApiError(400, 'pomodoro must be an object');
+  }
+  // Mola görüntüsü dosyası proje kurulunca yüklenir; kurulum sırasında seçilemez.
+  if (input.pomodoro?.breakClip !== undefined) {
+    throw new ApiError(400, 'pomodoro.breakClip cannot be set while creating a project');
+  }
 
   const ambient = input.ambient ?? [];
   if (!ambient.every((name) => typeof name === 'string' && name.trim() !== '')) {
@@ -1226,6 +1325,8 @@ function parseCreateBody(body) {
     parentId,
     selectedTracks,
     aspect: input.aspect,
+    // Yalnızca Pomodoro seçildiyse; alan alan doğrulama setProjectPomodoro'da.
+    pomodoro: input.pomodoro === undefined ? undefined : { ...input.pomodoro, enabled: true },
   };
 }
 

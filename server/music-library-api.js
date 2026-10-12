@@ -3,7 +3,6 @@
  *
  * Provides endpoints and domain functions for:
  * - Organizing music into albums in a central library (music_library/)
- * - Downloading / ingesting tracks directly from Suno URLs (song, playlist, short link)
  * - Previewing / streaming audio files
  * - Uploading, deleting, and managing tracks and albums
  * - Assigning/exporting tracks from an album to any video project
@@ -12,13 +11,11 @@
 import { copyFile, mkdir, readdir, realpath, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
-import { AUDIO_EXTENSIONS, listFiles, uniqueFileName } from '../core/files.js';
+import { AUDIO_EXTENSIONS, listFiles, sanitizeFilename, uniqueFileName } from '../core/files.js';
 import { probe } from '../core/probe.js';
 import { inspectProject, listProjects } from '../prep/project-status.js';
 import { recordAudioAdded, setProjectField } from '../prep/project-file.js';
 import { DEFAULT_VIDEOS_DIR } from '../prep/scaffold.js';
-import { SunoIngestError } from '../prep/suno-errors.js';
-import { ingestSunoUrl, sanitizeFilename } from '../prep/suno-ingest.js';
 import { ApiError, openFolderOnOs } from './project-api.js';
 
 export const DEFAULT_MUSIC_DIR = './music_library';
@@ -292,103 +289,6 @@ export async function openMusicFolder(body = {}, {
 
   const ok = openFn(targetPath);
   return { ok, path: targetPath };
-}
-
-/**
- * Ingests music directly from Suno URL into an Album or Video Project.
- */
-export async function ingestSuno(body, {
-  musicDir = DEFAULT_MUSIC_DIR,
-  videosDir = DEFAULT_VIDEOS_DIR,
-  ingestFn = ingestSunoUrl,
-} = {}) {
-  const { url, targetType, targetId, newAlbumName } = body ?? {};
-  if (typeof url !== 'string' || url.trim() === '') {
-    throw new ApiError(400, 'Suno URL is required');
-  }
-
-  if (targetType !== 'album' && targetType !== 'project') {
-    throw new ApiError(400, 'targetType must be "album" or "project"');
-  }
-
-  const resolvedMusicDir = resolve(musicDir);
-  await mkdir(resolvedMusicDir, { recursive: true });
-
-  let outputDir;
-  let finalAlbumId = null;
-  let finalProjectId = null;
-  let projectStatus = null;
-
-  if (targetType === 'album') {
-    let albumName = targetId;
-    if (newAlbumName && typeof newAlbumName === 'string' && newAlbumName.trim()) {
-      albumName = sanitizeFilename(newAlbumName.trim());
-    }
-    if (!albumName || !isSafeName(albumName)) {
-      throw new ApiError(400, 'Valid album name or targetId is required');
-    }
-    finalAlbumId = albumName;
-    outputDir = join(resolvedMusicDir, albumName);
-    await mkdir(outputDir, { recursive: true });
-  } else {
-    if (typeof targetId !== 'string' || !isSafeName(targetId)) {
-      throw new ApiError(400, 'Valid project targetId is required');
-    }
-    finalProjectId = targetId;
-    const projectDir = join(resolve(videosDir), targetId);
-    projectStatus = await inspectProject(projectDir).catch(() => null);
-    if (!projectStatus || !projectStatus.projectJson.ok) {
-      throw new ApiError(404, `Project "${targetId}" not found or project.json is invalid`);
-    }
-    outputDir = projectStatus.audioDir;
-    await mkdir(outputDir, { recursive: true });
-  }
-
-  let ingestResult;
-  try {
-    ingestResult = await ingestFn({ url: url.trim(), outputDir });
-  } catch (error) {
-    if (error instanceof SunoIngestError) {
-      if (error.notPublic) {
-        throw new ApiError(422, `Suno linki public değil ya da içerik bulunamadı: ${error.message}`);
-      }
-      if (error.downloadDisabled) {
-        throw new ApiError(422, `Suno bu şarkı için indirmeyi kapatmış: ${error.message}`);
-      }
-      throw new ApiError(422, `Suno indirme hatası: ${error.message}`);
-    }
-    throw new ApiError(502, `Suno bağlantı hatası: ${error.message}`);
-  }
-
-  // If target was a project, automatically link tracks in project.json
-  if (targetType === 'project' && projectStatus && ingestResult?.tracks?.length > 0) {
-    const musicData = projectStatus.projectJson.data?.music ?? {};
-    if (Array.isArray(musicData.tracks) && musicData.tracks.length > 0) {
-      const pendingTracks = musicData.tracks.filter((t) => t.status === 'pending');
-      const count = Math.min(ingestResult.tracks.length, pendingTracks.length);
-      for (let i = 0; i < count; i++) {
-        pendingTracks[i].status = 'completed';
-        pendingTracks[i].file = basename(ingestResult.tracks[i].localPath);
-      }
-      musicData.completedCount = musicData.tracks.filter((t) => t.status === 'completed').length;
-      musicData.status = musicData.completedCount === musicData.totalTracks ? 'completed' : 'in_progress';
-      await setProjectField(projectStatus.projectPath, 'music', musicData);
-    }
-  }
-
-  return {
-    ok: true,
-    targetType,
-    albumId: finalAlbumId,
-    projectId: finalProjectId,
-    downloadedCount: ingestResult?.tracks?.length ?? 0,
-    tracks: (ingestResult?.tracks ?? []).map((t) => ({
-      index: t.index,
-      title: t.title,
-      file: basename(t.localPath),
-      duration: t.duration,
-    })),
-  };
 }
 
 /**

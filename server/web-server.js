@@ -14,7 +14,6 @@ import {
   deleteAlbumTrack,
   getMusicAsset,
   getMusicLibrary,
-  ingestSuno,
   openMusicFolder,
   uploadAlbumTrack,
 } from './music-library-api.js';
@@ -29,6 +28,7 @@ import {
   getAmbientAsset,
   getAsset,
   getBuild,
+  getLabels,
   getLibrary,
   getMusic,
   getProject,
@@ -41,6 +41,7 @@ import {
   selectClip,
   startBuild,
   updateAmbient,
+  updateLabels,
   updatePomodoro,
   updateCrop,
   updateTrackOrder,
@@ -106,6 +107,8 @@ export function createDefaultProjectApi({ buildJobs = createBuildJobs() } = {}) 
     getAmbient: (id) => getAmbient(id),
     getPomodoro: (id) => getPomodoro(id),
     updatePomodoro: (id, body) => updatePomodoro(id, body),
+    getLabels: (id) => getLabels(id),
+    updateLabels: (id, body) => updateLabels(id, body),
     getAmbientAsset: (name) => getAmbientAsset(name),
     uploadAmbient: (body) => uploadAmbient(body),
     deleteAmbient: (name) => deleteAmbient(name),
@@ -120,7 +123,6 @@ export function createDefaultProjectApi({ buildJobs = createBuildJobs() } = {}) 
     deleteAlbumTrack: (albumId, filename) => deleteAlbumTrack(albumId, filename),
     uploadAlbumTrack: (albumId, body) => uploadAlbumTrack(albumId, body),
     openMusicFolder: (body) => openMusicFolder(body),
-    ingestSuno: (body) => ingestSuno(body),
     assignAlbumToProject: (body) => assignAlbumToProject(body),
     getMusicAsset: (albumId, filename) => getMusicAsset(albumId, filename),
     getMimiGallery: () => getMimiGallery(),
@@ -263,6 +265,16 @@ export const ROUTES = [
   },
   {
     method: 'GET',
+    pattern: /^\/api\/projects\/([^/]*)\/labels$/,
+    handle: async (api, { id }) => [200, await api.getLabels(id)],
+  },
+  {
+    method: 'PUT',
+    pattern: /^\/api\/projects\/([^/]*)\/labels$/,
+    handle: async (api, { id, body }) => [200, await api.updateLabels(id, body)],
+  },
+  {
+    method: 'GET',
     pattern: /^\/api\/projects\/([^/]*)\/pomodoro$/,
     handle: async (api, { id }) => [200, await api.getPomodoro(id)],
   },
@@ -301,11 +313,6 @@ export const ROUTES = [
     pattern: /^\/api\/projects\/([^/]*)\/assets\/([^/]*)\/([^/]*)$/,
     file: true,
     handle: async (api, { id, params }) => [200, await api.getAsset(id, ...params)],
-  },
-  {
-    method: 'POST',
-    pattern: /^\/api\/projects\/([^/]*)\/music\/ingest-suno$/,
-    handle: async (api, { id, body }) => [200, await api.ingestSuno({ ...body, targetType: 'project', targetId: id })],
   },
   // Shorts alt projesi — 9:16 kesitler. Kaynak video kopyalanmaz, zaman
   // aralığı referansıyla çalışılır; render yalnızca istenince olur.
@@ -381,11 +388,6 @@ export const ROUTES = [
     method: 'POST',
     pattern: /^\/api\/music-library\/open-folder$/,
     handle: async (api, { body }) => [200, await api.openMusicFolder(body)],
-  },
-  {
-    method: 'POST',
-    pattern: /^\/api\/music-library\/ingest-suno$/,
-    handle: async (api, { body }) => [200, await api.ingestSuno(body)],
   },
   {
     method: 'POST',

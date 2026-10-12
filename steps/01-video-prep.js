@@ -208,6 +208,9 @@ export function planAspectCrop({ width, height, aspect }) {
  * @param {string|null} [options.aspect] watermark kırpmasından sonra bu orana
  *   kırpar (varsayılan '16:9'); null/false verilirse adım kapalı
  * @param {number} [options.scaleWidth] verilirse bu genişliğe ölçekler
+ * @param {{ width: number, height: number, fps: number }|null} [options.matchTo] verilirse
+ *   çıktı bu boyut ve kare hızına getirilir (Pomodoro mola görüntüsü: çalışma
+ *   görüntüsüyle kopyayla birleşebilsin diye akış parametreleri aynı olmalı)
  * @param {number} [options.crf]
  * @param {string} [options.preset]
  * @param {number} [options.crossfadeSeconds]
@@ -232,6 +235,7 @@ export async function prepareVideo(options) {
     confirm,
     aspect = DEFAULTS.aspect,
     scaleWidth,
+    matchTo = null,
     crf = DEFAULTS.crf,
     preset = DEFAULTS.preset,
     crossfadeSeconds = DEFAULTS.crossfadeSeconds,
@@ -302,11 +306,13 @@ export async function prepareVideo(options) {
   if (aspectPlan && !aspectPlan.skipped && aspectPlan.filter) {
     filters.push(aspectPlan.filter);
   }
-  const expected = aspectPlan ? aspectPlan.after : { width: croppedWidth, height: croppedHeight };
+  const expected = matchTo
+    ? { width: matchTo.width, height: matchTo.height }
+    : (aspectPlan ? aspectPlan.after : { width: croppedWidth, height: croppedHeight });
 
   // Genişlik yalnızca en-boy adımı KIRPMADIĞINDA tek kalabilir (adım kapalı ya da
   // kaynak ±1 px ile zaten bu oranda). Kırpan plan her zaman çift genişlik verir.
-  if (expected.width % 2 !== 0 && !scaleWidth) {
+  if (expected.width % 2 !== 0 && !scaleWidth && !matchTo) {
     throw new CropSizeError(
       `Çıktı genişliği tek sayı (${expected.width}): kaynak genişliği kırpılmadan kalıyor ve ` +
       'h264/yuv420p çift sayı ister — ffmpeg sessizce bir piksel kırpardı. ' +
@@ -314,7 +320,7 @@ export async function prepareVideo(options) {
       { cropBottom: bottomCrop, suggestions: [] },
     );
   }
-  if (expected.height % 2 !== 0 && !scaleWidth) {
+  if (expected.height % 2 !== 0 && !scaleWidth && !matchTo) {
     expected.height = 2 * Math.floor(expected.height / 2);
     // Boyutu gerçekten düzeltmek için filtre ekle — aksi halde ffmpeg ham boyutu
     // alır ve libx264 "height not divisible by 2" ile çöker.
@@ -350,7 +356,10 @@ export async function prepareVideo(options) {
   // 3 — Kırp, sesi at, gerekirse ölçekle
   await mkdir(dirname(outputPath), { recursive: true });
 
-  if (scaleWidth) {
+  if (matchTo) {
+    // Çalışma görüntüsünün tam boyutu: kopyayla birleşme aynı akış parametresi ister.
+    filters.push(`scale=${matchTo.width}:${matchTo.height}:flags=lanczos`, 'setsar=1');
+  } else if (scaleWidth) {
     // -2: yüksekliği en-boy oranına göre çift sayıya yuvarla (h264 şartı).
     filters.push(`scale=${scaleWidth}:-2`);
   }
@@ -376,6 +385,7 @@ export async function prepareVideo(options) {
     ...(crossfade
       ? ['-filter_complex', buildCrossfadeFilter(crossfade, filters)]
       : (filters.length > 0 ? ['-vf', filters.join(',')] : [])),
+    ...(matchTo ? ['-r', String(matchTo.fps)] : []),
     '-an',                       // Hailuo'nun 32 kHz sesi kullanılmıyor
     '-c:v', 'libx264',
     '-crf', String(crf),

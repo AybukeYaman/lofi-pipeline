@@ -12,6 +12,7 @@ import {
   ApiError,
 } from '../../api';
 import { AssetPreview } from '../../components/AssetPreview';
+import { BreakVisualPicker } from '../../components/BreakVisualPicker';
 import { EmptyState } from '../../components/Feedback';
 import { StatusBadge } from '../../components/StatusBadge';
 import type { ProjectDetail, VideoSource } from '../../types';
@@ -382,6 +383,11 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
           ) : (
             <EmptyState compact title={isStill ? 'resimler\\ klasöründe henüz MASTER görseli yok.' : 'videolar\\ klasöründe .mp4 klip yok.'} />
           )}
+
+          {/* Pomodoro'da mola için ikinci görüntü; Ambiance projelerinde hiç görünmez. */}
+          {project.readiness?.pomodoro?.enabled ? (
+            <BreakVisualPicker project={project} onProjectUpdate={onProjectUpdate} />
+          ) : null}
 
           {/* Kırpma ve format ayarlarının çoğu projede varsayılanla çalışır:
               varsayılan dışı bir değer varsa açık, yoksa katlı başlar. */}

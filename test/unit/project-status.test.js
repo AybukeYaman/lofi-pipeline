@@ -48,7 +48,7 @@ describe('nextStep — karar tablosu (sondan başa)', () => {
     assert.ok(step.detail.includes('./videolar/in.mp4 · 15 parça'));
   });
 
-  test('klip hazır + müzik yok → Suno (elle, atlanamaz)', () => {
+  test('klip hazır + müzik yok → Müzik (elle, atlanamaz)', () => {
     const step = nextStep(makeStatus({ master: 'X:\\videolar\\v\\resimler\\MASTER.png', clip: readyClip }));
     assert.deepEqual([step.id, step.kind, step.skippable], ['audio', 'manual', false]);
     assert.ok(step.detail.includes('X:\\videolar\\v\\audio'));

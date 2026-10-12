@@ -69,7 +69,7 @@ export const STEP_GUIDE: Record<ViewStepId, { who: 'user' | 'system'; lines: str
   music: {
     who: 'user',
     lines: [
-      "Suno'dan parçaları üret ve buraya yükle.",
+      'Müzik parçalarını buraya yükle.',
       'Sonra sırayı seç: eklediğin sırayla mı, kendi belirleyeceğin sırayla mı, alfabetik mi dizilsin?',
     ],
   },
@@ -84,6 +84,44 @@ export const STEP_GUIDE: Record<ViewStepId, { who: 'user' | 'system'; lines: str
     lines: ["YouTube'a yükle, bu metni açıklamaya yapıştır."],
   },
 };
+
+/**
+ * Pomodoro projelerinde değişen rehber metinleri. Yalnızca farklı olan adımlar
+ * yazılır; listede olmayan adım (yayın) Ambiance ile aynı metni kullanır.
+ */
+const POMODORO_STEP_GUIDE: Partial<Record<ViewStepId, { who: 'user' | 'system'; lines: string[] }>> = {
+  project: {
+    who: 'user',
+    lines: [
+      'Pomodoro seçildi: düzen ve süre kayıtlı. Çalışma/mola görüntüsünü 2. adımda (Video), müziği 3. adımda ekleyeceksin.',
+    ],
+  },
+  video: {
+    who: 'user',
+    lines: [
+      'Çalışma oturumları için bir resim ya da döngü videosu seç.',
+      'Mola için ayrı bir görüntü istersen aşağıdan seç; istemezsen mola da aynı görüntüyü kullanır.',
+    ],
+  },
+  music: {
+    who: 'user',
+    lines: [
+      'Müzik parçalarını yükle: toplam süre Pomodoro süresine eşit olmalı. Fazlaysa tek tuşla kırpılır, eksikse parça eklemen gerekir.',
+      'Sonra sırayı seç.',
+    ],
+  },
+  build: {
+    who: 'system',
+    lines: [
+      '"Başlat" de; çalışma/mola görüntüleri, STUDY/BREAK yazısı, sayaç ve bip sesleri otomatik.',
+    ],
+  },
+};
+
+/** Adımın rehber metni; Pomodoro açıksa o adıma özel metin (varsa) öne geçer. */
+export function stepGuide(id: ViewStepId, pomodoro: boolean): { who: 'user' | 'system'; lines: string[] } {
+  return (pomodoro ? POMODORO_STEP_GUIDE[id] : undefined) ?? STEP_GUIDE[id];
+}
 
 export function stepInfo(workflow: ProjectWorkflow | undefined, id: WorkflowStepId): WorkflowStepInfo | undefined {
   return workflow?.steps.find((step) => step.id === id);

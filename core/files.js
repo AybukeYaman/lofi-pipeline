@@ -93,6 +93,21 @@ export async function listFiles(dir, extensions = AUDIO_EXTENSIONS) {
 }
 
 /**
+ * Dosya/klasör adlarında kullanılamayacak geçersiz karakterleri temizler;
+ * boşluklar tire olur, boş kalırsa 'untitled'.
+ * @param {string} text
+ * @returns {string}
+ */
+export function sanitizeFilename(text) {
+  if (!text) return 'untitled';
+  return text
+    .replace(/[\\/:*?"<>|]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '') || 'untitled';
+}
+
+/**
  * Klasörde çakışmayan dosya adı: "Ad.mp3" varsa "Ad (1).mp3", "Ad (2).mp3"...
  * @param {string} dir
  * @param {string} name

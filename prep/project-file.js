@@ -13,6 +13,9 @@ import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { normalizeAmbientSelection, serializeAmbientPlan } from '../core/ambient-plan.js';
 import { CONFIG_DEFAULTS, VIDEO_SOURCES } from '../core/config.js';
 import { isImagePath } from '../core/files.js';
+import {
+  SYSTEM_LABEL_KINDS, createLabel, normalizeLabelPlan, serializeLabelPlan,
+} from '../core/label-plan.js';
 import { normalizePomodoroSelection, serializePomodoroPlan } from '../core/pomodoro-plan.js';
 import { readJsonFile, writeTextFile } from '../core/workspace.js';
 
@@ -219,6 +222,31 @@ export async function setProjectAmbient(projectPath, tracks, settings = {}) {
 }
 
 /**
+ * Video üstü etiketleri yazar (`labels` dizisi — core/label-plan.js).
+ *
+ * Yalnızca GÖRSEL durumu (konum, boyut, renk, serbest metin) saklanır; zaman ve
+ * Pomodoro durumu `pomodoro` bloğunda kalır, buradan değişmez. Boş liste anahtarı
+ * tamamen siler: `labels` yoksa sistem bugünkü gibi çalışır (ambient ile aynı kural).
+ *
+ * @param {string} projectPath
+ * @param {object[]} rawLabels API gövdesi ya da normalleştirilmiş etiketler
+ * @returns {Promise<{ labels: object[], warnings: string[] }>}
+ */
+export async function setProjectLabels(projectPath, rawLabels) {
+  const { labels, problems, warnings } = normalizeLabelPlan(rawLabels);
+  if (problems.length > 0) {
+    throw new ProjectFileError(`Etiketler geçersiz:\n  - ${problems.join('\n  - ')}`);
+  }
+
+  const json = await readProjectObject(projectPath);
+  if (labels.length === 0) delete json.labels;
+  else json.labels = serializeLabelPlan(labels);
+
+  await writeTextFile(projectPath, JSON.stringify(json, null, 2) + '\n');
+  return { labels, warnings };
+}
+
+/**
  * Pomodoro ayarını yazar — "bu video Pomodoro oturumları olarak kurulsun".
  *
  * Ambiance ile aynı kural: yazılan şekil `core/pomodoro-plan.js`
@@ -241,19 +269,72 @@ export async function setProjectPomodoro(projectPath, settings) {
     throw new ProjectFileError(`Pomodoro ayarı geçersiz:\n  - ${problems.join('\n  - ')}`);
   }
 
+  // Mola görüntüsü: proje klasörünün içinde var olan bir resim/klip. Yol `./videolar/x.mp4`
+  // biçimine çevrilir (setProjectClip ile aynı) — build göreli yolu proje klasörüne çözüyor.
+  if (plan !== null && plan.breakClip !== null) {
+    plan.breakClip = await resolveBreakClip(projectPath, plan.breakClip);
+  }
+
   const json = await readProjectObject(projectPath);
   const written = serializePomodoroPlan(plan);
+  // Kapalıydı, şimdi açılıyor: STUDY/BREAK yazısı ve sayaç kendiliğinden gelsin. Yalnızca
+  // KAPALI → AÇIK geçişinde: kullanıcı yazıyı bilerek sildiyse ayar değişince geri gelmesin.
+  const turnedOn = plan !== null && json.pomodoro?.enabled !== true;
   if (written === undefined) delete json.pomodoro;
   else json.pomodoro = written;
 
+  const warnings = [];
+  if (turnedOn && addPomodoroLabels(json)) {
+    warnings.push('Ekrana çalışma/mola yazısı ve kalan süre sayacı eklendi — yerini 4. adımdan değiştirebilirsin.');
+  }
+
   await writeTextFile(projectPath, JSON.stringify(json, null, 2) + '\n');
 
-  const warnings = [];
   if (plan === null) {
     warnings.push('Pomodoro kapatıldı — montaj bugünkü düz akışla çalışacak.');
   }
 
   return { pomodoro: written ?? null, plan, warnings };
+}
+
+/**
+ * Eksik sistem etiketlerini (STUDY/BREAK + sayaç) varsayılan yerlerine ekler.
+ * Mevcut etiketler bozuksa dokunmaz: elle yazılmış bir kaydı ezmektense hiç eklememek.
+ *
+ * @param {object} json project.json nesnesi (yerinde değişir)
+ * @returns {boolean} bir şey eklendi mi
+ */
+function addPomodoroLabels(json) {
+  const { labels, problems } = normalizeLabelPlan(json.labels);
+  if (problems.length > 0) return false;
+
+  let added = false;
+  for (const kind of SYSTEM_LABEL_KINDS) {
+    if (labels.some((label) => label.kind === kind)) continue;
+    labels.push(createLabel(labels, { kind }));
+    added = true;
+  }
+  if (added) json.labels = serializeLabelPlan(labels);
+  return added;
+}
+
+/** Mola görüntüsü uzantıları: döngü videosu ya da resim (core/config.js ile aynı iki tür). */
+const BREAK_CLIP_VIDEO_EXTENSION = '.mp4';
+
+async function resolveBreakClip(projectPath, breakClip) {
+  const dir = dirname(resolve(projectPath));
+  const target = resolve(dir, breakClip);
+  const rel = relative(dir, target);
+
+  if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    throw new ProjectFileError(`Mola görüntüsü proje klasörünün içinde olmalı: ${target}`);
+  }
+  if (!isImagePath(target) && !target.toLowerCase().endsWith(BREAK_CLIP_VIDEO_EXTENSION)) {
+    throw new ProjectFileError(`Mola görüntüsü resim ya da .mp4 olmalı: ${target}`);
+  }
+  const info = await stat(target).catch(() => null);
+  if (!info?.isFile()) throw new ProjectFileError(`Mola görüntüsü bulunamadı: ${target}`);
+  return `./${rel.split(sep).join('/')}`;
 }
 
 /**

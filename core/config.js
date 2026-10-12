@@ -14,6 +14,7 @@ import { basename, dirname, isAbsolute, resolve } from 'node:path';
 
 import { normalizeAmbientSelection } from './ambient-plan.js';
 import { AspectError, parseAspect } from './aspect.js';
+import { normalizeLabelPlan } from './label-plan.js';
 import { normalizePomodoroSelection } from './pomodoro-plan.js';
 import { IMAGE_EXTENSIONS, isImagePath } from './files.js';
 import { readJsonFile } from './workspace.js';
@@ -55,7 +56,7 @@ export const DEFAULT_STREAM_DIR = 'C:\\Users\\Aybuke Yeni\\Desktop\\Youtube\\YT 
 
 /** Bilinen anahtarlar — yazım hatası ("cropbottom") sessizce yok sayılmasın. */
 const KNOWN_KEYS = {
-  root: ['clip', 'audioDir', 'ambient', 'pomodoro', 'stream', 'order', 'names', 'video', 'audio', 'output', 'music', 'style', 'styleBlock', 'motionHints', 'workflow'],
+  root: ['clip', 'audioDir', 'ambient', 'pomodoro', 'stream', 'order', 'names', 'video', 'audio', 'output', 'music', 'style', 'styleBlock', 'motionHints', 'workflow', 'labels'],
   video: ['source', 'cropBottom', 'cropTop', 'cropLeft', 'cropRight', 'watermark', 'aspect', 'crf', 'preset', 'fadeOut', 'scaleWidth', 'crossfadeSeconds'],
   audio: ['bitrate', 'ambientOffsetDb'],
   output: ['dir', 'name', 'tracklist'],
@@ -148,8 +149,23 @@ async function resolveProject(json, { projectPath, overrides = {} }) {
       cue[key] = at(cue[key]);
       await expectKind(cue[key], 'file', `pomodoro.cue.${key}`, problems);
     }
-    pomodoro = { ...pomodoroPlan, cue };
+    // Mola görüntüsü: tür (resim / döngü videosu) uzantıdan türer — çalışma
+    // görüntüsündeki `video.source` gibi ayrı bir alan yok.
+    let breakClip = null;
+    let breakSource = null;
+    if (pomodoroPlan.breakClip !== null) {
+      breakClip = at(pomodoroPlan.breakClip);
+      breakSource = isImagePath(breakClip) ? 'image' : 'clip';
+      await expectKind(breakClip, 'file', 'pomodoro.breakClip', problems);
+    }
+    pomodoro = { ...pomodoroPlan, cue, breakClip, breakSource };
   }
+
+  // Etiketler: şekil çözümlemesi core/label-plan.js'te. Bozuk kayıt sessizce
+  // atılmaz (elle yazım hatası montajda fark edilsin): hata olarak durur.
+  const labelResult = normalizeLabelPlan(json.labels);
+  problems.push(...labelResult.problems.map((message) => `labels: ${message}`));
+  warnings.push(...labelResult.warnings.map((message) => `labels: ${message}`));
 
   // --- yayın paketi: 24/7 yayının albümü (render'dan bağımsız, varsayılan açık)
   const streamBlock = objectOrEmpty(json.stream, 'stream', problems);
@@ -275,6 +291,7 @@ async function resolveProject(json, { projectPath, overrides = {} }) {
     audioDir,
     ambient,
     pomodoro,
+    labels: labelResult.labels,
     stream: {
       enabled: streamEnabled,
       dir: streamDir === null ? null : at(streamDir),

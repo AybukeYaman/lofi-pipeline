@@ -9,8 +9,10 @@ import type {
   ShortsRenderJob,
   ShortsState,
   ProjectAmbient,
+  ProjectLabels,
   ProjectPomodoro,
   ProjectDetail,
+  UpdateLabelsPayload,
   LibraryPrompt,
   UpdateAmbientPayload,
   UpdatePomodoroPayload,
@@ -20,6 +22,7 @@ import type {
   VideoSource,
   VideoSourceResponse,
 } from './types';
+import { pomodoroPayload } from './pomodoroSetup';
 
 export class ApiError extends Error {
   status: number;
@@ -292,6 +295,29 @@ export async function updateProjectAmbient(
   );
 }
 
+/** Projenin video üstü etiketleri + önizleme için kadraj oranı ve oturum zamanları. */
+export async function fetchProjectLabels(id: string): Promise<ProjectLabels> {
+  const response = await fetch(projectUrl(id, 'labels'));
+  return handleResponse<ProjectLabels>(response, 'Labels could not be loaded.');
+}
+
+/**
+ * Pomodoro mola görüntüsünü yazar; diğer ayarlar olduğu gibi korunur. Boş metin
+ * kaldırır (mola da çalışma görüntüsünü kullanır). Pomodoro kapalıyken çağrılmaz.
+ */
+export async function setProjectBreakClip(id: string, breakClip: string): Promise<ProjectPomodoro> {
+  const current = await fetchProjectPomodoro(id);
+  return updateProjectPomodoro(id, pomodoroPayload(current, { breakClip }));
+}
+
+/** Etiketleri yazar (boş liste hepsini kaldırır). Pomodoro ayarına dokunmaz. */
+export async function updateProjectLabels(
+  id: string,
+  payload: UpdateLabelsPayload,
+): Promise<ProjectLabels> {
+  return sendJson<ProjectLabels>('PUT', projectUrl(id, 'labels'), payload, 'Labels could not be saved.');
+}
+
 /** Projenin Pomodoro ayarı + montaj öncesi doğrulama sonucu. */
 export async function fetchProjectPomodoro(id: string): Promise<ProjectPomodoro> {
   const response = await fetch(projectUrl(id, 'pomodoro'));
@@ -344,30 +370,18 @@ export async function deleteProject(id: string): Promise<{ deleted: string }> {
   return handleResponse<{ deleted: string }>(response, 'Project could not be deleted.');
 }
 
-// ---------------------------------------------------------------- Music Library & Suno Ingest
-// Yalnızca ekranların kullandığı uçlar: kütüphaneyi okumak, bir albümü
-// projeye atamak ve Suno bağlantısını doğrudan projeye indirmek.
+// ---------------------------------------------------------------- Music Library
+// Yalnızca ekranların kullandığı uçlar: kütüphaneyi okumak ve bir albümü
+// projeye atamak.
 //
 // AÇIK İŞ: albüm/parça yönetimi uçları (POST /albums, DELETE /albums/:id,
-// DELETE /tracks/:a/:t, /upload, /open-folder, /ingest-suno, /assets/…) artık
+// DELETE /tracks/:a/:t, /upload, /open-folder, /assets/…) artık
 // HİÇBİR yerden çağrılmıyor — eskiden panelin işiydi, panel kaldırıldı. Ya bu
 // ekranlar web'e eklenmeli ya da uçlar silinmeli; ikisi de yapılmadan durmasın.
 
 export async function fetchMusicLibrary(): Promise<import('./types').MusicLibraryResponse> {
   const response = await fetch('/api/music-library');
   return handleResponse<import('./types').MusicLibraryResponse>(response, 'Music library could not be loaded.');
-}
-
-export async function ingestSunoToProject(
-  projectId: string,
-  url: string,
-): Promise<import('./types').SunoIngestResponse> {
-  const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/music/ingest-suno`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url }),
-  });
-  return handleResponse<import('./types').SunoIngestResponse>(response, 'Suno tracks could not be downloaded.');
 }
 
 export async function assignAlbumToProject(payload: {

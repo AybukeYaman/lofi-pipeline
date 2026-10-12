@@ -3,7 +3,7 @@
 .env.*
 !.env.example
 
-# Tarayıcı oturum profilleri (Suno botu: .auth/suno-profile) — hesap cookie'leri içerir, asla commit edilmez
+# Tarayıcı oturum profilleri — hesap cookie'leri içerir, asla commit edilmez
 .auth/
 
 # Node modules & OS metadata
@@ -22,5 +22,4 @@ release/
 
 # Kullanıcı müzik kütüphanesi ve geçici test çıktıları (ses dosyaları, scratch)
 music_library/
-test-temp-suno-forbidden/
 scratch/

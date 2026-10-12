@@ -27,7 +27,6 @@
     "test:regression:update": "node --test-reporter=spec test/regression.js --update"
   },
   "dependencies": {
-    "playwright": "1.63.0",
     "react": "19.3.0",
     "react-dom": "^19.3.0"
   },

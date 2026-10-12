@@ -3,10 +3,10 @@
 import { useRef, useState } from 'react';
 
 import { errorText } from '../../format';
-import { STEP_GUIDE, type ViewStepId } from '../../workflow';
+import { stepGuide, type ViewStepId } from '../../workflow';
 
-export function StepGuide({ stepId }: { stepId: ViewStepId }) {
-  const guide = STEP_GUIDE[stepId];
+export function StepGuide({ stepId, pomodoro = false }: { stepId: ViewStepId; pomodoro?: boolean }) {
+  const guide = stepGuide(stepId, pomodoro);
   return (
     <div className="step-guide" role="note">
       <strong>{guide.who === 'system' ? 'Sistem yapacak' : 'Senin yapman gereken'}</strong>

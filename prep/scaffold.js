@@ -99,7 +99,7 @@ export function planProject({ videosDir, videoName, ambient, concept, totalTrack
 }
 
 /**
- * `totalTracks` verilmişse Suno için parça planı üretir; verilmemişse plan
+ * `totalTracks` verilmişse parça planı üretir; verilmemişse plan
  * yazılmaz (bkz. planProject'teki not).
  */
 export async function planProjectAsync(options) {

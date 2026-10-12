@@ -69,7 +69,7 @@ export function phaseFor(index, trackCount) {
 }
 
 /**
- * Enerji değerinden Suno stil niteleyicilerini üretir.
+ * Enerji değerinden müzik stil niteleyicilerini üretir.
  *
  * @param {number} energy - Faz enerjisi
  * @returns {{rhythm: string, tempo: string, density: string}}

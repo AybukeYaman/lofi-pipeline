@@ -1,4 +1,4 @@
-/** 3. adımın müzik bölümü: Suno'dan aktarım, albüm, Ambiance ve Pomodoro seçimi. Çerçeve `MusicOrderStage`de. */
+/** 3. adımın müzik bölümü: müzik yükleme, albüm, Ambiance ve Pomodoro seçimi. Çerçeve `MusicOrderStage`de. */
 import { useEffect, useState } from 'react';
 import {
   assignAlbumToProject,
@@ -6,7 +6,6 @@ import {
   copyProjectTracks,
   fetchMusicLibrary,
   fetchProject,
-  ingestSunoToProject,
   openProjectFolder,
   uploadProjectAudio,
   fetchProjectMusic,
@@ -29,13 +28,6 @@ export function MusicSection({ project, assets, onProjectUpdate }: StageProps) {
   const [isCompleting, setIsCompleting] = useState(false);
   const [completeError, setCompleteError] = useState<string | null>(null);
   const [completeSuccess, setCompleteSuccess] = useState<string | null>(null);
-
-  // Inline Suno downloader state
-  const [showSunoBox, setShowSunoBox] = useState(false);
-  const [sunoUrl, setSunoUrl] = useState('');
-  const [isIngestingSuno, setIsIngestingSuno] = useState(false);
-  const [sunoIngestError, setSunoIngestError] = useState<string | null>(null);
-  const [sunoIngestSuccess, setSunoIngestSuccess] = useState<string | null>(null);
 
   // Yüklenen dosyaların listesi (audioDir) — plan olmayan projede de adlar görünsün.
   const [musicInfo, setMusicInfo] = useState<ProjectMusicInfo | null>(null);
@@ -132,27 +124,6 @@ export function MusicSection({ project, assets, onProjectUpdate }: StageProps) {
 
   const isMusicReady = readinessMusic?.ready ?? (assets.music === 'ready');
 
-  const handleDownloadSuno = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!sunoUrl.trim() || isIngestingSuno) return;
-    setIsIngestingSuno(true);
-    setSunoIngestError(null);
-    setSunoIngestSuccess(null);
-    try {
-      const res = await ingestSunoToProject(project.id, sunoUrl.trim());
-      const updated = await fetchProject(project.id);
-      if (onProjectUpdate) {
-        onProjectUpdate(updated);
-      }
-      setSunoIngestSuccess(`✓ ${res.downloadedCount} parça Suno'dan indirildi ve projeye bağlandı!`);
-      setSunoUrl('');
-    } catch (err: unknown) {
-      setSunoIngestError(err instanceof Error ? err.message : 'Suno indirme başarısız oldu.');
-    } finally {
-      setIsIngestingSuno(false);
-    }
-  };
-
   const handleCompleteMusic = async () => {
     if (isCompleting) return;
     setIsCompleting(true);
@@ -245,44 +216,6 @@ export function MusicSection({ project, assets, onProjectUpdate }: StageProps) {
           </span>
         </p>
       </div>
-
-      {/* Suno Downloader Accordion / Box */}
-      {showSunoBox ? (
-        <div className="tool-box">
-          <div className="tool-box-head">
-            <strong className="tool-box-title">Suno linkinden otomatik indir</strong>
-            <button type="button" className="button button-compact" onClick={() => setShowSunoBox(false)}>
-              Kapat
-            </button>
-          </div>
-          <form onSubmit={handleDownloadSuno} className="tool-box-body">
-            <div className="tool-box-row">
-              <input
-                type="url"
-                className="tool-box-input"
-                placeholder="https://suno.com/playlist/... veya https://suno.com/song/..."
-                value={sunoUrl}
-                onChange={(e) => setSunoUrl(e.target.value)}
-                disabled={isIngestingSuno}
-                required
-              />
-              <button
-                type="submit"
-                className="button button-primary"
-                disabled={isIngestingSuno || !sunoUrl.trim()}
-              >
-                {isIngestingSuno ? 'İndiriliyor...' : 'İndir ve bağla'}
-              </button>
-            </div>
-            {sunoIngestError ? (
-              <p className="field-hint field-error" role="alert">
-                {sunoIngestError}
-              </p>
-            ) : null}
-            {sunoIngestSuccess ? <p className="field-hint field-success">{sunoIngestSuccess}</p> : null}
-          </form>
-        </div>
-      ) : null}
 
       {/* Album Library Picker Box */}
       {showAlbumPicker ? (
@@ -396,7 +329,7 @@ export function MusicSection({ project, assets, onProjectUpdate }: StageProps) {
 
       {audioCount === 0 ? (
         <EmptyState compact title="Henüz müzik parçası yok.">
-          Suno ses dosyalarını (.mp3, .wav, .m4a, .flac) şu klasöre koy:{' '}
+          Ses dosyalarını (.mp3, .wav, .m4a, .flac) şu klasöre koy:{' '}
           <code className="link-code" onClick={handleOpenFolder} title="Explorer’da ses klasörünü aç">
             {project.audioDir ?? 'ses klasörü'}
           </code>.
@@ -420,9 +353,6 @@ export function MusicSection({ project, assets, onProjectUpdate }: StageProps) {
             {showParentPicker ? 'Ana proje müziklerini gizle' : `Ana projeden müzik aktar (${project.parentId})`}
           </button>
         ) : null}
-        <button className="button" type="button" onClick={() => setShowSunoBox((prev) => !prev)}>
-          {showSunoBox ? 'Suno alanını gizle' : 'Suno linkinden indir'}
-        </button>
         <button className="button" type="button" onClick={handleOpenFolder}>
           audio/ klasörünü aç
         </button>
@@ -443,7 +373,7 @@ export function MusicSection({ project, assets, onProjectUpdate }: StageProps) {
 
       {!isMusicReady && audioCount === 0 ? (
         <p className="field-hint">
-          ℹ Devam etmek için ses klasörüne en az 1 dosya (.mp3, .wav) ekle, bir albüm aktar ya da yukarıdan Suno linkiyle indir.
+          ℹ Devam etmek için ses klasörüne en az 1 dosya (.mp3, .wav) ekle ya da bir albüm aktar.
         </p>
       ) : null}
     </>

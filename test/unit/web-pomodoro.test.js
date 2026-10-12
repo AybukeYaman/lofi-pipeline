@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
 
-import { ApiError, getPomodoro, startBuild, updatePomodoro } from '../../server/project-api.js';
+import { ApiError, getPomodoro, getProject, startBuild, updatePomodoro } from '../../server/project-api.js';
 import { createWebServer } from '../../server/web-server.js';
 
 let base;
@@ -232,6 +232,58 @@ describe('PUT /api/projects/:id/pomodoro', () => {
     const get = await fetch(`${url}/api/projects/http/pomodoro`);
     assert.equal(get.status, 200);
     assert.equal((await get.json()).validation.timeline.totalMinutes, 240);
+  });
+});
+
+describe('PUT /api/projects/:id/pomodoro — mola görüntüsü', () => {
+  async function projectWithFiles(name) {
+    const dir = await writeProject(name, { audio: tracksFor(240 * 60) });
+    await mkdir(join(dir, 'videolar'), { recursive: true });
+    await mkdir(join(dir, 'resimler'), { recursive: true });
+    await writeFile(join(dir, 'videolar', 'mola.mp4'), 'x');
+    await writeFile(join(dir, 'resimler', 'mola.png'), 'x');
+    return dir;
+  }
+
+  test('mola görüntüsünü ./göreli yol olarak yazar; ayar geri okununca aynı gelir', async () => {
+    await projectWithFiles('break-write');
+    const res = await updatePomodoro(
+      'break-write', { enabled: true, preset: '50/10', rounds: 4, breakClip: 'resimler/mola.png' }, options(),
+    );
+
+    assert.equal(res.settings.breakClip, './resimler/mola.png');
+    assert.equal((await readProjectJson('break-write')).pomodoro.breakClip, './resimler/mola.png');
+  });
+
+  test('boş metin mola görüntüsünü kaldırır (mola da çalışma görüntüsünü kullanır)', async () => {
+    await projectWithFiles('break-clear');
+    await updatePomodoro('break-clear', { enabled: true, rounds: 4, breakClip: 'videolar/mola.mp4' }, options());
+    const res = await updatePomodoro('break-clear', { enabled: true, rounds: 4, breakClip: '' }, options());
+
+    assert.equal(res.settings.breakClip, null);
+    assert.equal(Object.hasOwn((await readProjectJson('break-clear')).pomodoro, 'breakClip'), false);
+  });
+
+  test('olmayan dosya, proje dışı yol ve yanlış tür 422 — dosya değişmez', async () => {
+    await projectWithFiles('break-bad');
+    for (const breakClip of ['videolar/yok.mp4', '../baska/mola.mp4', 'audio/' + tracksFor(60, 1)[0]]) {
+      await assert.rejects(
+        updatePomodoro('break-bad', { enabled: true, rounds: 4, breakClip }, options()),
+        (error) => error instanceof ApiError && error.status === 422,
+        breakClip,
+      );
+    }
+    assert.equal(Object.hasOwn(await readProjectJson('break-bad'), 'pomodoro'), false);
+  });
+
+  test('proje durumu seçilebilecek dosyaları iki klasörden listeler', async () => {
+    await projectWithFiles('break-list');
+    await updatePomodoro('break-list', { enabled: true, rounds: 4, breakClip: 'videolar/mola.mp4' }, options());
+    const project = await getProject('break-list', { videosDir });
+
+    assert.deepEqual([...project.breakCandidates].sort(), ['resimler/mola.png', 'videolar/mola.mp4']);
+    assert.deepEqual(project.breakClip, { value: './videolar/mola.mp4', exists: true });
+    assert.equal(project.readiness.pomodoro.breakClip, './videolar/mola.mp4');
   });
 });
 

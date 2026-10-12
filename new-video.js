@@ -184,7 +184,7 @@ function describeResult(result) {
     '',
     'Sıradaki adımlar:',
     '  1. Klibi videolar\\ altına koy (tek resim modunda resimler\\ altına bir görsel)',
-    '  2. Suno parçalarını audio\\ altına koy',
+    '  2. Müzik parçalarını audio\\ altına koy',
     `  3. node build.js --project "${resolve(result.dir, 'project.json')}"`,
   );
   return lines.join('\n');
