@@ -186,7 +186,7 @@ export function LabelEditor({ projectId, onSaved }: LabelEditorProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   /** Önizlemede hangi anın gösterileceği: Pomodoro yazıları için çalışma ya da mola. */
-  const [phase, setPhase] = useState<'work' | 'break'>('work');
+  const [phase, setPhase] = useState<'ready' | 'work' | 'break'>('work');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -498,6 +498,14 @@ export function LabelEditor({ projectId, onSaved }: LabelEditorProps) {
         {pomodoroOn && hasPomodoroLabel ? (
           <div className="label-time" role="group" aria-label="Önizlemede gösterilen an">
             <span>Önizlemede göster:</span>
+            <button
+              type="button"
+              className={phase === 'ready' ? 'button button-compact button-selected' : 'button button-compact'}
+              aria-pressed={phase === 'ready'}
+              onClick={() => setPhase('ready')}
+            >
+              Hazırlık anı
+            </button>
             <button
               type="button"
               className={phase === 'work' ? 'button button-compact button-selected' : 'button button-compact'}

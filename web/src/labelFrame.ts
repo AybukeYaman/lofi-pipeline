@@ -16,7 +16,7 @@ export const DEFAULT_LABEL_SIZE = 0.05;
 export const DEFAULT_LABEL_COLOR = '#ffffff';
 
 /** Pomodoro oturum türü → ekrandaki yazı (core/label-filter.js `STATUS_TEXT` aynası). */
-export const STATUS_TEXT = { work: 'STUDY', break: 'BREAK' } as const;
+export const STATUS_TEXT = { ready: 'GET READY', work: 'STUDY', break: 'BREAK' } as const;
 
 export const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value));

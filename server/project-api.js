@@ -716,7 +716,7 @@ export async function getPomodoro(id, { videosDir = DEFAULT_VIDEOS_DIR, probeFn 
  * kaldirir ve sistem bugunku gibi calisir.
  *
  * @param {unknown} body `{ enabled, preset?, workMinutes?, breakMinutes?, rounds?,
- *   countdownSeconds?, countdownBeep?, workStartSound?, breakStartSound?, trimExcess? }`
+ *   countdownSeconds?, countdownBeep?, trimExcess?, breakClip? }`
  */
 export async function updatePomodoro(id, body, { videosDir = DEFAULT_VIDEOS_DIR, probeFn = probe } = {}) {
   const projectDir = await resolveProjectDir(id, videosDir);
@@ -728,8 +728,6 @@ export async function updatePomodoro(id, body, { videosDir = DEFAULT_VIDEOS_DIR,
     rounds: 'number',
     countdownSeconds: 'number',
     countdownBeep: 'boolean',
-    workStartSound: 'boolean',
-    breakStartSound: 'boolean',
     trimExcess: 'boolean',
     // Mola görüntüsü (proje klasörüne göreli yol); '' → mola da çalışma görüntüsünü kullanır.
     breakClip: 'string',

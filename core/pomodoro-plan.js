@@ -20,13 +20,15 @@
  *     "breakMinutes": 10,
  *     "rounds": 4,
  *     "countdownSeconds": 3,
- *     "countdownBeep": true,
- *     "workStartSound": true,
- *     "breakStartSound": true,
+ *     "countdownBeep": true,    // her oturumun (GET READY, WORK, BREAK) son 3 saniyesinde 3 bip
  *     "trimExcess": false,      // fazla müzik kullanıcı onayıyla kırpılır
  *     "breakClip": null,        // mola görüntüsü (resim ya da döngü videosu); boşsa mola da çalışma görüntüsünü kullanır
- *     "cue": { "volumeDb": -10, "beepFile": null, "workStartFile": null, "breakStartFile": null }
+ *     "cue": { "volumeDb": -10, "beepFile": null }
  *   }
+ *
+ * Her Pomodoro videosu `INTRO_SECONDS` (2 dk) süren bir GET READY oturumuyla başlar;
+ * `rounds` turluk WORK/BREAK ondan sonra gelir. Bip akışının TAMAMI budur:
+ * her oturumun (hazırlık dahil) bitişinden önce 3 bip. Ayrı başlangıç sesi yok.
  */
 
 /**
@@ -38,8 +40,11 @@ export const POMODORO_PRESETS = [
   { id: '30/10', workMinutes: 30, breakMinutes: 10 },
 ];
 
-/** Oturum türleri. Timeline bu sırayla üretilir: her turda önce WORK, sonra BREAK. */
+/** Tur içindeki oturum türleri. Timeline bu sırayla üretilir: her turda önce WORK, sonra BREAK. */
 export const SESSION_KINDS = ['work', 'break'];
+
+/** Videonun başındaki GET READY oturumu (sn): her Pomodoro videosunda var, ayarı yok. */
+export const INTRO_SECONDS = 120;
 
 /** Varsayılanlar — UI ve config aynı değerleri buradan okur. */
 export const POMODORO_DEFAULTS = {
@@ -49,8 +54,6 @@ export const POMODORO_DEFAULTS = {
   rounds: 4,
   countdownSeconds: 3,
   countdownBeep: true,
-  workStartSound: true,
-  breakStartSound: true,
   /** Fazla müzik sorulmadan kırpılmaz; kullanıcı onayı bu bayrağı açar. */
   trimExcess: false,
   /**
@@ -64,8 +67,6 @@ export const POMODORO_DEFAULTS = {
     volumeDb: -10,
     /** null → ffmpeg sine kaynağıyla üretilir; yol verilirse o dosya çalınır. */
     beepFile: null,
-    workStartFile: null,
-    breakStartFile: null,
   },
 };
 
@@ -96,11 +97,9 @@ export const MATCH_TOLERANCE_SECONDS = 1;
  * @property {string|null} preset Eşleşen hazır düzenin kimliği, yoksa null.
  * @property {number} countdownSeconds
  * @property {boolean} countdownBeep
- * @property {boolean} workStartSound
- * @property {boolean} breakStartSound
  * @property {boolean} trimExcess
  * @property {string|null} breakClip Mola görüntüsünün yolu, yoksa null (mola = çalışma görüntüsü).
- * @property {{ volumeDb: number, beepFile: string|null, workStartFile: string|null, breakStartFile: string|null }} cue
+ * @property {{ volumeDb: number, beepFile: string|null }} cue
  */
 
 /**
@@ -156,8 +155,6 @@ export function normalizePomodoroSelection(raw, field = 'pomodoro') {
     preset: presetIdFor(workMinutes, breakMinutes),
     countdownSeconds,
     countdownBeep: readBoolean(raw.countdownBeep, `${field}.countdownBeep`, POMODORO_DEFAULTS.countdownBeep, problems),
-    workStartSound: readBoolean(raw.workStartSound, `${field}.workStartSound`, POMODORO_DEFAULTS.workStartSound, problems),
-    breakStartSound: readBoolean(raw.breakStartSound, `${field}.breakStartSound`, POMODORO_DEFAULTS.breakStartSound, problems),
     trimExcess: readBoolean(raw.trimExcess, `${field}.trimExcess`, POMODORO_DEFAULTS.trimExcess, problems),
     breakClip: readBreakClip(raw.breakClip, `${field}.breakClip`, problems),
     cue: readCue(raw.cue, `${field}.cue`, problems),
@@ -167,30 +164,37 @@ export function normalizePomodoroSelection(raw, field = 'pomodoro') {
 }
 
 /**
- * Plandan WORK/BREAK oturumlarını üretir.
+ * Plandan oturumları üretir: önce 2 dk GET READY, sonra her turda WORK + BREAK.
  *
- * Her tur bir WORK ve ardından bir BREAK'tir (spec örneği: 50/10 × 4 →
- * WORK 01 … BREAK 04, toplam 240 dk). Tur sayısı değişince timeline kendiliğinden
- * yeniden kurulur; başka hiçbir yerde süre hesabı yok.
+ * Spec örneği: 50/10 × 4 → GET READY, WORK 01 … BREAK 04, toplam 242 dk.
+ * Tur sayısı değişince timeline kendiliğinden yeniden kurulur; başka hiçbir
+ * yerde süre hesabı yok.
  *
  * @param {PomodoroPlan} plan
  * @returns {{
- *   sessions: Array<{ index: number, kind: 'work'|'break', round: number, label: string,
+ *   sessions: Array<{ index: number, kind: 'ready'|'work'|'break', round: number, label: string,
  *     startSeconds: number, endSeconds: number, durationSeconds: number }>,
  *   totalSeconds: number,
  *   totalMinutes: number,
  * }}
  */
 export function buildTimeline(plan) {
-  const sessions = [];
-  let elapsed = 0;
-  let index = 0;
+  const sessions = [{
+    index: 0,
+    kind: 'ready',
+    round: 0,
+    label: 'GET READY',
+    startSeconds: 0,
+    endSeconds: INTRO_SECONDS,
+    durationSeconds: INTRO_SECONDS,
+  }];
+  let elapsed = INTRO_SECONDS;
 
   for (let round = 1; round <= plan.rounds; round++) {
     for (const kind of SESSION_KINDS) {
       const durationSeconds = (kind === 'work' ? plan.workMinutes : plan.breakMinutes) * 60;
       sessions.push({
-        index: index++,
+        index: sessions.length,
         kind,
         round,
         label: `${kind === 'work' ? 'WORK' : 'BREAK'} ${String(round).padStart(2, '0')}`,
@@ -206,60 +210,38 @@ export function buildTimeline(plan) {
 }
 
 /**
- * Timeline'a yerleşecek ses işaretleri.
+ * Timeline'a yerleşecek bip olayları.
  *
- * Her oturum için: `countdownSeconds` saniye önce birer saniye arayla beep'ler
- * (T-3, T-2, T-1), tam başlangıç anında (T=0) oturum efekti. Böylece hem
- * WORK → BREAK hem BREAK → WORK geçişinde aynı geri sayım duyulur.
+ * Bip akışının TAMAMI: her oturumun (GET READY, her WORK, her BREAK — videonun
+ * son oturumu dahil) bitişinden `countdownSeconds` saniye önce birer saniye
+ * arayla bip'ler (T-3, T-2, T-1). Başlangıç sesi yok.
  *
- * İlk oturum t=0'da başlıyor: geri sayımı videodan ÖNCEYE düşerdi, o yüzden
- * atlanır ve `skipped` ile raporlanır — sessizce kaybolmasın. Başlangıç efekti
- * yerinde kalır (0. saniyede duyulur).
+ * Her oturum en az 1 dk sürdüğü için hiçbir bip videonun başından önceye düşmez.
  *
  * @param {PomodoroPlan} plan
  * @param {ReturnType<typeof buildTimeline>} timeline
- * @returns {{
- *   events: Array<{ atSeconds: number, type: 'beep'|'start', kind: 'work'|'break',
- *     session: number, label: string }>,
- *   skipped: Array<{ atSeconds: number, type: string, session: number, reason: string }>,
- * }}
+ * @returns {{ events: Array<{ atSeconds: number, type: 'beep', kind: 'ready'|'work'|'break',
+ *   session: number, label: string }> }}
  */
 export function buildCueEvents(plan, timeline) {
   const events = [];
-  const skipped = [];
 
-  for (const session of timeline.sessions) {
-    if (plan.countdownBeep && plan.countdownSeconds > 0) {
+  if (plan.countdownBeep && plan.countdownSeconds > 0) {
+    for (const session of timeline.sessions) {
       for (let n = plan.countdownSeconds; n >= 1; n--) {
-        const event = {
-          atSeconds: session.startSeconds - n,
+        events.push({
+          atSeconds: session.endSeconds - n,
           type: 'beep',
           kind: session.kind,
           session: session.index,
           label: `${session.label} T-${n}`,
-        };
-        if (event.atSeconds < 0) {
-          skipped.push({ ...event, reason: 'video başlamadan önceye düşüyor' });
-        } else {
-          events.push(event);
-        }
+        });
       }
-    }
-
-    const soundOn = session.kind === 'work' ? plan.workStartSound : plan.breakStartSound;
-    if (soundOn) {
-      events.push({
-        atSeconds: session.startSeconds,
-        type: 'start',
-        kind: session.kind,
-        session: session.index,
-        label: `${session.label} START`,
-      });
     }
   }
 
   events.sort((a, b) => a.atSeconds - b.atSeconds);
-  return { events, skipped };
+  return { events };
 }
 
 /**
@@ -372,7 +354,7 @@ export function formatClock(seconds) {
 export function describeComparison(comparison, plan) {
   const head =
     `Pomodoro timeline: ${formatClock(comparison.timelineSeconds)} ` +
-    `(${plan.workMinutes}/${plan.breakMinutes} × ${plan.rounds} tur)\n` +
+    `(${plan.workMinutes}/${plan.breakMinutes} × ${plan.rounds} tur + ${INTRO_SECONDS / 60} dk hazırlık)\n` +
     `Müzik toplamı: ${formatClock(comparison.musicSeconds)}`;
 
   if (comparison.status === 'excess') {
@@ -416,7 +398,7 @@ export function describeTimeline(timeline) {
  *
  * Denetlenenler (spec bölüm 8): mod açık mı, preset ve tur sayısı geçerli mi,
  * toplam süre ne, müzik toplamı ne, fazla/eksik ne kadar, kaç kırpma gerekiyor,
- * bütün oturumlar doldurulabiliyor mu, cue olayları timeline'a sığıyor mu.
+ * bütün oturumlar doldurulabiliyor mu.
  *
  * `ok: false` ise montaj BAŞLATILMAZ. Fazla müzik kullanıcı onayıyla
  * (`plan.trimExcess`) kırpılabilir; eksik müzik üretilemez, her durumda durur.
@@ -487,15 +469,6 @@ export function validatePomodoro({ plan, tracks, tolerance = MATCH_TOLERANCE_SEC
     );
   }
 
-  for (const skippedCue of cues.skipped) {
-    warnings.push(`${skippedCue.label} atlandı: ${skippedCue.reason}.`);
-  }
-  // Cue'lar müziğin üstüne bindiriliyor; timeline'ın dışına taşan bir olay sessiz kalırdı.
-  const strayCue = cues.events.find((event) => event.atSeconds > timeline.totalSeconds);
-  if (strayCue) {
-    problems.push(`${strayCue.label} timeline dışına düşüyor (${formatClock(strayCue.atSeconds)}).`);
-  }
-
   return {
     enabled: true,
     ok: problems.length === 0,
@@ -535,12 +508,12 @@ export function serializePomodoroPlan(plan) {
   };
 
   const defaults = POMODORO_DEFAULTS;
-  for (const key of ['countdownSeconds', 'countdownBeep', 'workStartSound', 'breakStartSound', 'trimExcess', 'breakClip']) {
+  for (const key of ['countdownSeconds', 'countdownBeep', 'trimExcess', 'breakClip']) {
     if (plan[key] !== defaults[key]) out[key] = plan[key];
   }
 
   const cue = {};
-  for (const key of ['volumeDb', 'beepFile', 'workStartFile', 'breakStartFile']) {
+  for (const key of ['volumeDb', 'beepFile']) {
     if (plan.cue[key] !== defaults.cue[key]) cue[key] = plan.cue[key];
   }
   if (Object.keys(cue).length > 0) out.cue = cue;
@@ -632,7 +605,5 @@ function readCue(raw, field, problems) {
   return {
     volumeDb,
     beepFile: file(raw.beepFile, `${field}.beepFile`),
-    workStartFile: file(raw.workStartFile, `${field}.workStartFile`),
-    breakStartFile: file(raw.breakStartFile, `${field}.breakStartFile`),
   };
 }

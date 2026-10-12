@@ -2,12 +2,13 @@
  * Uçtan uca build, Pomodoro açık: doğrulama → fazla müziğin kırpılması →
  * işaret seslerinin timeline'a bindirilmesi → montaj. Gerçek encode.
  *
- * Spec'teki Test 2 (fazla müzik kırpılır) ve Test 5 (oturum geçişlerinde
- * 3 saniyelik geri sayım + başlangıç efekti) burada ölçülerek doğrulanıyor:
- * işaretler nihai videodan geri okunuyor, filtre metnine bakılarak değil.
+ * Spec'teki Test 2 (fazla müzik kırpılır) ve Test 5 (her oturumun son 3
+ * saniyesinde 3 bip — GET READY ve videonun sonu dahil, başlangıç sesi YOK)
+ * burada ölçülerek doğrulanıyor: bipler nihai videodan geri okunuyor, filtre
+ * metnine bakılarak değil.
  *
  * Süreler dakika cinsinden olmak zorunda (Pomodoro'nun birimi bu), o yüzden
- * en küçük anlamlı kurulum seçildi: 1/1 × 2 tur = 4 dakika.
+ * en küçük anlamlı kurulum seçildi: 2 dk GET READY + 1/1 × 2 tur = 6 dakika.
  */
 
 import assert from 'node:assert/strict';
@@ -59,21 +60,22 @@ describe('build — Pomodoro: kırpma, oturumlar ve işaret sesleri', () => {
     await mkdir(dir.path('audio'));
     await makeDriftingClip(dir.path('clip.mp4'), { width: 320, height: 180 });
 
-    // 3 × 100 sn = 300 sn müzik, 240 sn timeline → 60 sn fazla.
+    // 4 × 100 sn = 400 sn müzik, 360 sn timeline (2 dk GET READY + 4 dk) → 40 sn fazla.
     await makeQuietTone(dir.path('audio/01-a.m4a'), { seconds: 100, frequency: 220 });
     await makeQuietTone(dir.path('audio/02-b.m4a'), { seconds: 100, frequency: 330 });
     await makeQuietTone(dir.path('audio/03-c.m4a'), { seconds: 100, frequency: 440 });
+    await makeQuietTone(dir.path('audio/04-d.m4a'), { seconds: 100, frequency: 550 });
 
     await writeFile(dir.path('project.json'), JSON.stringify({
       clip: './clip.mp4',
       audioDir: './audio',
-      order: ['01-a.m4a', '02-b.m4a', '03-c.m4a'],
+      order: ['01-a.m4a', '02-b.m4a', '03-c.m4a', '04-d.m4a'],
       pomodoro: {
         enabled: true,
         workMinutes: 1,
         breakMinutes: 1,
         rounds: 2,
-        // Kırpma onaylı: fazla 60 sn sorulmadan kesilsin (onay akışı
+        // Kırpma onaylı: fazla 40 sn sorulmadan kesilsin (onay akışı
         // test/unit/web-pomodoro.test.js'te ayrıca doğrulanıyor).
         trimExcess: true,
         // İşaretleri müziğin üstünde net duyulur yap: ölçüm eşiği ayırabilsin.
@@ -90,79 +92,82 @@ describe('build — Pomodoro: kırpma, oturumlar ve işaret sesleri', () => {
   });
   after(() => dir?.cleanup());
 
-  test('çıktı Pomodoro timeline süresinde (240 sn), müzik süresinde değil', async () => {
+  test('çıktı Pomodoro timeline süresinde (360 sn), müzik süresinde değil', async () => {
     const out = await probe(config.output.video);
-    assert.ok(Math.abs(out.duration - 240) < 0.2, `süre ${out.duration}`);
+    assert.ok(Math.abs(out.duration - 360) < 0.2, `süre ${out.duration}`);
   });
 
   test('adım sırası: ses → işaretler → montaj (Ambiance yok, 03 atlandı)', () => {
     assert.deepEqual(report.steps.map((s) => s.tag), ['01', '02', '07', '06', '04', '05']);
   });
 
-  test('Test 2 — fazla 60 sn son parçadan kırpıldı, orijinal dosya değişmedi', async () => {
+  test('Test 2 — fazla 40 sn son parçadan kırpıldı, orijinal dosya değişmedi', async () => {
     const { trim, comparison } = report.pomodoroPlan;
     assert.equal(comparison.status, 'excess');
-    assert.equal(Math.round(comparison.excessSeconds), 60);
+    assert.equal(Math.round(comparison.excessSeconds), 40);
     assert.equal(trim.trimmedCount, 1);
     assert.equal(trim.droppedCount, 0);
-    assert.deepEqual(trim.tracks.map((t) => Math.round(t.usedDuration)), [100, 100, 40]);
+    assert.deepEqual(trim.tracks.map((t) => Math.round(t.usedDuration)), [100, 100, 100, 60]);
 
     // Kırpma yalnızca render'da: kaynak dosya hâlâ 100 saniye.
-    const source = await probe(dir.path('audio/03-c.m4a'));
+    const source = await probe(dir.path('audio/04-d.m4a'));
     assert.ok(Math.abs(source.duration - 100) < 0.2, `kaynak ${source.duration}`);
   });
 
   test('tracklist kırpılmış süreye göre damgalanır', async () => {
     const text = await readFile(config.output.tracklist, 'utf8');
-    assert.deepEqual(text.trim().split('\n').map((line) => line.split('  ')[0]), ['0:00', '1:40', '3:20']);
+    assert.deepEqual(text.trim().split('\n').map((line) => line.split('  ')[0]), ['0:00', '1:40', '3:20', '5:00']);
   });
 
-  test('timeline dosyası WORK/BREAK dökümünü verir', async () => {
+  test('timeline dosyası GET READY + WORK/BREAK dökümünü verir', async () => {
     const text = await readFile(config.output.pomodoroTimeline, 'utf8');
     assert.equal(text.trim(), [
-      'WORK 01', '00:00 - 01:00', '',
-      'BREAK 01', '01:00 - 02:00', '',
-      'WORK 02', '02:00 - 03:00', '',
-      'BREAK 02', '03:00 - 04:00',
+      'GET READY', '00:00 - 02:00', '',
+      'WORK 01', '02:00 - 03:00', '',
+      'BREAK 01', '03:00 - 04:00', '',
+      'WORK 02', '04:00 - 05:00', '',
+      'BREAK 02', '05:00 - 06:00',
     ].join('\n'));
   });
 
-  test('Test 5 — her geçişte 3 beep + başlangıç efekti, doğru saniyelerde', async () => {
+  test('Test 5 — her oturumun son 3 saniyesinde 3 bip: GET READY, çalışma, mola ve videonun sonu', async () => {
     const { onsets } = await findOnsets(config.output.video, { dir, ...onsetOptions() });
 
-    // 4 oturum var; ilkinin geri sayımı videodan önceye düştüğü için atlanıyor.
-    //   t=0   WORK 01 başlangıç efekti
-    //   57,58,59,60    BREAK 01
-    //   117,118,119,120 WORK 02
-    //   177,178,179,180 BREAK 02
-    const expected = [0, 57, 58, 59, 60, 117, 118, 119, 120, 177, 178, 179, 180];
+    // 5 oturum (GET READY 0-120, WORK 120-180, BREAK 180-240, WORK 240-300, BREAK 300-360).
+    // Başlangıç sesi YOK: yalnızca her oturumun bitişinden önceki 3 bip.
+    const expected = [
+      117, 118, 119,   // GET READY'nin 2. dakikasının son 3 sn'si
+      177, 178, 179,   // WORK 01
+      237, 238, 239,   // BREAK 01
+      297, 298, 299,   // WORK 02
+      357, 358, 359,   // BREAK 02 = videonun son 3 sn'si (ses kararması bipleri kısmaz)
+    ];
     assert.equal(onsets.length, expected.length, `bulunan işaretler: ${onsets.map((o) => o.toFixed(2))}`);
     for (const [i, at] of expected.entries()) {
       assert.ok(
         Math.abs(onsets[i] - at) < 0.2,
-        `işaret ${i}: ${onsets[i].toFixed(2)} sn, beklenen ${at} sn`,
+        `bip ${i}: ${onsets[i].toFixed(2)} sn, beklenen ${at} sn`,
       );
     }
   });
 
-  test('geri sayımın son beep\'i ile oturum başlangıcı arasında tam 1 saniye var', async () => {
+  test('bipler tam 1 saniye arayla ve videonun başında ses yok', async () => {
     const { onsets } = await findOnsets(config.output.video, { dir, ...onsetOptions() });
-    // 60, 120, 180 başlangıçları: bir öncekiyle farkı 1 sn olmalı.
-    for (const start of [60, 120, 180]) {
-      const i = onsets.findIndex((o) => Math.abs(o - start) < 0.2);
-      assert.ok(Math.abs((onsets[i] - onsets[i - 1]) - 1) < 0.05, `${start}. sn geçişi`);
+    for (let group = 0; group < onsets.length; group += 3) {
+      assert.ok(Math.abs((onsets[group + 1] - onsets[group]) - 1) < 0.05, `${group}. grup`);
+      assert.ok(Math.abs((onsets[group + 2] - onsets[group + 1]) - 1) < 0.05, `${group}. grup`);
     }
+    assert.ok(onsets[0] > 100, `ilk bip GET READY'nin sonunda olmalı (${onsets[0].toFixed(2)} sn)`);
   });
 
   test('raporda plan, oturumlar ve işaret sayısı var', () => {
     assert.equal(report.pomodoro, 'applied');
     assert.equal(report.pomodoroPlan.rounds, 2);
-    assert.equal(report.pomodoroPlan.totalSeconds, 240);
+    assert.equal(report.pomodoroPlan.totalSeconds, 360);
     assert.deepEqual(report.pomodoroPlan.sessions.map((s) => s.label), [
-      'WORK 01', 'BREAK 01', 'WORK 02', 'BREAK 02',
+      'GET READY', 'WORK 01', 'BREAK 01', 'WORK 02', 'BREAK 02',
     ]);
-    // 4 oturum × (3 beep + 1 efekt) − ilk oturumun atlanan 3 beep'i = 13
-    assert.equal(report.pomodoroPlan.cueEvents, 13);
-    assert.equal(report.details['06'].skippedCount, 3);
+    // 5 oturum × 3 bip
+    assert.equal(report.pomodoroPlan.cueEvents, 15);
   });
 });

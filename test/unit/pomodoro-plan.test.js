@@ -1,8 +1,10 @@
 /**
  * core/pomodoro-plan.js — saf plan/timeline/karşılaştırma mantığı.
  *
- * Senaryolar spec'teki kabul testleriyle aynı sayıları kullanıyor:
- * 50/10×4 ve 30/10×6 → 240 dk, 253:00 fazla, 227:30 eksik.
+ * Her video 2 dk GET READY ile başlar; bip akışının tamamı "her oturumun son
+ * 3 saniyesinde 3 bip" (başlangıç sesi yok). Senaryolar spec'teki sayıların
+ * hazırlık süresi eklenmiş hâli: 50/10×4 ve 30/10×6 → 242 dk (240 + 2),
+ * 255:00 fazla, 229:30 eksik.
  */
 
 import assert from 'node:assert/strict';
@@ -82,83 +84,91 @@ describe('normalizePomodoroSelection', () => {
     assert.ok(problems.some((p) => p.includes('pomodoro.cue.volumeDb')));
   });
 
-  it('cue dosyaları verilebilir, verilmezse üretilen ses için null kalır', () => {
-    const plan = planOf({ cue: { workStartFile: 'C:\\ses\\work_start.wav' } });
-    assert.equal(plan.cue.workStartFile, 'C:\\ses\\work_start.wav');
-    assert.equal(plan.cue.breakStartFile, null);
-    assert.equal(plan.cue.beepFile, null);
+  it('bip dosyası verilebilir, verilmezse üretilen ses için null kalır', () => {
+    assert.equal(planOf({ cue: { beepFile: 'C:\\ses\\bip.wav' } }).cue.beepFile, 'C:\\ses\\bip.wav');
+    assert.equal(planOf({}).cue.beepFile, null);
+  });
+
+  it('eski projelerdeki başlangıç sesi alanları sessizce yok sayılır (proje yüklenir)', () => {
+    const { plan, problems } = normalizePomodoroSelection({
+      enabled: true, workStartSound: true, breakStartSound: false, cue: { workStartFile: 'x.wav' },
+    });
+    assert.deepEqual(problems, []);
+    assert.equal(Object.hasOwn(plan, 'workStartSound'), false);
+    assert.equal(Object.hasOwn(plan.cue, 'workStartFile'), false);
   });
 });
 
 describe('buildTimeline', () => {
-  it('50/10 × 4 → 240 dakika, 8 oturum', () => {
+  it('50/10 × 4 → 242 dakika: 2 dk GET READY + 8 oturum', () => {
     const timeline = buildTimeline(planOf({ preset: '50/10', rounds: 4 }));
-    assert.equal(timeline.totalMinutes, 240);
-    assert.equal(timeline.sessions.length, 8);
+    assert.equal(timeline.totalMinutes, 242);
+    assert.equal(timeline.sessions.length, 9);
   });
 
-  it('30/10 × 6 → yine 240 dakika (spec Test 4)', () => {
+  it('30/10 × 6 → yine 242 dakika (spec Test 4)', () => {
     const timeline = buildTimeline(planOf({ preset: '30/10', rounds: 6 }));
-    assert.equal(timeline.totalMinutes, 240);
-    assert.equal(timeline.sessions.length, 12);
+    assert.equal(timeline.totalMinutes, 242);
+    assert.equal(timeline.sessions.length, 13);
   });
 
-  it('oturumlar WORK/BREAK sırasıyla ve boşluksuz dizilir', () => {
-    const timeline = buildTimeline(planOf({ preset: '50/10', rounds: 4 }));
+  it('video her zaman 2 dk GET READY ile başlar, sonra WORK/BREAK boşluksuz dizilir', () => {
+    const timeline = buildTimeline(planOf({ preset: '50/10', rounds: 2 }));
     assert.deepEqual(
-      timeline.sessions.map((s) => [s.label, s.startSeconds / 60, s.endSeconds / 60]),
+      timeline.sessions.map((s) => [s.kind, s.label, s.startSeconds / 60, s.endSeconds / 60]),
       [
-        ['WORK 01', 0, 50], ['BREAK 01', 50, 60],
-        ['WORK 02', 60, 110], ['BREAK 02', 110, 120],
-        ['WORK 03', 120, 170], ['BREAK 03', 170, 180],
-        ['WORK 04', 180, 230], ['BREAK 04', 230, 240],
+        ['ready', 'GET READY', 0, 2],
+        ['work', 'WORK 01', 2, 52], ['break', 'BREAK 01', 52, 62],
+        ['work', 'WORK 02', 62, 112], ['break', 'BREAK 02', 112, 122],
       ],
     );
+    assert.deepEqual(timeline.sessions.map((s) => s.index), [0, 1, 2, 3, 4]);
   });
 
   it('tur sayısı değişince timeline kendiliğinden yeniden kurulur', () => {
     const timeline = buildTimeline(planOf({ preset: '50/10', rounds: 8 }));
-    assert.equal(timeline.totalMinutes, 480);
+    assert.equal(timeline.totalMinutes, 482);
     assert.equal(timeline.sessions.at(-1).label, 'BREAK 08');
   });
 
-  it('describeTimeline spec\'teki dökümü verir', () => {
+  it('describeTimeline GET READY ile başlayan dökümü verir', () => {
     const text = describeTimeline(buildTimeline(planOf({ preset: '50/10', rounds: 4 })));
-    assert.ok(text.startsWith('WORK 01\n00:00 - 50:00\n\nBREAK 01\n50:00 - 60:00'));
-    assert.ok(text.trimEnd().endsWith('BREAK 04\n230:00 - 240:00'));
+    assert.ok(text.startsWith('GET READY\n00:00 - 02:00\n\nWORK 01\n02:00 - 52:00\n\nBREAK 01\n52:00 - 62:00'));
+    assert.ok(text.trimEnd().endsWith('BREAK 04\n232:00 - 242:00'));
   });
 });
 
-describe('buildCueEvents', () => {
-  const plan = planOf({ preset: '50/10', rounds: 4 });
+describe('buildCueEvents — bip akışının tamamı', () => {
+  const plan = planOf({ preset: '50/10', rounds: 2 });
   const timeline = buildTimeline(plan);
 
-  it('her oturum için T-3/T-2/T-1 beep ve T=0 başlangıç efekti koyar', () => {
+  it('GET READY dahil HER oturumun son 3 saniyesinde 3 bip (T-3, T-2, T-1)', () => {
     const { events } = buildCueEvents(plan, timeline);
-    const atBreak1 = events.filter((e) => e.session === 1);
-    assert.deepEqual(
-      atBreak1.map((e) => [e.atSeconds, e.type]),
-      [[50 * 60 - 3, 'beep'], [50 * 60 - 2, 'beep'], [50 * 60 - 1, 'beep'], [50 * 60, 'start']],
-    );
+    const ready = events.filter((e) => e.session === 0);
+    assert.deepEqual(ready.map((e) => e.atSeconds), [117, 118, 119]);
+    const work1 = events.filter((e) => e.session === 1);
+    assert.deepEqual(work1.map((e) => e.atSeconds), [52 * 60 - 3, 52 * 60 - 2, 52 * 60 - 1]);
   });
 
-  it('WORK → BREAK ve BREAK → WORK geçişlerinin ikisinde de geri sayım var', () => {
+  it('videonun son oturumunun sonunda da bip var', () => {
     const { events } = buildCueEvents(plan, timeline);
-    const starts = events.filter((e) => e.type === 'start');
-    assert.equal(starts.length, 8);
-    for (const start of starts.slice(1)) {
-      const beeps = events.filter((e) => e.type === 'beep' && e.session === start.session);
-      assert.equal(beeps.length, 3, `${start.label} için geri sayım eksik`);
-      assert.equal(start.atSeconds - beeps.at(-1).atSeconds, 1);
+    const last = events.filter((e) => e.session === timeline.sessions.length - 1);
+    assert.deepEqual(last.map((e) => e.atSeconds), [122 * 60 - 3, 122 * 60 - 2, 122 * 60 - 1]);
+  });
+
+  it('başka ses yok: yalnızca bip, oturum başına tam 3; toplam = oturum × 3', () => {
+    const { events } = buildCueEvents(plan, timeline);
+    assert.ok(events.every((e) => e.type === 'beep'));
+    assert.equal(events.length, timeline.sessions.length * 3);
+    for (const session of timeline.sessions) {
+      assert.equal(events.filter((e) => e.session === session.index).length, 3);
     }
   });
 
-  it('ilk oturumun geri sayımı videodan önceye düştüğü için atlanır ve raporlanır', () => {
-    const { events, skipped } = buildCueEvents(plan, timeline);
-    assert.equal(skipped.length, 3);
-    assert.ok(skipped.every((s) => s.atSeconds < 0 && s.session === 0));
-    // Başlangıç efekti yerinde: video 0. saniyede WORK ile açılıyor.
-    assert.ok(events.some((e) => e.atSeconds === 0 && e.type === 'start' && e.kind === 'work'));
+  it('hiçbir bip videonun başından önceye düşmez (atlanan bip yok)', () => {
+    const { events } = buildCueEvents(plan, timeline);
+    assert.ok(events.every((e) => e.atSeconds >= 0));
+    assert.equal(events[0].atSeconds, 117, 'ilk bip GET READY\'nin 2. dakikasının son 3 saniyesinde');
   });
 
   it('olaylar zamana göre sıralı döner', () => {
@@ -167,12 +177,15 @@ describe('buildCueEvents', () => {
     assert.deepEqual(times, [...times].sort((a, b) => a - b));
   });
 
-  it('kapatılan ses türü hiç olay üretmez', () => {
-    const quiet = planOf({ preset: '50/10', rounds: 2, countdownBeep: false, breakStartSound: false });
-    const { events } = buildCueEvents(quiet, buildTimeline(quiet));
-    assert.ok(events.every((e) => e.type === 'start'));
-    assert.ok(events.every((e) => e.kind === 'work'));
-    assert.equal(events.length, 2);
+  it('bip kapatılınca hiç olay üretmez', () => {
+    const quiet = planOf({ preset: '50/10', rounds: 2, countdownBeep: false });
+    assert.deepEqual(buildCueEvents(quiet, buildTimeline(quiet)).events, []);
+  });
+
+  it('countdownSeconds geri sayımın uzunluğunu belirler', () => {
+    const two = planOf({ preset: '50/10', rounds: 1, countdownSeconds: 2 });
+    const { events } = buildCueEvents(two, buildTimeline(two));
+    assert.deepEqual(events.filter((e) => e.session === 0).map((e) => e.atSeconds), [118, 119]);
   });
 });
 
@@ -181,7 +194,7 @@ describe('compareMusic', () => {
   const timeline = buildTimeline(plan);
 
   it('Test 1 — müzik timeline\'a eşitse doğrulama geçer', () => {
-    const result = compareMusic({ musicSeconds: 240 * 60, timeline });
+    const result = compareMusic({ musicSeconds: 242 * 60, timeline });
     assert.equal(result.status, 'exact');
     assert.equal(result.ok, true);
     assert.equal(result.excessSeconds, 0);
@@ -189,11 +202,11 @@ describe('compareMusic', () => {
   });
 
   it('saniyenin altındaki toplama sapması eşit sayılır', () => {
-    assert.equal(compareMusic({ musicSeconds: 240 * 60 + 0.4, timeline }).status, 'exact');
+    assert.equal(compareMusic({ musicSeconds: 242 * 60 + 0.4, timeline }).status, 'exact');
   });
 
   it('Test 2 — 13 dakika fazla', () => {
-    const result = compareMusic({ musicSeconds: 253 * 60, timeline });
+    const result = compareMusic({ musicSeconds: 255 * 60, timeline });
     assert.equal(result.status, 'excess');
     assert.equal(result.ok, false);
     assert.equal(result.excessSeconds, 13 * 60);
@@ -201,14 +214,15 @@ describe('compareMusic', () => {
   });
 
   it('Test 3 — 12:30 eksik', () => {
-    const result = compareMusic({ musicSeconds: 227.5 * 60, timeline });
+    const result = compareMusic({ musicSeconds: 229.5 * 60, timeline });
     assert.equal(result.status, 'short');
     assert.equal(result.ok, false);
     assert.equal(result.shortSeconds, 12.5 * 60);
     const text = describeComparison(result, plan);
     assert.ok(text.includes('Eksik: 12:30'));
-    assert.ok(text.includes('Pomodoro timeline: 240:00'));
-    assert.ok(text.includes('Müzik toplamı: 227:30'));
+    assert.ok(text.includes('Pomodoro timeline: 242:00'));
+    assert.ok(text.includes('2 dk hazırlık'));
+    assert.ok(text.includes('Müzik toplamı: 229:30'));
   });
 });
 
@@ -266,15 +280,15 @@ describe('validatePomodoro', () => {
   });
 
   it('Test 1 — müzik tam oturursa geçer, kırpma planı üretilmez', () => {
-    const result = validatePomodoro({ plan: planOf({ preset: '50/10', rounds: 4 }), tracks: tracksOf(240 * 60) });
+    const result = validatePomodoro({ plan: planOf({ preset: '50/10', rounds: 4 }), tracks: tracksOf(242 * 60) });
     assert.equal(result.ok, true);
     assert.equal(result.comparison.status, 'exact');
     assert.equal(result.trim, null);
-    assert.equal(result.timeline.totalMinutes, 240);
+    assert.equal(result.timeline.totalMinutes, 242);
   });
 
   it('Test 2 — fazla müzik onay istemeden geçmez', () => {
-    const result = validatePomodoro({ plan: planOf({ preset: '50/10', rounds: 4 }), tracks: tracksOf(253 * 60) });
+    const result = validatePomodoro({ plan: planOf({ preset: '50/10', rounds: 4 }), tracks: tracksOf(255 * 60) });
     assert.equal(result.ok, false);
     assert.equal(result.needsTrimConfirmation, true);
     assert.ok(result.problems[0].includes('13:00'));
@@ -284,16 +298,16 @@ describe('validatePomodoro', () => {
 
   it('Test 2 — kırpma onaylanınca geçer ve uyarıya düşer', () => {
     const plan = planOf({ preset: '50/10', rounds: 4, trimExcess: true });
-    const result = validatePomodoro({ plan, tracks: tracksOf(253 * 60) });
+    const result = validatePomodoro({ plan, tracks: tracksOf(255 * 60) });
     assert.equal(result.ok, true);
     assert.equal(result.needsTrimConfirmation, false);
-    assert.equal(result.trim.usedSeconds, 240 * 60);
+    assert.equal(result.trim.usedSeconds, 242 * 60);
     assert.ok(result.warnings.some((w) => w.includes('13:00')));
   });
 
   it('Test 3 — eksik müzik onayla bile geçmez', () => {
     const plan = planOf({ preset: '50/10', rounds: 4, trimExcess: true });
-    const result = validatePomodoro({ plan, tracks: tracksOf(227.5 * 60) });
+    const result = validatePomodoro({ plan, tracks: tracksOf(229.5 * 60) });
     assert.equal(result.ok, false);
     assert.ok(result.problems.some((p) => p.includes('12:30')));
   });
@@ -307,17 +321,18 @@ describe('validatePomodoro', () => {
     assert.ok(result.problems.some((p) => p.includes('ölçülemedi')));
   });
 
-  it('atlanan ilk geri sayım uyarı olarak raporlanır, montajı durdurmaz', () => {
-    const result = validatePomodoro({ plan: planOf({ preset: '50/10', rounds: 4 }), tracks: tracksOf(240 * 60) });
+  it('bipler hiçbir uyarı üretmez: hepsi videonun içine düşer', () => {
+    const result = validatePomodoro({ plan: planOf({ preset: '50/10', rounds: 4 }), tracks: tracksOf(242 * 60) });
     assert.equal(result.ok, true);
-    assert.equal(result.warnings.filter((w) => w.includes('T-')).length, 3);
+    assert.deepEqual(result.warnings, []);
+    assert.equal(result.cues.events.length, 9 * 3);
   });
 
   it('PomodoroValidationError mesajı sayıları ve sorunları taşır', () => {
-    const result = validatePomodoro({ plan: planOf({ preset: '50/10', rounds: 4 }), tracks: tracksOf(227.5 * 60) });
+    const result = validatePomodoro({ plan: planOf({ preset: '50/10', rounds: 4 }), tracks: tracksOf(229.5 * 60) });
     const error = new PomodoroValidationError(result);
     assert.equal(error.name, 'PomodoroValidationError');
-    assert.ok(error.message.includes('Müzik toplamı: 227:30'));
+    assert.ok(error.message.includes('Müzik toplamı: 229:30'));
     assert.ok(error.message.includes('12:30'));
     assert.equal(error.validation, result);
   });

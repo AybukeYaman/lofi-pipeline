@@ -156,7 +156,7 @@ export function NewProject({
               workMinutes: pomodoro.workMinutes,
               breakMinutes: pomodoro.breakMinutes,
               rounds: pomodoro.rounds,
-              ...(pomodoro.sounds ? {} : { countdownBeep: false, workStartSound: false, breakStartSound: false }),
+              ...(pomodoro.sounds ? {} : { countdownBeep: false }),
             },
           }
           : {}),
@@ -256,7 +256,7 @@ export function NewProject({
           <div className="choice-cards" role="radiogroup" aria-label="Video türü">
             {([
               ['ambiance', 'Ambiance', 'Sakin lofi: müzik ve arka plan sesi. Video, müziğin süresi kadar olur.'],
-              ['pomodoro', 'Pomodoro', 'Çalışma ve mola oturumları: ekranda STUDY/BREAK yazısı, sayaç ve bip sesleri.'],
+              ['pomodoro', 'Pomodoro', '2 dk GET READY, sonra çalışma ve mola oturumları: ekranda STUDY/BREAK yazısı, sayaç ve her oturumun sonunda bip.'],
             ] as const).map(([value, title, text]) => (
               <label key={value} className={mode === value ? 'choice-card selected' : 'choice-card'}>
                 <span className="choice-card-head">

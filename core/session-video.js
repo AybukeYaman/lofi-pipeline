@@ -17,7 +17,8 @@
 /**
  * @typedef {object} SessionPart
  * @property {number} index oturum sırası
- * @property {'work'|'break'} kind
+ * @property {'ready'|'work'|'break'} kind oturum türü
+ * @property {'work'|'break'} visual hangi görüntü gösterilir (GET READY çalışma görüntüsünü kullanır)
  * @property {number} startFrame
  * @property {number} frames parçanın toplam kare sayısı
  * @property {number} clipFrames bu oturumun görüntüsünün tek tekrar kare sayısı
@@ -28,7 +29,7 @@
 
 /**
  * @param {object} input
- * @param {Array<{ kind: 'work'|'break', startSeconds: number, endSeconds: number }>} input.sessions
+ * @param {Array<{ kind: 'ready'|'work'|'break', startSeconds: number, endSeconds: number }>} input.sessions
  * @param {number} input.fps
  * @param {{ work: number, break: number }} input.clipFrames görüntü başına tek tekrar kare sayısı
  * @param {number} input.totalFrames videonun toplam kare sayısı (sesin süresinden)
@@ -58,13 +59,15 @@ export function planSessionFrames({ sessions, fps, clipFrames, totalFrames, fade
       throw new Error(`${session.kind} oturumu ${index + 1} için kare kalmadı (süre çok kısa ya da ses timeline'dan kısa).`);
     }
 
-    const clip = clipFrames[session.kind];
+    const visual = session.kind === 'break' ? 'break' : 'work';
+    const clip = clipFrames[visual];
     const fade = index === last ? Math.min(fadeFrames, frames) : 0;
     const copies = Math.floor((frames - fade) / clip);
 
     parts.push({
       index,
       kind: session.kind,
+      visual,
       startFrame,
       frames,
       clipFrames: clip,

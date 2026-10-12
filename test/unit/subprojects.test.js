@@ -151,7 +151,7 @@ describe('alt proje ve müzik aktarımı (subprojects)', () => {
       assert.deepEqual(pomodoro.project.projectJson.data.pomodoro, {
         enabled: true, preset: '50/10', workMinutes: 50, breakMinutes: 10, rounds: 2,
       });
-      assert.equal(pomodoro.project.readiness.pomodoro.totalMinutes, 120);
+      assert.equal(pomodoro.project.readiness.pomodoro.totalMinutes, 122);
 
       const ambiance = await createProject({ name: 'ambiance-proj' }, { videosDir: tempDir });
       assert.equal(Object.hasOwn(ambiance.project.projectJson.data, 'pomodoro'), false);

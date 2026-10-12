@@ -12,7 +12,7 @@
  *   2  02-audio-concat  parçalar → mix.wav, sonra disk kontrolü
  *   3  03-ambient-mix   (opsiyonel) ambient → mix'e karışır (yalnız ses; video bir kez yazılır)
  *   4  04-assemble      base × n + ses + fade → nihai video
- *   5  06-pomodoro-cues (opsiyonel) countdown beep + oturum efektleri sese biner
+ *   5  06-pomodoro-cues (opsiyonel) her oturumun son 3 saniyesinde 3 bip sese biner
  *   5  05-tracklist     damgalar
  *   6  çıktıları taşı, rapor yaz, workspace'i temizle
  *
@@ -328,18 +328,21 @@ export async function runBuild(config, options = {}) {
     // Müzik dosyalarına ve mix.wav'a dokunulmaz: Pomodoro kapatılırsa iz kalmaz.
     let cues = null;
     if (cuePlan) {
-      cues = await step('06', `Pomodoro işaretleri (${cuePlan.events.length} olay)`, (logger) => mixPomodoroCues({
+      cues = await step('06', `Pomodoro bipleri (${cuePlan.events.length} olay)`, (logger) => mixPomodoroCues({
         audioPath: finalAudio,
         plan: config.pomodoro,
         cues: cuePlan,
         outputPath: workspace.path('cue_mix.wav'),
         workspace,
+        // Videonun son 3 saniyesindeki bipler de duyulsun: ses kararması müziğe
+        // bipten ÖNCE uygulanır, montaj sesi ikinci kez kısmaz (fadeAudio: false).
+        fadeOut: config.video.fadeOut,
         logger,
         onProgress: progress('06', audio.duration),
       }));
       finalAudio = cues.output;
     } else if (pomodoro) {
-      log.info('Pomodoro açık ama işaret sesi kapalı — 06 atlandı.');
+      log.info('Pomodoro açık ama bip kapalı — 06 atlandı.');
     }
 
     // --- 4a: etiket katmanı (opsiyonel). Etiket yoksa filter null → montaj eski
@@ -360,6 +363,7 @@ export async function runBuild(config, options = {}) {
       audioPath: finalAudio,
       outputPath: finalVideo,
       overlayFilter: labelOverlay.filter,
+      fadeAudio: cues === null,
       // Çalışma ve mola ayrı görüntüyse her oturum kendi görüntüsüyle kurulur.
       sessionVideo: pomodoro && breakVideo
         ? { sessions: pomodoro.timeline.sessions, breakVideoPath: breakVideo.output }

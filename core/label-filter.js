@@ -14,8 +14,8 @@
 
 import { isSystemLabel } from './label-plan.js';
 
-/** Pomodoro oturum türü → ekrandaki yazı (canlı yayındaki STUDY/BREAK ile aynı). */
-export const STATUS_TEXT = { work: 'STUDY', break: 'BREAK' };
+/** Pomodoro oturum türü → ekrandaki yazı (canlı yayındaki STUDY/BREAK ile aynı; videonun başında GET READY). */
+export const STATUS_TEXT = { ready: 'GET READY', work: 'STUDY', break: 'BREAK' };
 
 /** Filtre değeri için yol kaçışı: ters bölü → /, `:` → `\:` (Windows `C:/...`). */
 export function escapeFilterPath(path) {
@@ -67,7 +67,7 @@ function countdownText(endSeconds) {
  *   labels: object[],
  *   height: number,
  *   fontFile: string,
- *   sessions?: Array<{ kind: 'work'|'break', startSeconds: number, endSeconds: number }>|null,
+ *   sessions?: Array<{ kind: 'ready'|'work'|'break', startSeconds: number, endSeconds: number }>|null,
  *   textPath: (name: string) => string,
  * }} input
  *   `sessions`: Pomodoro kapalıysa null — sistem etiketleri atlanır ve raporlanır.
@@ -109,11 +109,11 @@ export function buildLabelFilter({ labels, height, fontFile, sessions = null, te
       continue;
     }
 
-    // pomodoro-status: iki sabit metin dosyası, oturum başına bir drawtext
-    // (yalnızca kendi aralığında görünür).
+    // pomodoro-status: oturum türü başına bir sabit metin dosyası, oturum başına
+    // bir drawtext (yalnızca kendi aralığında görünür).
     const names = {};
-    for (const kind of ['work', 'break']) {
-      names[kind] = `label-${label.id}-${STATUS_TEXT[kind].toLowerCase()}.txt`;
+    for (const kind of new Set(sessions.map((session) => session.kind))) {
+      names[kind] = `label-${label.id}-${kind}.txt`;
       files.push({ name: names[kind], content: STATUS_TEXT[kind] });
     }
     for (const session of sessions) {

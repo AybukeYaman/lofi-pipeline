@@ -17,7 +17,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { fetchProjectPomodoro, updateProjectPomodoro } from '../api';
-import { pomodoroPayload, pomodoroSummary } from '../pomodoroSetup';
+import { pomodoroPayload, pomodoroSummary, roundsFittingMusic, totalMinutes } from '../pomodoroSetup';
 import { PickerPanel } from './PickerPanel';
 import { PomodoroSetup, type PomodoroChoice } from './PomodoroSetup';
 import type { ProjectPomodoro, UpdatePomodoroPayload } from '../types';
@@ -42,7 +42,7 @@ function choiceOf(data: ProjectPomodoro): PomodoroChoice {
     workMinutes: current.workMinutes,
     breakMinutes: current.breakMinutes,
     rounds: current.rounds,
-    sounds: current.countdownBeep && current.workStartSound && current.breakStartSound,
+    sounds: current.countdownBeep,
   };
 }
 
@@ -109,14 +109,13 @@ export function PomodoroPicker({
   const settings = data?.settings ?? null;
   const validation = data?.validation;
   const comparison = validation?.comparison ?? null;
-  const total = validation?.timeline?.totalMinutes ?? null;
 
   return (
     <PickerPanel
       label={label}
       badge={
         data
-          ? `(${settings ? `${settings.workMinutes}/${settings.breakMinutes} × ${settings.rounds} = ${total} dk` : 'kapalı'})`
+          ? `(${settings ? pomodoroSummary(settings.workMinutes, settings.breakMinutes, settings.rounds) : 'kapalı'})`
           : undefined
       }
       open={open}
@@ -158,18 +157,11 @@ export function PomodoroPicker({
                   breakMinutes: next.breakMinutes,
                   rounds: next.rounds,
                   countdownBeep: next.sounds,
-                  workStartSound: next.sounds,
-                  breakStartSound: next.sounds,
                 })}
               />
 
               {data.enabled && settings ? (
                 <>
-                  <p className="field-hint" style={{ marginTop: 8 }}>
-                    Toplam: <strong>{pomodoroSummary(settings.workMinutes, settings.breakMinutes, settings.rounds)}</strong>
-                    {' '}({formatClock(validation?.timeline?.totalSeconds)})
-                  </p>
-
                   {/* --- montaj öncesi karşılaştırma: spec'in asıl istediği ekran */}
                   <div
                     style={{
@@ -216,6 +208,27 @@ export function PomodoroPicker({
                         ℹ {warning}
                       </p>
                     ))}
+
+                    {/* Müzik süreye uymuyorsa: süreyi müziğe sığan tur sayısına çek (kalan küçük fazla kırpılır). */}
+                    {comparison && comparison.status !== 'exact'
+                      && comparison.musicSeconds >= totalMinutes(settings.workMinutes, settings.breakMinutes, 1) * 60
+                      && roundsFittingMusic(comparison.musicSeconds, settings.workMinutes, settings.breakMinutes) !== settings.rounds ? (
+                        <button
+                          type="button"
+                          className="button"
+                          style={{ fontSize: 12.5, minHeight: 30, padding: '2px 12px', marginTop: 8 }}
+                          onClick={() => void save({
+                            rounds: roundsFittingMusic(comparison.musicSeconds, settings.workMinutes, settings.breakMinutes),
+                          })}
+                          disabled={saving}
+                        >
+                          Süreyi müziğe uydur ({pomodoroSummary(
+                            settings.workMinutes,
+                            settings.breakMinutes,
+                            roundsFittingMusic(comparison.musicSeconds, settings.workMinutes, settings.breakMinutes),
+                          )})
+                        </button>
+                      ) : null}
 
                     {validation?.needsTrimConfirmation && validation.trim ? (
                       <div style={{ marginTop: 8 }}>

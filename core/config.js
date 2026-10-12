@@ -144,7 +144,7 @@ async function resolveProject(json, { projectPath, overrides = {} }) {
   let pomodoro = null;
   if (pomodoroPlan) {
     const cue = { ...pomodoroPlan.cue };
-    for (const key of ['beepFile', 'workStartFile', 'breakStartFile']) {
+    for (const key of ['beepFile']) {
       if (cue[key] === null) continue;
       cue[key] = at(cue[key]);
       await expectKind(cue[key], 'file', `pomodoro.cue.${key}`, problems);

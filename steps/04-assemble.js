@@ -50,6 +50,9 @@ const NOOP_LOGGER = { info() {}, warn() {} };
  * @param {string} options.outputPath
  * @param {object} options.workspace core/workspace.js örneği
  * @param {number} [options.fadeOut] sondaki fade süresi (sn), 0 = fade yok
+ * @param {boolean} [options.fadeAudio] false → fade yalnızca VİDEOYA uygulanır; ses zaten
+ *   kararmıştır (Pomodoro bipleri videonun son 3 saniyesinde de net duyulsun diye
+ *   kararma 06'da, bipler eklenmeden önce müziğe uygulanır)
  * @param {number} [options.crf] base.mp4 üretilirken kullanılan değerle AYNI olmalı
  * @param {string} [options.preset] base.mp4 üretilirken kullanılan değerle AYNI olmalı
  * @param {string} [options.bitrate]
@@ -57,7 +60,7 @@ const NOOP_LOGGER = { info() {}, warn() {} };
  *   uyumsuzlukta tam encode'a düşer. full: her zaman tam encode.
  * @param {string|null} [options.overlayFilter] etiket (drawtext) zinciri —
  *   core/label-filter.js. Verilirse strateji `full`'a zorlanır; null/yoksa eski davranış.
- * @param {{ sessions: Array<{ kind: 'work'|'break', startSeconds: number, endSeconds: number }>,
+ * @param {{ sessions: Array<{ kind: 'ready'|'work'|'break', startSeconds: number, endSeconds: number }>,
  *   breakVideoPath: string }|null} [options.sessionVideo] Pomodoro: `videoPath` çalışma
  *   görüntüsü, `breakVideoPath` mola görüntüsü (aynı boyut ve kare hızında base). null → tek görüntü.
  * @param {{ info: Function, warn: Function }} [options.logger]
@@ -71,6 +74,7 @@ export async function assembleVideo(options) {
     outputPath,
     workspace,
     fadeOut = DEFAULTS.fadeOut,
+    fadeAudio = true,
     crf = DEFAULTS.crf,
     preset = DEFAULTS.preset,
     bitrate = DEFAULTS.bitrate,
@@ -144,7 +148,7 @@ export async function assembleVideo(options) {
   );
 
   await mkdir(dirname(outputPath), { recursive: true });
-  const audioArgs = buildAudioArgs({ duration: audio.duration, fadeOut, bitrate });
+  const audioArgs = buildAudioArgs({ duration: audio.duration, fadeOut: fadeAudio ? fadeOut : 0, bitrate });
 
   // 3 — Üret
   let method = strategy === 'full' ? 'full-encode' : 'copy-body+encode-tail';
@@ -444,7 +448,7 @@ async function buildSessionList({
   const lines = [];
   const produced = [];
   for (const part of plan.parts) {
-    const base = paths[part.kind];
+    const base = paths[part.visual];
     const copies = allEncoded ? 0 : part.copies;
     const tailFrames = allEncoded ? part.frames : part.tailFrames;
     for (let i = 0; i < copies; i++) lines.push(concatLine(base));

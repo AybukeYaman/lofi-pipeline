@@ -257,7 +257,7 @@ export async function setProjectLabels(projectPath, rawLabels) {
  *
  * @param {string} projectPath
  * @param {object|null} settings `{ enabled, preset?, workMinutes?, breakMinutes?,
- *   rounds?, countdownSeconds?, countdownBeep?, workStartSound?, breakStartSound?,
+ *   rounds?, countdownSeconds?, countdownBeep?,
  *   trimExcess?, cue? }` — null ya da `enabled: false` seçimi kaldırır
  * @returns {Promise<{ pomodoro: object|null, plan: object|null, warnings: string[] }>}
  */

@@ -113,7 +113,7 @@ const POMODORO_STEP_GUIDE: Partial<Record<ViewStepId, { who: 'user' | 'system'; 
   build: {
     who: 'system',
     lines: [
-      '"Başlat" de; çalışma/mola görüntüleri, STUDY/BREAK yazısı, sayaç ve bip sesleri otomatik.',
+      '"Başlat" de; videonun başına 2 dk GET READY, çalışma/mola görüntüleri, STUDY/BREAK yazısı, sayaç ve her oturumun sonundaki bipler otomatik.',
     ],
   },
 };

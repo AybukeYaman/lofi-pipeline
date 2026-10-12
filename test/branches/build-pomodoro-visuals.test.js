@@ -7,7 +7,8 @@
  * doğruluğu çıktı videosundan geri okunarak doğrulanıyor.
  *
  * İki yol: etiketsiz (gövde kopya + kuyruk encode) ve etiketli (tam encode).
- * 1/1 × 2 tur = 4 dakika, Pomodoro'nun birimi dakika olduğu için en küçük kurulum.
+ * 2 dk GET READY + 1/1 × 2 tur = 6 dakika, Pomodoro'nun birimi dakika olduğu için
+ * en küçük kurulum. GET READY çalışma görüntüsünü kullanır.
  */
 
 import assert from 'node:assert/strict';
@@ -64,13 +65,14 @@ function colorAt(video, at) {
 const isRed = ([r, g, b]) => r > 180 && g < 90 && b < 90;
 const isBlue = ([r, g, b]) => b > 180 && r < 90 && g < 90;
 
-/** Oturum sırası: WORK 0-60, BREAK 60-120, WORK 120-180, BREAK 180-240. */
+/** Oturum sırası: GET READY 0-120, WORK 120-180, BREAK 180-240, WORK 240-300, BREAK 300-360. */
 function assertSessionColors(video) {
   const expect = [
-    [30, isRed, 'WORK 01 ortası'], [59.8, isRed, 'WORK 01 sonu'],
-    [60.2, isBlue, 'BREAK 01 başı'], [90, isBlue, 'BREAK 01 ortası'], [119.8, isBlue, 'BREAK 01 sonu'],
-    [120.2, isRed, 'WORK 02 başı'], [150, isRed, 'WORK 02 ortası'], [179.8, isRed, 'WORK 02 sonu'],
-    [180.2, isBlue, 'BREAK 02 başı'], [205, isBlue, 'BREAK 02 ortası'],
+    [30, isRed, 'GET READY ortası (çalışma görüntüsü)'], [119.8, isRed, 'GET READY sonu'],
+    [120.2, isRed, 'WORK 01 başı'], [150, isRed, 'WORK 01 ortası'], [179.8, isRed, 'WORK 01 sonu'],
+    [180.2, isBlue, 'BREAK 01 başı'], [210, isBlue, 'BREAK 01 ortası'], [239.8, isBlue, 'BREAK 01 sonu'],
+    [240.2, isRed, 'WORK 02 başı'], [270, isRed, 'WORK 02 ortası'], [299.8, isRed, 'WORK 02 sonu'],
+    [300.2, isBlue, 'BREAK 02 başı'], [330, isBlue, 'BREAK 02 ortası'],
   ];
   for (const [at, check, name] of expect) {
     const color = colorAt(video, at);
@@ -101,9 +103,9 @@ describe('build — Pomodoro: çalışma ve mola için ayrı görüntü', () => 
     await mkdir(dir.path('audio'));
     await makeSolidClip(dir.path('work.mp4'), 'red');
     await makeSolidImage(dir.path('break.png'), 'blue');
-    // Tam 240 sn müzik: timeline'la eşit, kırpma yok.
-    await makeTone(dir.path('audio/01-a.m4a'), { seconds: 120, frequency: 220 });
-    await makeTone(dir.path('audio/02-b.m4a'), { seconds: 120, frequency: 330 });
+    // Tam 360 sn müzik: timeline'la eşit (2 dk GET READY dahil), kırpma yok.
+    await makeTone(dir.path('audio/01-a.m4a'), { seconds: 180, frequency: 220 });
+    await makeTone(dir.path('audio/02-b.m4a'), { seconds: 180, frequency: 330 });
   });
   after(() => dir?.cleanup());
 
@@ -138,16 +140,17 @@ describe('build — Pomodoro: çalışma ve mola için ayrı görüntü', () => 
     test('yöntem gövde kopya + kuyruk encode; birleşme noktaları temiz', () => {
       const assemble = report.details['04'];
       assert.equal(assemble.method, 'copy-body+encode-tail');
-      assert.equal(assemble.sessions.length, 4);
-      assert.deepEqual(assemble.sessions.map((s) => s.kind), ['work', 'break', 'work', 'break']);
+      assert.equal(assemble.sessions.length, 5);
+      assert.deepEqual(assemble.sessions.map((s) => s.kind), ['ready', 'work', 'break', 'work', 'break']);
+      assert.deepEqual(assemble.sessions.map((s) => s.visual), ['work', 'work', 'break', 'work', 'break']);
       assert.ok(assemble.junctions.length >= 3, 'oturum geçişleri denetlenmedi');
       assert.deepEqual(assemble.junctions.filter((j) => !j.clean), []);
     });
 
-    test('süre ve kare sayısı tam: 240 sn × 24 fps', async () => {
+    test('süre ve kare sayısı tam: 360 sn × 24 fps', async () => {
       const out = await probe(config.output.video);
-      assert.ok(Math.abs(out.duration - 240) < 0.2, `süre ${out.duration}`);
-      assert.ok(Math.abs(await countFrames(config.output.video) - 240 * 24) <= 1);
+      assert.ok(Math.abs(out.duration - 360) < 0.2, `süre ${out.duration}`);
+      assert.ok(Math.abs(await countFrames(config.output.video) - 360 * 24) <= 1);
     });
   });
 
@@ -168,7 +171,7 @@ describe('build — Pomodoro: çalışma ve mola için ayrı görüntü', () => 
       const assemble = report.details['04'];
       assert.equal(assemble.method, 'full-encode');
       assert.equal(assemble.labels, true);
-      assert.equal(assemble.sessions.length, 4);
+      assert.equal(assemble.sessions.length, 5);
     });
 
     test('görüntüler etiketli videoda da oturumlara göre değişir', () => {
@@ -176,7 +179,7 @@ describe('build — Pomodoro: çalışma ve mola için ayrı görüntü', () => 
     });
 
     test('kare sayısı tam: fade ve etiketler oturum sınırlarını kaydırmaz', async () => {
-      assert.ok(Math.abs(await countFrames(config.output.video) - 240 * 24) <= 1);
+      assert.ok(Math.abs(await countFrames(config.output.video) - 360 * 24) <= 1);
     });
   });
 
@@ -192,7 +195,7 @@ describe('build — Pomodoro: çalışma ve mola için ayrı görüntü', () => 
       assert.deepEqual(report.steps.map((s) => s.tag), ['01', '02', '07', '04', '05']);
       assert.equal(report.details['04'].sessions, null);
       // Tek görüntü: baştan sona kırmızı.
-      for (const at of [30, 90, 150, 210]) assert.ok(isRed(colorAt(config.output.video, at)), `${at} sn`);
+      for (const at of [30, 150, 210, 270, 330]) assert.ok(isRed(colorAt(config.output.video, at)), `${at} sn`);
     });
 
     test('olmayan mola dosyası build\'den ÖNCE anlaşılır hatayla durur', async () => {

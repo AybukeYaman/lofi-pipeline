@@ -87,29 +87,29 @@ describe('GET /api/projects/:id/pomodoro', () => {
   test('Test 1 — müzik tam oturuyorsa doğrulama geçer', async () => {
     await writeProject('exact', {
       project: { pomodoro: { enabled: true, preset: '50/10', rounds: 4 } },
-      audio: tracksFor(240 * 60),
+      audio: tracksFor(242 * 60),
     });
     const res = await getPomodoro('exact', options());
 
     assert.equal(res.enabled, true);
     assert.equal(res.validation.ok, true);
     assert.equal(res.validation.comparison.status, 'exact');
-    assert.equal(res.validation.timeline.totalMinutes, 240);
-    assert.equal(res.music.totalSeconds, 240 * 60);
+    assert.equal(res.validation.timeline.totalMinutes, 242);
+    assert.equal(res.music.totalSeconds, 242 * 60);
   });
 
   test('Test 2 — fazla müzik sayılarla ve kırpma planıyla raporlanır', async () => {
     await writeProject('excess', {
       project: { pomodoro: { enabled: true, preset: '50/10', rounds: 4 } },
-      audio: tracksFor(253 * 60),
+      audio: tracksFor(255 * 60),
     });
     const res = await getPomodoro('excess', options());
 
     assert.equal(res.validation.ok, false);
     assert.equal(res.validation.needsTrimConfirmation, true);
     assert.equal(res.validation.comparison.excessSeconds, 13 * 60);
-    assert.ok(res.validation.message.includes('Pomodoro timeline: 240:00'));
-    assert.ok(res.validation.message.includes('Müzik toplamı: 253:00'));
+    assert.ok(res.validation.message.includes('Pomodoro timeline: 242:00'));
+    assert.ok(res.validation.message.includes('Müzik toplamı: 255:00'));
     assert.ok(res.validation.message.includes('Fazla: 13:00'));
     // Kırpmanın ne yapacağı onay ÖNCESİNDE görünür.
     assert.equal(res.validation.trim.trimmedSeconds, 13 * 60);
@@ -118,7 +118,7 @@ describe('GET /api/projects/:id/pomodoro', () => {
   test('Test 3 — eksik müzik doğrulamayı düşürür', async () => {
     await writeProject('short', {
       project: { pomodoro: { enabled: true, preset: '50/10', rounds: 4 } },
-      audio: tracksFor(227.5 * 60),
+      audio: tracksFor(229.5 * 60),
     });
     const res = await getPomodoro('short', options());
 
@@ -127,15 +127,15 @@ describe('GET /api/projects/:id/pomodoro', () => {
     assert.ok(res.validation.message.includes('Eksik: 12:30'));
   });
 
-  test('Test 4 — 30/10 × 6 de 240 dakika timeline üretir', async () => {
+  test('Test 4 — 30/10 × 6 de 242 dakika timeline üretir (2 dk GET READY dahil)', async () => {
     await writeProject('thirty', {
       project: { pomodoro: { enabled: true, preset: '30/10', rounds: 6 } },
-      audio: tracksFor(240 * 60),
+      audio: tracksFor(242 * 60),
     });
     const res = await getPomodoro('thirty', options());
 
-    assert.equal(res.validation.timeline.totalMinutes, 240);
-    assert.equal(res.validation.timeline.sessions.length, 12);
+    assert.equal(res.validation.timeline.totalMinutes, 242);
+    assert.equal(res.validation.timeline.sessions.length, 13);
     assert.equal(res.validation.ok, true);
   });
 
@@ -149,9 +149,9 @@ describe('GET /api/projects/:id/pomodoro', () => {
     });
     const res = await getPomodoro('ordered', options());
 
-    // 15 dk timeline: önce 20 dk'lık "uzun" geliyor, 15 dk'ya kırpılıyor,
-    // "kisa" hiç kullanılmıyor. Sıra yanlış okunsaydı kırpma da yanlış olurdu.
-    assert.deepEqual(res.validation.trim.tracks.map((t) => t.usedDuration), [900, 0]);
+    // 17 dk timeline (2 dk GET READY + 15 dk): önce 20 dk'lık "uzun" geliyor, 17 dk'ya
+    // kırpılıyor, "kisa" hiç kullanılmıyor. Sıra yanlış okunsaydı kırpma da yanlış olurdu.
+    assert.deepEqual(res.validation.trim.tracks.map((t) => t.usedDuration), [1020, 0]);
     assert.equal(res.validation.trim.droppedCount, 1);
   });
 
@@ -167,7 +167,7 @@ describe('GET /api/projects/:id/pomodoro', () => {
 
 describe('PUT /api/projects/:id/pomodoro', () => {
   test('ayarı project.json\'a yazar ve güncel doğrulamayı döner', async () => {
-    await writeProject('write', { audio: tracksFor(240 * 60) });
+    await writeProject('write', { audio: tracksFor(242 * 60) });
     const res = await updatePomodoro('write', { enabled: true, preset: '50/10', rounds: 4 }, options());
 
     assert.equal(res.enabled, true);
@@ -180,7 +180,7 @@ describe('PUT /api/projects/:id/pomodoro', () => {
   test('kırpma onayı ayarı yazar ve doğrulamayı geçirir', async () => {
     await writeProject('confirm', {
       project: { pomodoro: { enabled: true, preset: '50/10', rounds: 4 } },
-      audio: tracksFor(253 * 60),
+      audio: tracksFor(255 * 60),
     });
     assert.equal((await getPomodoro('confirm', options())).validation.ok, false);
 
@@ -220,7 +220,7 @@ describe('PUT /api/projects/:id/pomodoro', () => {
   });
 
   test('HTTP üzerinden de aynı yoldan geçer', async () => {
-    await writeProject('http', { audio: tracksFor(240 * 60) });
+    await writeProject('http', { audio: tracksFor(242 * 60) });
     const put = await fetch(`${url}/api/projects/http/pomodoro`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
@@ -231,13 +231,13 @@ describe('PUT /api/projects/:id/pomodoro', () => {
 
     const get = await fetch(`${url}/api/projects/http/pomodoro`);
     assert.equal(get.status, 200);
-    assert.equal((await get.json()).validation.timeline.totalMinutes, 240);
+    assert.equal((await get.json()).validation.timeline.totalMinutes, 242);
   });
 });
 
 describe('PUT /api/projects/:id/pomodoro — mola görüntüsü', () => {
   async function projectWithFiles(name) {
-    const dir = await writeProject(name, { audio: tracksFor(240 * 60) });
+    const dir = await writeProject(name, { audio: tracksFor(242 * 60) });
     await mkdir(join(dir, 'videolar'), { recursive: true });
     await mkdir(join(dir, 'resimler'), { recursive: true });
     await writeFile(join(dir, 'videolar', 'mola.mp4'), 'x');
@@ -309,7 +309,7 @@ describe('montaj başlatma engeli', () => {
   test('doğrulama geçmezse montaj HİÇ başlamaz (409)', async () => {
     await buildableProject('no-build', {
       pomodoro: { enabled: true, preset: '50/10', rounds: 4 },
-      totalSeconds: 227.5 * 60,
+      totalSeconds: 229.5 * 60,
     });
 
     await assert.rejects(
@@ -327,7 +327,7 @@ describe('montaj başlatma engeli', () => {
   test('doğrulama geçerse montaj başlar', async () => {
     await buildableProject('go-build', {
       pomodoro: { enabled: true, preset: '50/10', rounds: 4 },
-      totalSeconds: 240 * 60,
+      totalSeconds: 242 * 60,
     });
 
     const job = await startBuild('go-build', {}, { videosDir, buildJobs, probeFn: fakeProbe });

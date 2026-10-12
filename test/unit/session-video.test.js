@@ -100,6 +100,19 @@ describe('planSessionFrames', () => {
   });
 });
 
+describe('GET READY oturumu', () => {
+  const withReady = [{ kind: 'ready', startSeconds: 0, endSeconds: 120 }, ...sessions(['work', 120, 180], ['break', 180, 240])];
+
+  it('çalışma görüntüsünü kullanır ama oturum türü ready kalır', () => {
+    const plan = planSessionFrames({
+      sessions: withReady, fps: FPS, clipFrames: { work: 120, break: 192 }, totalFrames: 240 * FPS,
+    });
+    assert.deepEqual(plan.parts.map((p) => [p.kind, p.visual]), [['ready', 'work'], ['work', 'work'], ['break', 'break']]);
+    // 120 sn = 2880 kare = 24 × 120 (çalışma döngüsüyle tam bölünür).
+    assert.deepEqual([plan.parts[0].frames, plan.parts[0].copies, plan.parts[0].tailFrames], [2880, 24, 0]);
+  });
+});
+
 describe('sessionJunctionPoints', () => {
   it('her oturum geçişini, gövde→kuyruk dikişini ve ilk klip→klip dikişini içerir', () => {
     const plan = planSessionFrames({

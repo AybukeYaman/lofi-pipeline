@@ -264,9 +264,8 @@ export type PomodoroSettings = {
   /** Değerler bir hazır düzene denk geliyorsa onun kimliği. */
   preset: string | null;
   countdownSeconds: number;
+  /** Her oturumun son 3 saniyesinde 3 bip. */
   countdownBeep: boolean;
-  workStartSound: boolean;
-  breakStartSound: boolean;
   /** Fazla müziğin kırpılması kullanıcı tarafından onaylandı mı. */
   trimExcess: boolean;
   /** Mola görüntüsü (proje klasörüne göreli yol); null → mola da çalışma görüntüsünü kullanır. */
@@ -274,8 +273,6 @@ export type PomodoroSettings = {
   cue: {
     volumeDb: number;
     beepFile: string | null;
-    workStartFile: string | null;
-    breakStartFile: string | null;
   };
 };
 
@@ -314,9 +311,10 @@ export type UpdateLabelsPayload = { labels: Array<Partial<VideoLabel> & { id: st
 /** Bir WORK ya da BREAK oturumu. */
 export type PomodoroSession = {
   index: number;
-  kind: 'work' | 'break';
+  /** 'ready' = videonun başındaki 2 dakikalık GET READY oturumu. */
+  kind: 'ready' | 'work' | 'break';
   round: number;
-  /** "WORK 01" / "BREAK 03". */
+  /** "GET READY" / "WORK 01" / "BREAK 03". */
   label: string;
   startSeconds: number;
   endSeconds: number;
@@ -388,8 +386,6 @@ export type UpdatePomodoroPayload = {
   rounds?: number;
   countdownSeconds?: number;
   countdownBeep?: boolean;
-  workStartSound?: boolean;
-  breakStartSound?: boolean;
   trimExcess?: boolean;
   /** Proje klasörüne göreli yol; boş metin mola görüntüsünü kaldırır. */
   breakClip?: string;
@@ -432,8 +428,6 @@ export type CreateProjectPayload = {
     breakMinutes: number;
     rounds: number;
     countdownBeep?: boolean;
-    workStartSound?: boolean;
-    breakStartSound?: boolean;
   };
 };
 
