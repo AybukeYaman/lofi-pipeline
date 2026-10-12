@@ -20,6 +20,10 @@ import type { ProjectMusicInfo } from '../../types';
 import { UploadButton } from './StepWidgets';
 import type { StageProps } from './StagePanel';
 
+/** Tarayıcıdan yükleme sınırları (sunucudaki MAX_AUDIO_UPLOAD_BYTES / MAX_ZIP_UPLOAD_BYTES aynası). */
+const MAX_AUDIO_UPLOAD_MB = 100;
+const MAX_ZIP_UPLOAD_MB = 200;
+
 export function MusicSection({ project, assets, onProjectUpdate }: StageProps) {
   const music = project.projectJson?.data?.music;
   const readinessMusic = project.readiness?.music;
@@ -194,6 +198,19 @@ export function MusicSection({ project, assets, onProjectUpdate }: StageProps) {
         primary={audioCount === 0}
         multiple
         onFiles={async (files) => {
+          // Sunucu sınırını aşan dosya yarıda kesilir ve tarayıcı yalnızca "Failed to fetch" der:
+          // önce burada, anlaşılır bir cümleyle durdur.
+          for (const file of files) {
+            const isZip = file.name.toLowerCase().endsWith('.zip');
+            const limitMb = isZip ? MAX_ZIP_UPLOAD_MB : MAX_AUDIO_UPLOAD_MB;
+            if (file.size > limitMb * 1024 * 1024) {
+              throw new Error(
+                `${file.name} çok büyük (${Math.round(file.size / 1024 / 1024)} MB, en fazla ${limitMb} MB). ` +
+                'Dosyayı doğrudan projenin audio\ klasörüne bırak' +
+                (isZip ? '; zip sayfa yenilenince açılır.' : '.'),
+              );
+            }
+          }
           let latest = project;
           for (const file of files) latest = await uploadProjectAudio(project.id, file);
           onProjectUpdate?.(latest);

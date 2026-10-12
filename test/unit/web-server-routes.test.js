@@ -58,6 +58,16 @@ describe('rota tablosu — her rota adapter\'da var olan bir metot çağırır',
     }
   });
 
+  test('proje müziği rotası 200 MB zip taşıyabilir (base64 ile ~267 MB gövde)', () => {
+    const route = ROUTES.find((r) => r.method === 'POST' && r.pattern.test('/api/projects/video1/audio'));
+    assert.ok(route, 'POST /api/projects/:id/audio rotası bulunamadı');
+    // Sınır küçük kalırsa sunucu yükleme sürerken bağlantıyı keser: tarayıcıda "Failed to fetch".
+    assert.ok(
+      route.maxBodyBytes >= Math.ceil((200 * 1024 * 1024 * 4) / 3),
+      `gövde sınırı 200 MB zip için yetmiyor: ${route.maxBodyBytes}`,
+    );
+  });
+
   for (const route of ROUTES) {
     const label = `${route.method} ${route.pattern.source}`;
     test(label, async () => {

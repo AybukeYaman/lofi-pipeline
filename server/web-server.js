@@ -78,6 +78,12 @@ const MAX_UPLOAD_BODY_BYTES = 25 * 1024 * 1024;
 const MAX_AUDIO_UPLOAD_BODY_BYTES = 100 * 1024 * 1024;
 /** base64 ~%33 büyütür: 200 MB klip için gövde sınırı. */
 const MAX_CLIP_UPLOAD_BODY_BYTES = 280 * 1024 * 1024;
+/**
+ * Proje müziği: tek parça 100 MB, ama zip 200 MB'a kadar (server/project-api.js
+ * MAX_ZIP_UPLOAD_BYTES). Gövde sınırı bundan küçük kalırsa sunucu yükleme sürerken
+ * bağlantıyı kesiyor ve tarayıcı yalnızca "Failed to fetch" diyor.
+ */
+const MAX_PROJECT_AUDIO_UPLOAD_BODY_BYTES = MAX_CLIP_UPLOAD_BODY_BYTES;
 /** Yalnızca bu makineden: DNS rebinding ile başka bir sitenin API'yi okumasını engeller. */
 const LOCAL_HOST = /^(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/i;
 
@@ -203,7 +209,7 @@ export const ROUTES = [
   {
     method: 'POST',
     pattern: /^\/api\/projects\/([^/]*)\/audio$/,
-    maxBodyBytes: MAX_AUDIO_UPLOAD_BODY_BYTES,
+    maxBodyBytes: MAX_PROJECT_AUDIO_UPLOAD_BODY_BYTES,
     handle: async (api, { id, body }) => [200, await api.uploadProjectAudio(id, body)],
   },
   {
