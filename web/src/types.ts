@@ -175,6 +175,8 @@ export type ProjectDetail = {
   videoSourceCandidates?: Record<VideoSource, { count: number; dir: string }>;
   clips?: string[];
   clip?: ProjectFileEvidence;
+  /** Yalnızca zip işlenen yanıtta: müzik klasöründeki zip'lerin açılma sonucu. */
+  audioZip?: AudioZipResult;
   /** Pomodoro mola görüntüsü için seçilebilecek dosyalar (proje klasörüne göreli, iki klasörden). */
   breakCandidates?: string[];
   breakClip?: { value: string; exists: boolean };
@@ -185,6 +187,12 @@ export type ProjectDetail = {
   workflow?: ProjectWorkflow;
   /** Sunucu her zaman gönderir (getProject koşulsuz üretir). */
   readiness: ProjectReadiness;
+};
+
+export type AudioZipResult = {
+  /** Klasöre eklenen yeni parçalar. */
+  files: string[];
+  archives: Array<{ zip: string; files: string[]; error?: string; noAudio?: boolean }>;
 };
 
 export type ProjectMusicAudio = {

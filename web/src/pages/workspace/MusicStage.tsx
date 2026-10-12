@@ -189,8 +189,8 @@ export function MusicSection({ project, assets, onProjectUpdate }: StageProps) {
         />
       </div>
       <UploadButton
-        label="Müzik dosyalarını yükle"
-        accept=".mp3,.wav,.m4a,.flac,.aac,.opus,.ogg"
+        label="Müzik dosyalarını yükle (zip de olur)"
+        accept=".mp3,.wav,.m4a,.flac,.aac,.opus,.ogg,.zip"
         primary={audioCount === 0}
         multiple
         onFiles={async (files) => {
@@ -199,6 +199,10 @@ export function MusicSection({ project, assets, onProjectUpdate }: StageProps) {
           onProjectUpdate?.(latest);
         }}
       />
+      <p className="field-hint">
+        Zip'i <code>audio\</code> klasörüne elle de bırakabilirsin: sayfayı yenileyince (🔄 Klasörü yeniden
+        kontrol et) içindeki müzikler eklenir, zip <code>audio\zip-arsivi\</code> içine taşınır.
+      </p>
       <div className="music-summary">
         {music?.concept ? (
           <p>

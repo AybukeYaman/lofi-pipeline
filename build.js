@@ -35,6 +35,7 @@ import { CropNotConfirmedError, prepareVideo } from './steps/01-video-prep.js';
 import { concatAudio } from './steps/02-audio-concat.js';
 import { mixAmbient } from './steps/03-ambient-mix.js';
 import { assembleVideo } from './steps/04-assemble.js';
+import { hasAudioZips } from './prep/audio-zip.js';
 import { prepareLabelOverlay } from './steps/04a-label-overlay.js';
 import { writeTracklist } from './steps/05-tracklist.js';
 import { mixPomodoroCues } from './steps/06-pomodoro-cues.js';
@@ -110,6 +111,15 @@ export async function runBuild(config, options = {}) {
         existing.map((p) => `  ${p}`).join('\n'),
       );
     }
+  }
+
+  // Zip'ler web arayüzü açılırken açılıyor (prep/audio-zip.js); CLI'dan doğrudan çalışırken
+  // klasörde kalmışsa müzik listesine girmez — sessizce yok sayılmasın.
+  if (await hasAudioZips(config.audioDir)) {
+    const message = 'Müzik klasöründe açılmamış zip var — içindeki parçalar kullanılmayacak. ' +
+      'Önce web arayüzünde projeyi açın (zip otomatik açılır) ya da zipi elle klasöre çıkarın.';
+    warnings.push({ step: 'config', message });
+    log.warn(message);
   }
 
   await mkdir(config.output.dir, { recursive: true });

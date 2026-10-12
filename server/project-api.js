@@ -23,6 +23,7 @@ import { probe } from '../core/probe.js';
 import { moveDirToTrash, moveFileToTrash } from '../core/trash.js';
 import { readJsonFile, writeTextFile } from '../core/workspace.js';
 import { NewVideoError, runNewVideo } from '../new-video.js';
+import { hasAudioZips, unpackAudioZips } from '../prep/audio-zip.js';
 import { AmbientError, DEFAULT_AMBIENT_DIR, findAmbient, listAmbients } from '../prep/ambients.js';
 import {
   DEFAULT_CROP_BOTTOM, ProjectFileError, completeMusicByUser, cropForWatermark, recordAudioAdded, setProjectAmbient, setProjectClip, setProjectCrop,
@@ -121,12 +122,17 @@ export async function getProjects({ videosDir = DEFAULT_VIDEOS_DIR } = {}) {
 /** Bir projenin diskten okunmus mevcut durumunu dondurur. */
 export async function getProject(id, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
   const projectDir = await resolveProjectDir(id, videosDir);
-  const status = await inspectProject(projectDir);
+  let status = await inspectProject(projectDir);
+  // Müzik klasörüne bırakılmış zip'ler burada açılır (sayfa yenilenince parçalar gelir).
+  const audioZip = await unpackProjectAudioZips(projectDir, status);
+  if (audioZip && audioZip.files.length > 0) status = await inspectProject(projectDir);
   const readiness = describeReadiness(status);
   readiness.output = await describeOutput(id, projectDir, status);
   return {
     id,
     ...status,
+    // Yalnızca zip işlenen yanıtta var: arayüz "N parça eklendi" / hata bildirimini bundan gösterir.
+    ...(audioZip ? { audioZip } : {}),
     step: nextStep(status),
     workflow: projectWorkflow(status),
     readiness,
@@ -1443,6 +1449,8 @@ function workflowOf(status) {
 
 const MAX_CLIP_UPLOAD_BYTES = 200 * 1024 * 1024;
 const MAX_AUDIO_UPLOAD_BYTES = 100 * 1024 * 1024;
+/** Tarayıcıdan yüklenen zip üst sınırı; daha büyüğü doğrudan audio\ klasörüne bırakılır (orada sınır yok). */
+const MAX_ZIP_UPLOAD_BYTES = 200 * 1024 * 1024;
 
 /**
  * Görsel yüklemesi → resimler/. Dosya kullanıcının verdiği adla yazılır; ad
@@ -1489,16 +1497,38 @@ export async function uploadProjectClip(id, body, { videosDir = DEFAULT_VIDEOS_D
  */
 export async function uploadProjectAudio(id, body, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
   const projectDir = await resolveProjectDir(id, videosDir);
-  const { name, data } = uploadName(body, AUDIO_EXTENSIONS, 'audio');
-  const buffer = decodeUpload(data, MAX_AUDIO_UPLOAD_BYTES, 'Audio');
+  const { name, data, ext } = uploadName(body, [...AUDIO_EXTENSIONS, '.zip'], 'audio');
+  const isZip = ext === '.zip';
+  const buffer = decodeUpload(data, isZip ? MAX_ZIP_UPLOAD_BYTES : MAX_AUDIO_UPLOAD_BYTES, isZip ? 'Zip' : 'Audio');
   const status = await inspectProject(projectDir);
   const outside = new ApiError(409, 'audioDir is outside the project folder', { audioDir: status.audioDir });
   if (!isInside(resolve(projectDir), resolve(status.audioDir))) throw outside;
   await mkdir(status.audioDir, { recursive: true });
   if (!(await realPathInside(projectDir, status.audioDir))) throw outside;
+  if (isZip) {
+    // Zip klasöre yazılır; parçalar getProject içinde açılır — klasöre elle bırakılan zip ile AYNI yol.
+    await writeFile(join(status.audioDir, await uniqueFileName(status.audioDir, name)), buffer);
+    return getProject(id, { videosDir });
+  }
   await writeFile(join(status.audioDir, name), buffer);
   await recordAudioAdded(status.projectPath, [name]);
   return getProject(id, { videosDir });
+}
+
+/**
+ * `audio/` klasöründeki zip'leri açar (prep/audio-zip.js) ve açılan parçaları
+ * eklenme sırasına yazar. audioDir proje dışını gösteriyorsa dokunmaz.
+ *
+ * @returns {Promise<import('../prep/audio-zip.js').UnpackResult|null>} zip yoksa null
+ */
+async function unpackProjectAudioZips(projectDir, status) {
+  if (!isInside(resolve(projectDir), resolve(status.audioDir))) return null;
+  if (!(await hasAudioZips(status.audioDir))) return null;
+  if (!(await realPathInside(projectDir, status.audioDir))) return null;
+
+  const result = await unpackAudioZips(status.audioDir);
+  if (result.files.length > 0) await recordAudioAdded(status.projectPath, result.files);
+  return result.archives.length > 0 ? result : null;
 }
 
 /**

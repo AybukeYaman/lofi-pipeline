@@ -5,7 +5,9 @@ import { EmptyState } from '../components/Feedback';
 import { PageHeader } from '../components/PageHeader';
 import { ProjectTabs } from '../components/ProjectTabs';
 import { StatusBadge } from '../components/StatusBadge';
+import { describeAudioZip } from '../audioZip';
 import { pomodoroSummary } from '../pomodoroSetup';
+import { showSuccess, showWarning } from '../toast';
 import type { LoadState, ProjectDetail, ProjectSummary } from '../types';
 import { isStepReachable, nextStepId, previousStep, stepInfo, viewWorkflow, type ViewStepId } from '../workflow';
 import { ShortsWorkspace } from './ShortsWorkspace';
@@ -178,6 +180,15 @@ function WorkspaceContent({
   // yüzden her zaman canonical akışın bir adımı.
   const current = (workflow?.current ?? 'project') as ViewStepId;
   const assets = useMemo(() => deriveAssets(project), [project]);
+
+  // Müzik klasöründeki zip'ler açıldıysa (sayfa açılışı, yenileme ya da zip yükleme) söyle.
+  // Sunucu `audioZip`'i yalnızca zip işlenen yanıtta gönderir, bu yüzden bildirim bir kez çıkar.
+  useEffect(() => {
+    if (!project.audioZip) return;
+    const notice = describeAudioZip(project.audioZip);
+    if (notice.success) showSuccess(notice.success, 'Zip açıldı');
+    for (const problem of notice.problems) showWarning(problem, 'Zip açılamadı');
+  }, [project.audioZip]);
 
   // Açılışta diskten hesaplanan ilk açık adım gösterilir. Bir işlem ilk açık
   // adımı değiştirirse (adım tamamlandı / yeniden açıldı) oraya geçilir;
