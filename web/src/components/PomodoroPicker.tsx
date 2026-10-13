@@ -48,12 +48,12 @@ function choiceOf(data: ProjectPomodoro): PomodoroChoice {
 
 /**
  * Müzik/süre durumunun kısa metni ve rengi. Uyuyor ✓; fazla ⚠ (montajda kendiliğinden kırpılır);
- * kısa ⚠ (kalan süreyi arka plan sesi doldurur) — ikisi de engel değil, yalnızca ölçülemeyen parça engeller.
+ * kısa ⚠ (liste bitince baştaki parçalar tekrar çalar) — ikisi de engel değil, yalnızca ölçülemeyen parça engeller.
  */
 function statusText(status: string | undefined, ok: boolean | undefined): string {
   if (!ok) return '⚠ Müzik uymuyor';
   if (status === 'excess') return '⚠ Fazla müzik: montajda otomatik kırpılacak';
-  if (status === 'short') return '⚠ Müzik kısa: kalanı arka plan sesiyle devam eder';
+  if (status === 'short') return '⚠ Müzik kısa: baştaki parçalar tekrar çalacak';
   return '✓ Müzik süreye uyuyor';
 }
 

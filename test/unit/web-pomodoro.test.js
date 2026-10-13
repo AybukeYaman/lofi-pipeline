@@ -134,7 +134,8 @@ describe('GET /api/projects/:id/pomodoro', () => {
     assert.equal(res.validation.ok, true);
     assert.equal(res.validation.comparison.shortSeconds, 12.5 * 60);
     assert.ok(res.validation.message.includes('Eksik: 12:30'));
-    assert.ok(res.validation.warnings.some((w) => w.includes('Ambiance')));
+    assert.ok(res.validation.warnings.some((w) => w.includes('baştaki parçalar tekrar çalacak')));
+    assert.equal(res.validation.fill.repeatedSeconds, 12.5 * 60);
   });
 
   test('Test 4 — 30/10 × 6 de 232 dakika timeline üretir (2 dk GET READY dahil, son BREAK yok)', async () => {

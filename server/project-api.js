@@ -727,6 +727,8 @@ export async function getPomodoro(id, { videosDir = DEFAULT_VIDEOS_DIR, probeFn 
       warnings: validation.warnings,
       comparison: validation.comparison,
       trim: validation.trim,
+      // Kısa müzikte baştan tekrar çalacak parçalar (montajdan önce görünsün).
+      fill: validation.fill,
       timeline: validation.timeline,
       cueCount: validation.cues?.events.length ?? 0,
     },

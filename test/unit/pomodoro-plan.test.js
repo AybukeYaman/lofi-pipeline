@@ -23,6 +23,7 @@ import {
   legacyKeysIn,
   normalizePomodoroSelection,
   PomodoroValidationError,
+  planFill,
   planTrim,
   flattenSets,
   inferKind,
@@ -355,6 +356,37 @@ describe('planTrim', () => {
   });
 });
 
+describe('planFill — kısa müzik baştan tekrar çalar', () => {
+  const tracks = [{ path: 'a/Amber.m4a', duration: 100 }, { path: 'a/Rain.m4a', duration: 60 }];
+
+  it('liste bir kez çalar, bitince baştan; son parça video bitince kesilir', () => {
+    const fill = planFill(tracks, 220);
+    assert.deepEqual(fill.tracks.map((t) => [t.index, t.usedDuration, t.repeat, t.trimmed]), [
+      [0, 100, false, false], [1, 60, false, false], [0, 60, true, true],
+    ]);
+    assert.deepEqual(fill.tracks.map((t) => t.startSeconds), [0, 100, 160]);
+    assert.equal(fill.repeatedSeconds, 60);
+    assert.equal(fill.repeatedCount, 1);
+  });
+
+  it('gerekirse liste birkaç kez döner; toplam tam timeline kadar', () => {
+    const fill = planFill(tracks, 400);
+    assert.deepEqual(fill.tracks.map((t) => t.index), [0, 1, 0, 1, 0]);
+    assert.equal(fill.tracks.reduce((sum, t) => sum + t.usedDuration, 0), 400);
+    assert.equal(fill.tracks.at(-1).usedDuration, 80);
+  });
+
+  it('uyarı aynı parçanın kaç kez tekrar ettiğini ve kesilen son parçayı söyler', () => {
+    const plan = planOf({ statuses: [{ name: 'STUDY', minutes: 5 }], rounds: 1 });
+    const [warning] = validatePomodoro({ plan, tracks: [{ path: 'x/Amber Curtains.m4a', duration: 200 }] }).warnings;
+    assert.equal(
+      warning,
+      'Müzik 03:40 kısa: video dolsun diye baştaki parçalar tekrar çalacak: ' +
+      'Amber Curtains ×2 (toplam 03:40 tekrar; sonuncusu 00:20 çalıp kesilir).',
+    );
+  });
+});
+
 describe('validatePomodoro', () => {
   /** Verilen toplam süreyi eşit parçalara bölen sahte seçim. */
   const tracksOf = (total, count = 4) =>
@@ -402,21 +434,25 @@ describe('validatePomodoro', () => {
     assert.equal(Object.hasOwn(serializePomodoroPlan(plan), 'trimExcess'), false);
   });
 
-  it('Test 3 — eksik müzik engel DEĞİL: uyarır, kalan süreyi arka plan sesi doldurur', () => {
+  it('Test 3 — eksik müzik engel DEĞİL: uyarır, baştaki parçalar tekrar çalar', () => {
     const plan = planOf({ preset: '50/10', rounds: 4 });
     const result = validatePomodoro({ plan, tracks: tracksOf(219.5 * 60) });
     assert.equal(result.ok, true);
     assert.deepEqual(result.problems, []);
     assert.equal(result.comparison.status, 'short');
     assert.equal(result.trim, null, 'eksik müzikte kırpılacak bir şey yok');
-    assert.ok(result.warnings.some((w) => w.includes('12:30') && w.includes('Ambiance')));
+    assert.equal(result.fill.repeatedSeconds, 12.5 * 60);
+    assert.ok(result.warnings.some((w) => w.includes('12:30') && w.includes('tekrar çalacak') && w.includes('t0')));
     assert.match(result.message, /Eksik: 12:30/);
-    assert.match(result.message, /Ambiance/);
+    assert.match(result.message, /baştaki parçalar tekrar çalar/);
   });
 
-  it('çok eksik müzik de engel değil (hiç müzik olmasa bile yalnızca ölçülemeyen parça durdurur)', () => {
+  it('hiç müzik yoksa tekrar edecek parça yok: uyarı Ambiance der, plan yok', () => {
     const plan = planOf({ preset: '50/10', rounds: 2 });
-    assert.equal(validatePomodoro({ plan, tracks: [] }).ok, true);
+    const empty = validatePomodoro({ plan, tracks: [] });
+    assert.equal(empty.ok, true);
+    assert.equal(empty.fill, null);
+    assert.ok(empty.warnings.some((w) => w.includes('tekrar edilecek parça yok') && w.includes('Ambiance')));
     assert.equal(validatePomodoro({ plan, tracks: [{ path: 'x.m4a', duration: null }] }).ok, false);
   });
 

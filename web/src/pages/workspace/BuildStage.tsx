@@ -275,7 +275,7 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
                 ? (pomodoro.validation.comparison?.status === 'excess'
                   ? '⚠ Fazla müzik otomatik kırpılacak'
                   : pomodoro.validation.comparison?.status === 'short'
-                    ? '⚠ Müzik kısa: kalanı arka plan sesiyle'
+                    ? '⚠ Müzik kısa: baştaki parçalar tekrar çalacak'
                     : '✓ Müzik süreye uyuyor')
                 : '⚠ Müzik uymuyor'}{' '}
               <button type="button" className="button button-compact" onClick={() => onGoToStep?.('music')}>

@@ -102,7 +102,8 @@ function titleCase(text) {
  * Manifest parçalarından tracklist metnini ve bölüm denetimini üretir.
  * Saf fonksiyon — dosya yazmaz.
  *
- * @param {Array<{ file: string, startSeconds: number, duration: number|null }>} tracks
+ * @param {Array<{ file: string, startSeconds: number, duration: number|null, repeat?: boolean }>} tracks
+ *   `repeat`: kısa Pomodoro müziğinde baştan tekrar çalan parça — adına " (tekrar)" eklenir
  * @param {{ names?: Record<string, string> }} [options]
  * @returns {{
  *   text: string,
@@ -111,6 +112,9 @@ function titleCase(text) {
  *   warnings: string[],
  * }}
  */
+/** Tekrar çalan parçanın tracklist'teki eki. */
+export const REPEAT_SUFFIX = ' (tekrar)';
+
 export function buildTracklist(tracks, options = {}) {
   const { names = {} } = options;
 
@@ -120,7 +124,7 @@ export function buildTracklist(tracks, options = {}) {
 
   const entries = tracks.map((track) => ({
     stamp: formatTimestamp(track.startSeconds),
-    name: trackName(track.file, names),
+    name: track.repeat ? `${trackName(track.file, names)}${REPEAT_SUFFIX}` : trackName(track.file, names),
     file: track.file,
     startSeconds: track.startSeconds,
     duration: track.duration,

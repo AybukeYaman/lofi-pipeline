@@ -135,15 +135,24 @@ export async function concatAudio(options) {
   if (!validation.ok) throw new PomodoroValidationError(validation);
   for (const message of validation.warnings) warn(message);
 
-  // Kırpma yalnızca bu plana göre uygulanır: orijinal dosyalara dokunulmaz,
-  // concat filtresinde `atrim` olarak yaşar (bkz. buildFilterArgs).
-  const segments = probes
-    .map((p, i) => ({
-      probe: p,
-      duration: decoded[i],
-      useDuration: validation.trim ? validation.trim.tracks[i].usedDuration : decoded[i],
+  // Kırpma ve tekrar yalnızca bu planlara göre uygulanır: orijinal dosyalara dokunulmaz,
+  // kesilen parça concat filtresinde `atrim` olarak yaşar (bkz. buildFilterArgs). Kısa
+  // müzikte (`fill`) liste bitince baştaki parçalar aynı dosyadan yeniden girdi olur.
+  const segments = validation.fill
+    ? validation.fill.tracks.map((track) => ({
+      probe: probes[track.index],
+      duration: decoded[track.index],
+      useDuration: track.usedDuration,
+      repeat: track.repeat,
     }))
-    .filter((segment) => segment.useDuration > 0);
+    : probes
+      .map((p, i) => ({
+        probe: p,
+        duration: decoded[i],
+        useDuration: validation.trim ? validation.trim.tracks[i].usedDuration : decoded[i],
+        repeat: false,
+      }))
+      .filter((segment) => segment.useDuration > 0);
 
   if (validation.trim) {
     logger.info(
@@ -161,15 +170,16 @@ export async function concatAudio(options) {
 
   // 5 — Birleştir
   await mkdir(dirname(outputPath), { recursive: true });
-  // Pomodoro'da müzik timeline'dan KISA ise ses sessizlikle timeline süresine tamamlanır:
-  // video (ve Ambiance, etiketler, bipler) timeline kadar sürer, ses bitti diye yarıda kalmaz.
-  const padTo = validation.comparison?.status === 'short' ? validation.timeline.totalSeconds : null;
-  if (padTo !== null) {
+  if (validation.fill) {
     logger.info(
-      `Müzik ${validation.comparison.shortSeconds.toFixed(1)} sn kısa: ses sessizlikle ` +
-      `${padTo} sn'ye tamamlanıyor (kalan süre Ambiance'a kalır).`,
+      `Müzik ${validation.comparison.shortSeconds.toFixed(1)} sn kısa: baştaki parçalar tekrar ` +
+      `çalıyor (${validation.fill.repeatedCount} tekrar, ${validation.fill.repeatedSeconds.toFixed(1)} sn).`,
     );
   }
+  // Tekrar edecek parça yoksa (hiç parça yok) ses sessizlikle timeline süresine tamamlanır:
+  // video (ve Ambiance, etiketler, bipler) timeline kadar sürer, ses bitti diye yarıda kalmaz.
+  // Tekrarlı planın son parçası yuvarlama payı kadar kısa kalabilir; apad onu da kapatır.
+  const padTo = validation.comparison?.status === 'short' ? validation.timeline.totalSeconds : null;
   await ffmpeg(buildFilterArgs(segments, outputPath, padTo), { onProgress });
 
   // 6 — Doğrula (beklenen: çözülen sürelerin toplamı; kısa müzikte tamamlanmış timeline süresi)
@@ -190,9 +200,11 @@ export async function concatAudio(options) {
 
   // 7 — Manifest (05-tracklist.js damgaları ve adları buradan üretir, dosyaları yeniden ölçmez)
   let elapsed = 0;
-  const tracks = segments.map(({ probe: p, duration, useDuration }) => {
+  const tracks = segments.map(({ probe: p, duration, useDuration, repeat }) => {
     const track = {
       file: p.path,
+      // Kısa müzikte liste bitince baştan tekrar çalan parça (tracklist "(tekrar)" yazar).
+      repeat,
       // Videoda gerçekten duyulan süre: kırpıldıysa kullanılan kadarı.
       duration: useDuration,
       sourceDuration: duration,
@@ -229,6 +241,7 @@ export async function concatAudio(options) {
         timeline: validation.timeline,
         comparison: validation.comparison,
         trim: validation.trim,
+        fill: validation.fill,
         cues: validation.cues,
         warnings: validation.warnings,
       }

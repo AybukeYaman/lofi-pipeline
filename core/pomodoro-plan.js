@@ -421,6 +421,71 @@ export function planTrim(tracks, totalSeconds) {
 }
 
 /**
+ * Kısa müziği timeline'a tamamlayan çalma planı: liste bir kez olduğu gibi çalar, bitince
+ * BAŞTAN tekrar başlar (gerekirse birkaç kez); videonun bittiği yerdeki parça kesilir.
+ * Orijinal dosyalara dokunulmaz — `steps/02-audio-concat.js` aynı dosyayı concat'e yeniden
+ * girdi olarak verir, kesilen parça `atrim` ile.
+ *
+ * @param {Array<{ path: string, duration: number }>} tracks çalma sırasıyla, hepsi ölçülmüş
+ * @param {number} totalSeconds timeline süresi
+ * @returns {{
+ *   tracks: Array<{ index: number, path: string, duration: number, usedDuration: number,
+ *     startSeconds: number, trimmed: boolean, repeat: boolean }>,
+ *   repeatedSeconds: number, repeatedCount: number,
+ * }}
+ */
+export function planFill(tracks, totalSeconds) {
+  const planned = [];
+  let elapsed = 0;
+  const playable = tracks.filter((track) => track.duration > 0);
+  // Yuvarlama artığı kadar yer kalmışsa yeni parça başlatılmaz (planTrim ile aynı pay).
+  const room = () => totalSeconds - elapsed > MATCH_TOLERANCE_SECONDS / 10;
+
+  for (let pass = 0; playable.length > 0 && room(); pass++) {
+    for (const track of playable) {
+      if (!room()) break;
+      const usedDuration = Math.min(track.duration, totalSeconds - elapsed);
+      planned.push({
+        index: tracks.indexOf(track),
+        path: track.path,
+        duration: track.duration,
+        usedDuration: Number(usedDuration.toFixed(3)),
+        startSeconds: Number(elapsed.toFixed(3)),
+        trimmed: usedDuration < track.duration,
+        repeat: pass > 0,
+      });
+      elapsed += usedDuration;
+    }
+  }
+
+  const repeated = planned.filter((track) => track.repeat);
+  return {
+    tracks: planned,
+    repeatedSeconds: Number(repeated.reduce((sum, track) => sum + track.usedDuration, 0).toFixed(3)),
+    repeatedCount: repeated.length,
+  };
+}
+
+/**
+ * Tekrar çalan parçaların kısa anlatımı (uyarı metni), ör.
+ * "Amber Curtains, Rainy Window (toplam 12:30 tekrar; sonuncusu 03:20 çalıp kesilir)".
+ * Aynı parça birden fazla kez tekrar ediyorsa adı bir kez, yanında "×3".
+ */
+function describeRepeats(fill) {
+  const repeated = fill.tracks.filter((track) => track.repeat);
+  const counts = new Map();
+  for (const track of repeated) {
+    const name = String(track.path).split(/[\\/]/).pop().replace(/\.[^.]+$/, '');
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  const names = [...counts].map(([name, count]) => (count > 1 ? `${name} ×${count}` : name));
+  const shown = names.length > 6 ? `${names.slice(0, 6).join(', ')} ve ${names.length - 6} parça daha` : names.join(', ');
+  const last = repeated.at(-1);
+  const cut = last?.trimmed ? `; sonuncusu ${formatClock(last.usedDuration)} çalıp kesilir` : '';
+  return `${shown} (toplam ${formatClock(fill.repeatedSeconds)} tekrar${cut})`;
+}
+
+/**
  * Saniyeyi `mm:ss` damgasına çevirir (`240:00`, `03:17`).
  *
  * Dakika saate çevrilmez: Pomodoro ekranında "240:00" okunabilir, "4:00:00" ise
@@ -465,7 +530,7 @@ export function describeComparison(comparison, plan) {
     return (
       `${head}\nEksik: ${formatClock(comparison.shortSeconds)}\n\n` +
       "Seçilen müzikler Pomodoro timeline'ını doldurmuyor.\n" +
-      'Montaj yine de yapılır: müziğin bittiği yerden sonra yalnızca arka plan sesi (Ambiance) çalar.'
+      'Montaj yine de yapılır: liste bitince baştaki parçalar tekrar çalar.'
     );
   }
   return `${head}\nMüzik timeline ile eşleşiyor.`;
@@ -511,6 +576,7 @@ export function describeTimeline(timeline) {
  *   timeline: ReturnType<typeof buildTimeline>|null,
  *   comparison: ReturnType<typeof compareMusic>|null,
  *   trim: ReturnType<typeof planTrim>|null,
+ *   fill: ReturnType<typeof planFill>|null,
  *   cues: ReturnType<typeof buildCueEvents>|null,
  *   problems: string[], warnings: string[], message: string|null,
  * }}
@@ -518,7 +584,7 @@ export function describeTimeline(timeline) {
 export function validatePomodoro({ plan, tracks, tolerance = MATCH_TOLERANCE_SECONDS }) {
   const off = {
     enabled: false, ok: true, plan: null, timeline: null, comparison: null,
-    trim: null, cues: null,
+    trim: null, fill: null, cues: null,
     problems: [], warnings: [], message: null,
   };
   if (plan === null || plan === undefined) return off;
@@ -538,13 +604,16 @@ export function validatePomodoro({ plan, tracks, tolerance = MATCH_TOLERANCE_SEC
     problems.push(`${unmeasured.length} parçanın süresi ölçülemedi — toplam süre güvenilir değil.`);
   }
 
-  // Eksik müzik engel DEĞİL: kalan süreyi arka plan sesi (Ambiance) doldurur, yoksa sessiz kalır.
-  // Montajda (02) ses timeline süresine sessizlikle tamamlanır, video yarım kalmaz.
+  // Eksik müzik engel DEĞİL: liste bitince baştaki parçalar tekrar çalar (montajda 02 bu planı
+  // birleştirir). Hiç parça yoksa tekrar edecek bir şey yok: ses sessizlikle tamamlanır.
+  const measured = unmeasured.length === 0 && tracks.length > 0;
+  const fill = comparison.status === 'short' && measured ? planFill(tracks, timeline.totalSeconds) : null;
   if (comparison.status === 'short') {
-    warnings.push(
-      `Müzik ${formatClock(comparison.shortSeconds)} kısa: müzik bittikten sonra kalan süre ` +
-      'yalnızca arka plan sesiyle (Ambiance) devam eder, o da seçili değilse sessiz kalır.',
-    );
+    warnings.push(fill
+      ? `Müzik ${formatClock(comparison.shortSeconds)} kısa: video dolsun diye baştaki parçalar ` +
+        `tekrar çalacak: ${describeRepeats(fill)}.`
+      : `Müzik ${formatClock(comparison.shortSeconds)} kısa ve tekrar edilecek parça yok: kalan süre ` +
+        'yalnızca arka plan sesiyle (Ambiance) devam eder, o da seçili değilse sessiz kalır.');
   }
 
   // Fazla müzik engel değil, UYARI: montaj kendiliğinden kırpar. Hiç kullanılmayacak
@@ -562,7 +631,7 @@ export function validatePomodoro({ plan, tracks, tolerance = MATCH_TOLERANCE_SEC
   return {
     enabled: true,
     ok: problems.length === 0,
-    plan, timeline, comparison, trim, cues,
+    plan, timeline, comparison, trim, fill, cues,
     problems, warnings,
     message: describeComparison(comparison, plan),
   };
