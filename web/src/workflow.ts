@@ -93,14 +93,14 @@ const POMODORO_STEP_GUIDE: Partial<Record<ViewStepId, { who: 'user' | 'system'; 
   project: {
     who: 'user',
     lines: [
-      'Pomodoro seçildi: düzen ve süre kayıtlı. Çalışma/mola görüntüsünü 2. adımda (Video), müziği 3. adımda ekleyeceksin.',
+      'Pomodoro seçildi: durumlar ve süre kayıtlı. Her durumun görüntüsünü 2. adımda (Video), müziği 3. adımda ekleyeceksin.',
     ],
   },
   video: {
     who: 'user',
     lines: [
-      'Çalışma oturumları için bir resim ya da döngü videosu seç.',
-      'Mola için ayrı bir görüntü istersen aşağıdan seç; istemezsen mola da aynı görüntüyü kullanır.',
+      'Önce ana görüntüyü seç (resim ya da döngü videosu).',
+      'Sonra sekmelerden (GET READY, STUDY, BREAK…) istediğin durum için ayrı bir görüntü seç; seçmezsen o durum ana görüntüyü kullanır.',
     ],
   },
   music: {
@@ -113,7 +113,7 @@ const POMODORO_STEP_GUIDE: Partial<Record<ViewStepId, { who: 'user' | 'system'; 
   build: {
     who: 'system',
     lines: [
-      '"Başlat" de; videonun başına 2 dk GET READY, çalışma/mola görüntüleri, STUDY/BREAK yazısı, sayaç ve her oturumun sonundaki bipler otomatik.',
+      '"Başlat" de; videonun başına 2 dk GET READY, her durumun görüntüsü, durum yazısı, sayaç ve her oturumun sonundaki bipler otomatik.',
     ],
   },
 };

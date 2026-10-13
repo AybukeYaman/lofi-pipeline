@@ -1,7 +1,6 @@
 /** 2. adım — Video: döngü klibi / tek görsel seçimi, kırpma ve format. */
 import { useEffect, useState } from 'react';
 import {
-  fetchProject,
   getProjectClipUrl,
   openProjectFolder,
   selectProjectClip,
@@ -12,7 +11,7 @@ import {
   ApiError,
 } from '../../api';
 import { AssetPreview } from '../../components/AssetPreview';
-import { PomodoroVisuals } from '../../components/PomodoroVisuals';
+import { StatusTabs } from '../../components/StatusTabs';
 import { EmptyState } from '../../components/Feedback';
 import { StatusBadge } from '../../components/StatusBadge';
 import type { ProjectDetail, VideoSource } from '../../types';
@@ -23,7 +22,7 @@ import { StagePanel, type StageProps } from './StagePanel';
 export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: StageProps) {
   // Tek resim modu: clips = resimler\ altındaki bütün görseller (sunucu ada göre sıralar).
   const isStill = project.videoSource === 'image';
-  // Pomodoro açıksa görüntüler "hangi an için" kartlarıyla seçilir (PomodoroVisuals).
+  // Pomodoro açıksa görüntüler durum sekmeleriyle seçilir (StatusTabs).
   const isPomodoro = project.readiness?.pomodoro?.enabled === true;
   const clips = project.clips ?? [];
   const currentClip = project.clip?.exists ? project.clip.path : null;
@@ -233,18 +232,6 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
     }
   };
 
-  const handleRefreshClips = async () => {
-    try {
-      const updated = await fetchProject(project.id);
-      if (onProjectUpdate) {
-        onProjectUpdate(updated);
-      }
-      setSuccess(`${mediaFolder}/ klasöründeki ${isStill ? 'görseller' : 'klipler'} yeniden okundu.`);
-    } catch {
-      setError('Klipler okunamadı. Klasörü kontrol edip tekrar dene.');
-    }
-  };
-
   const handleNumberChange = (
     val: string,
     setter: (n: number) => void,
@@ -339,28 +326,26 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
           )}
           <div className="stage-section-head">
             <h3>
-              {isStill ? 'Klasördeki görseller' : 'Klasördeki klipler'} <span className="count">({clips.length})</span>
+              {isPomodoro ? 'Ana görüntü' : isStill ? 'Klasördeki görseller' : 'Klasördeki klipler'} <span className="count">({clips.length})</span>
             </h3>
             <div className="tool-box-row">
               <button type="button" className="button button-compact" onClick={handleOpenFolder}>
                 Klasörü aç
               </button>
-              <button type="button" className="button button-compact" onClick={handleRefreshClips}>
-                Yenile
-              </button>
             </div>
           </div>
-          <p className="field-hint">
-            {isStill
-              ? <>MASTER ve açı görselleri (<code>Master1.jpg</code> …) şu klasörden:</>
-              : <>Döngü videosu dosyalarını (<code>.mp4</code>) şu klasöre koy:</>}{' '}
-            <code className="link-code" onClick={handleOpenFolder} title={`Explorer’da ${mediaFolder} klasörünü aç`}>
-              {project.dir || project.name}\{mediaFolder}\
-            </code>.
-          </p>
+          {/* Uzun klasör yolu yok: "Klasörü aç" düğmesi aynı yolu açıyor (tam yol "Dosya yolları"nda).
+              Pomodoro'da aynı cümleyi StatusTabs söylüyor. */}
+          {isPomodoro ? null : (
+            <p className="field-hint">
+              {isStill
+                ? <>MASTER ve açı görselleri (<code>Master1.jpg</code> …) <code>{mediaFolder}\</code> klasöründen seçilir.</>
+                : <>Döngü videosu (<code>.mp4</code>) dosyalarını <code>{mediaFolder}\</code> klasörüne koy ya da yukarıdan yükle.</>}
+            </p>
+          )}
           {isPomodoro ? (
-            // Pomodoro: liste yerine "hangi görüntü ne zaman" kartları (çalışma + mola, küçük resimli).
-            <PomodoroVisuals
+            // Pomodoro: liste yerine ana görüntü + "hangi görüntü ne zaman" sekmeleri (küçük resimli).
+            <StatusTabs
               project={project}
               workPath={selected}
               workCandidates={clips}

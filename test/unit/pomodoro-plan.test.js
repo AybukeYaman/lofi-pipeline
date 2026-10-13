@@ -17,8 +17,10 @@ import {
   buildTimeline,
   compareMusic,
   describeComparison,
+  describeCycle,
   describeTimeline,
   formatClock,
+  legacyKeysIn,
   normalizePomodoroSelection,
   PomodoroValidationError,
   planTrim,
@@ -47,22 +49,34 @@ describe('normalizePomodoroSelection', () => {
     assert.deepEqual(problems, []);
   });
 
-  it('preset work/break dakikalarını doldurur', () => {
+  it('eski preset durum dakikalarını doldurur', () => {
     const plan = planOf({ preset: '30/10', rounds: 6 });
-    assert.equal(plan.workMinutes, 30);
-    assert.equal(plan.breakMinutes, 10);
+    assert.deepEqual(plan.statuses.map((x) => [x.name, x.minutes]), [['STUDY', 30], ['BREAK', 10]]);
     assert.equal(plan.rounds, 6);
     assert.equal(plan.preset, '30/10');
   });
 
-  it('elle verilen değerler preseti ezer ve eşleşen preset kimliği taşınır', () => {
+  it('eski elle verilen değerler preseti ezer ve eşleşen preset kimliği taşınır', () => {
     const plan = planOf({ preset: '30/10', workMinutes: 50 });
-    assert.equal(plan.workMinutes, 50);
+    assert.deepEqual(plan.statuses.map((x) => x.minutes), [50, 10]);
     assert.equal(plan.preset, '50/10');
   });
 
   it('hazır düzene denk gelmeyen değerde preset null kalır', () => {
     assert.equal(planOf({ workMinutes: 45, breakMinutes: 15 }).preset, null);
+    assert.equal(planOf({ statuses: [{ name: 'A', minutes: 45 }, { name: 'B', minutes: 15 }] }).preset, null);
+  });
+
+  it('plan geçici/eski alanları taşımaz: yalnızca statuses', () => {
+    const plan = planOf({ preset: '50/10', breakClip: 'x.png' });
+    for (const old of ['workMinutes', 'breakMinutes', 'breakClip']) assert.equal(old in plan, false);
+  });
+
+  it('legacyKeysIn eski anahtarları bulur, yenilerini bulmaz', () => {
+    assert.deepEqual(legacyKeysIn({ enabled: true, preset: '50/10', breakClip: '' }), ['preset', 'breakClip']);
+    assert.deepEqual(legacyKeysIn({ enabled: true, statuses: [], intro: {} }), []);
+    assert.deepEqual(legacyKeysIn(null), []);
+    assert.deepEqual(legacyKeysIn([]), []);
   });
 
   it('varsayılanlar POMODORO_DEFAULTS ile aynı', () => {
@@ -111,14 +125,14 @@ describe('buildTimeline', () => {
     assert.equal(timeline.sessions.length, 13);
   });
 
-  it('video her zaman 2 dk GET READY ile başlar, sonra WORK/BREAK boşluksuz dizilir', () => {
+  it('video her zaman 2 dk GET READY ile başlar, sonra STUDY/BREAK boşluksuz dizilir', () => {
     const timeline = buildTimeline(planOf({ preset: '50/10', rounds: 2 }));
     assert.deepEqual(
       timeline.sessions.map((s) => [s.kind, s.label, s.startSeconds / 60, s.endSeconds / 60]),
       [
         ['ready', 'GET READY', 0, 2],
-        ['work', 'WORK 01', 2, 52], ['break', 'BREAK 01', 52, 62],
-        ['work', 'WORK 02', 62, 112], ['break', 'BREAK 02', 112, 122],
+        ['status', 'STUDY 01', 2, 52], ['status', 'BREAK 01', 52, 62],
+        ['status', 'STUDY 02', 62, 112], ['status', 'BREAK 02', 112, 122],
       ],
     );
     assert.deepEqual(timeline.sessions.map((s) => s.index), [0, 1, 2, 3, 4]);
@@ -132,8 +146,75 @@ describe('buildTimeline', () => {
 
   it('describeTimeline GET READY ile başlayan dökümü verir', () => {
     const text = describeTimeline(buildTimeline(planOf({ preset: '50/10', rounds: 4 })));
-    assert.ok(text.startsWith('GET READY\n00:00 - 02:00\n\nWORK 01\n02:00 - 52:00\n\nBREAK 01\n52:00 - 62:00'));
+    assert.ok(text.startsWith('GET READY\n00:00 - 02:00\n\nSTUDY 01\n02:00 - 52:00\n\nBREAK 01\n52:00 - 62:00'));
     assert.ok(text.trimEnd().endsWith('BREAK 04\n232:00 - 242:00'));
+  });
+});
+
+describe('özel durumlar (statuses)', () => {
+  const stretch = [
+    { name: 'STUDY', minutes: 25 },
+    { name: 'STRETCH', minutes: 5, visual: './resimler/esneme.png' },
+    { name: 'LONG BREAK', minutes: 10, beep: false },
+  ];
+
+  it('döngü sırayla tekrarlanır; her oturum adını, sırasını, görüntüsünü ve bipini taşır', () => {
+    const timeline = buildTimeline(planOf({ statuses: stretch, rounds: 2, intro: { visual: './resimler/hazir.png' } }));
+    assert.equal(timeline.totalMinutes, 2 + 2 * 40);
+    assert.deepEqual(
+      timeline.sessions.map((x) => [x.name, x.statusIndex, x.round, x.visual, x.beep]),
+      [
+        ['GET READY', -1, 0, './resimler/hazir.png', true],
+        ['STUDY', 0, 1, null, true], ['STRETCH', 1, 1, './resimler/esneme.png', true], ['LONG BREAK', 2, 1, null, false],
+        ['STUDY', 0, 2, null, true], ['STRETCH', 1, 2, './resimler/esneme.png', true], ['LONG BREAK', 2, 2, null, false],
+      ],
+    );
+    assert.equal(timeline.sessions[2].label, 'STRETCH 01');
+  });
+
+  it('beep: false olan durumun bitişinde bip çalmaz, öbürleri çalar', () => {
+    const plan = planOf({ statuses: stretch, rounds: 1 });
+    const { events } = buildCueEvents(plan, buildTimeline(plan));
+    const sessions = new Set(events.map((e) => e.session));
+    assert.deepEqual([...sessions].sort(), [0, 1, 2]);
+    assert.equal(events.length, 9);
+  });
+
+  it('eski şekil iki durumlu listeye çevrilir; breakClip BREAK görüntüsü olur', () => {
+    const plan = planOf({ preset: '50/10', breakClip: 'videolar/mola.mp4' });
+    assert.deepEqual(plan.statuses, [
+      { name: 'STUDY', minutes: 50, visual: null, beep: true },
+      { name: 'BREAK', minutes: 10, visual: 'videolar/mola.mp4', beep: true },
+    ]);
+    assert.equal(plan.preset, '50/10');
+  });
+
+  it('statuses varsa eski alanlar yok sayılır', () => {
+    const plan = planOf({ statuses: [{ name: 'A', minutes: 7 }], workMinutes: 50, preset: '30/10' });
+    assert.deepEqual(plan.statuses.map((x) => [x.name, x.minutes]), [['A', 7]]);
+    assert.equal(plan.preset, null);
+  });
+
+  it('geçersiz durumlar anlaşılır hata verir', () => {
+    const cases = [
+      [[], /pomodoro\.statuses/],
+      ['x', /pomodoro\.statuses/],
+      [[{ name: '', minutes: 5 }], /statuses\[0\]\.name/],
+      [[{ name: 'A'.repeat(25), minutes: 5 }], /statuses\[0\]\.name.*24/],
+      [[{ name: 'A\nB', minutes: 5 }], /statuses\[0\]\.name/],
+      [[{ name: 'A', minutes: 0 }], /statuses\[0\]\.minutes/],
+      [[{ name: 'A', minutes: 5, beep: 'evet' }], /statuses\[0\]\.beep/],
+      [[{ name: 'A', minutes: 5, visual: '' }], /statuses\[0\]\.visual/],
+      [[5], /statuses\[0\]: nesne/],
+    ];
+    for (const [statuses, pattern] of cases) {
+      const { problems } = normalizePomodoroSelection({ enabled: true, statuses });
+      assert.ok(problems.some((p) => pattern.test(p)), JSON.stringify(statuses) + ' → ' + problems.join(' | '));
+    }
+  });
+
+  it('describeCycle sürelerle özetler', () => {
+    assert.equal(describeCycle(planOf({ statuses: stretch }).statuses), '25/5/10');
   });
 });
 
@@ -356,14 +437,16 @@ describe('validatePomodoro', () => {
   });
 });
 
-describe('breakClip (mola görüntüsü)', () => {
-  it('varsayılan null: mola da çalışma görüntüsünü kullanır', () => {
-    assert.equal(planOf({}).breakClip, null);
-    assert.equal(POMODORO_DEFAULTS.breakClip, null);
+describe('görüntü yolları (visual)', () => {
+  it('varsayılan null: durum da ana görüntüyü (clip) kullanır', () => {
+    const plan = planOf({});
+    assert.deepEqual(plan.statuses.map((x) => x.visual), [null, null]);
+    assert.equal(plan.intro.visual, null);
   });
 
-  it('verilen yol plana geçer', () => {
-    assert.equal(planOf({ breakClip: 'resimler/mola.png' }).breakClip, 'resimler/mola.png');
+  it('verilen yol plana geçer (eski breakClip BREAK görüntüsü olur)', () => {
+    assert.equal(planOf({ breakClip: 'resimler/mola.png' }).statuses[1].visual, 'resimler/mola.png');
+    assert.equal(planOf({ intro: { visual: 'resimler/hazir.png' } }).intro.visual, 'resimler/hazir.png');
   });
 
   it('boş ya da metin olmayan değer anlaşılır hata verir', () => {
@@ -372,6 +455,8 @@ describe('breakClip (mola görüntüsü)', () => {
       assert.equal(problems.length, 1, JSON.stringify(bad));
       assert.match(problems[0], /pomodoro\.breakClip/);
     }
+    assert.match(normalizePomodoroSelection({ enabled: true, intro: { visual: '' } }).problems[0], /intro\.visual/);
+    assert.match(normalizePomodoroSelection({ enabled: true, intro: 3 }).problems[0], /intro/);
   });
 
   it('Pomodoro kapalıyken doğrulanmaz', () => {
@@ -392,7 +477,9 @@ describe('serializePomodoroPlan', () => {
   it('varsayılandan sapmayan alanı yazmaz', () => {
     const written = serializePomodoroPlan(planOf({ preset: '50/10', rounds: 4 }));
     assert.deepEqual(written, {
-      enabled: true, preset: '50/10', workMinutes: 50, breakMinutes: 10, rounds: 4,
+      enabled: true,
+      rounds: 4,
+      statuses: [{ name: 'STUDY', minutes: 50 }, { name: 'BREAK', minutes: 10 }],
     });
   });
 
@@ -408,16 +495,41 @@ describe('serializePomodoroPlan', () => {
     assert.equal(serializePomodoroPlan(null), undefined);
   });
 
-  it('mola görüntüsü yazılır, yoksa hiç yazılmaz', () => {
-    assert.equal('breakClip' in serializePomodoroPlan(planOf({ preset: '50/10' })), false);
-    assert.equal(
-      serializePomodoroPlan(planOf({ preset: '50/10', breakClip: 'videolar/mola.mp4' })).breakClip,
-      'videolar/mola.mp4',
-    );
+  it('görüntü ve bip kapalı yalnızca verildiyse yazılır; eski alanlar hiç yazılmaz', () => {
+    const plain = serializePomodoroPlan(planOf({ preset: '50/10' }));
+    assert.deepEqual(Object.keys(plain).sort(), ['enabled', 'rounds', 'statuses']);
+    assert.deepEqual(plain.statuses[1], { name: 'BREAK', minutes: 10 });
+
+    const custom = serializePomodoroPlan(planOf({
+      statuses: [{ name: 'STUDY', minutes: 50, beep: false }, { name: 'BREAK', minutes: 10, visual: 'videolar/mola.mp4' }],
+      intro: { visual: 'resimler/hazir.png' },
+    }));
+    assert.deepEqual(custom.statuses, [
+      { name: 'STUDY', minutes: 50, beep: false },
+      { name: 'BREAK', minutes: 10, visual: 'videolar/mola.mp4' },
+    ]);
+    assert.deepEqual(custom.intro, { visual: 'resimler/hazir.png' });
+    for (const old of ['preset', 'workMinutes', 'breakMinutes', 'breakClip']) assert.equal(old in custom, false);
+  });
+
+  it('eski şekilde yazılmış plan geri yazılınca yalnızca statuses olur', () => {
+    const written = serializePomodoroPlan(planOf({
+      workMinutes: 30, breakMinutes: 10, breakClip: 'resimler/mola.png', rounds: 3,
+    }));
+    assert.deepEqual(written, {
+      enabled: true,
+      rounds: 3,
+      statuses: [{ name: 'STUDY', minutes: 30 }, { name: 'BREAK', minutes: 10, visual: 'resimler/mola.png' }],
+    });
   });
 
   it('yazılan şekil geri okunduğunda aynı planı verir', () => {
-    const plan = planOf({ preset: '30/10', rounds: 6, cue: { volumeDb: -6 } });
+    const plan = planOf({
+      rounds: 6,
+      cue: { volumeDb: -6 },
+      statuses: [{ name: 'STUDY', minutes: 25 }, { name: 'STRETCH', minutes: 5, beep: false, visual: 'a.png' }],
+      intro: { visual: 'b.png' },
+    });
     const { plan: reread, problems } = normalizePomodoroSelection(serializePomodoroPlan(plan));
     assert.deepEqual(problems, []);
     assert.deepEqual(reread, plan);
@@ -427,8 +539,9 @@ describe('serializePomodoroPlan', () => {
 describe('presetIdFor', () => {
   it('hazır düzenleri tanır', () => {
     for (const preset of POMODORO_PRESETS) {
-      assert.equal(presetIdFor(preset.workMinutes, preset.breakMinutes), preset.id);
+      assert.equal(presetIdFor(preset.statuses), preset.id);
     }
-    assert.equal(presetIdFor(45, 15), null);
+    assert.equal(presetIdFor([{ minutes: 45 }, { minutes: 15 }]), null);
+    assert.equal(presetIdFor([{ minutes: 50 }, { minutes: 10 }, { minutes: 5 }]), null);
   });
 });

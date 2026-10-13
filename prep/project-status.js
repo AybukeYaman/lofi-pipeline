@@ -16,6 +16,7 @@ import { CONFIG_DEFAULTS } from '../core/config.js';
 import { AUDIO_EXTENSIONS, isImagePath, listFiles, matchOrder } from '../core/files.js';
 import { probe } from '../core/probe.js';
 import { mapWithLimit, probeCached } from '../core/probe-cache.js';
+import { normalizePomodoroSelection } from '../core/pomodoro-plan.js';
 import { normalizeShortsPlan } from '../core/shorts-plan.js';
 import { readJsonFile } from '../core/workspace.js';
 
@@ -52,13 +53,17 @@ export async function inspectProject(dir) {
   const clipCandidates = await filesOrEmpty(join(dir, 'videolar'), ['.mp4']);
   const clips = videoSource === 'image' ? imageCandidates : clipCandidates;
 
-  // Pomodoro mola görüntüsü: çalışma görüntüsünden bağımsız, İKİ klasörden de
-  // seçilebilir (resim ya da döngü videosu) — tür uzantıdan türer. Yollar proje
-  // klasörüne göreli ("videolar/mola.mp4"), project.json'daki `breakClip` ile aynı biçim.
+  // Pomodoro durum görüntüleri: ana görüntüden bağımsız, İKİ klasörden de seçilebilir
+  // (resim ya da döngü videosu) — tür uzantıdan türer. Yollar proje klasörüne göreli
+  // ("videolar/mola.mp4"), project.json'daki `statuses[].visual` ile aynı biçim.
   const visualFiles = [...clipCandidates, ...imageCandidates];
-  const breakCandidates = visualFiles.map((path) => relative(dir, path).split(sep).join('/'));
-  const breakClipValue = typeof data.pomodoro?.breakClip === 'string' ? data.pomodoro.breakClip.trim() : '';
-  const breakClipPath = breakClipValue ? at(breakClipValue) : null;
+  const visualCandidates = visualFiles.map((path) => relative(dir, path).split(sep).join('/'));
+  // Kaydedilmiş görüntülerin var olup olmadığı: dosya silinmişse arayüz uyarsın.
+  const pomodoroPlan = normalizePomodoroSelection(data.pomodoro).plan;
+  const visualEvidence = async (value) => ({
+    value: value ?? '',
+    exists: value ? await isFile(at(value)) : false,
+  });
 
   // Proje türü: 'shorts' alt projesi kendi ekranını ve adımlarını kullanır
   // (kaynak videoyu KOPYALAMAZ, ana projedeki dosyaya yol tutar); 'video'
@@ -93,14 +98,19 @@ export async function inspectProject(dir) {
       image: { count: imageCandidates.length, dir: join(dir, 'resimler') },
     },
     clip: { value: clipValue, path: clipPath, exists: clipExists },
-    /** Pomodoro mola görüntüsünün seçilebilecek dosyaları (proje klasörüne göreli). */
-    breakCandidates,
+    /** Pomodoro durum görüntüleri için seçilebilecek dosyalar (proje klasörüne göreli). */
+    visualCandidates,
     /** Aynı dosyaların tam yolları — küçük resim/önizleme olarak sunulur (`assets/visual/<ad>`). */
     visualFiles,
-    /** project.json → pomodoro.breakClip; yoksa value boş (mola = çalışma görüntüsü). */
-    breakClip: {
-      value: breakClipValue,
-      exists: breakClipPath ? await isFile(breakClipPath) : false,
+    /**
+     * project.json → pomodoro: GET READY ve her durumun kayıtlı görüntüsü (sırayla, `statuses`
+     * ile aynı sırada); boş value = ana görüntüyle aynı. Pomodoro kapalıysa `statuses` boş.
+     */
+    pomodoroVisuals: {
+      intro: await visualEvidence(pomodoroPlan?.intro.visual),
+      statuses: pomodoroPlan
+        ? await Promise.all(pomodoroPlan.statuses.map((status) => visualEvidence(status.visual)))
+        : [],
     },
     // Proje listesindeki küçük resim — kullanıcı seçmez: videoda görünen
     // görsel, yoksa resimler\ altındaki ilk görsel.

@@ -6,9 +6,9 @@ import { normalizeLabelPlan } from '../../core/label-plan.js';
 
 const FONT = 'C:/Windows/Fonts/arial.ttf';
 const SESSIONS = [
-  { kind: 'work', startSeconds: 0, endSeconds: 3000 },
-  { kind: 'break', startSeconds: 3000, endSeconds: 3600 },
-  { kind: 'work', startSeconds: 3600, endSeconds: 6600 },
+  { kind: 'status', name: 'STUDY', startSeconds: 0, endSeconds: 3000 },
+  { kind: 'status', name: 'BREAK', startSeconds: 3000, endSeconds: 3600 },
+  { kind: 'status', name: 'STUDY', startSeconds: 3600, endSeconds: 6600 },
 ];
 const textPath = (name) => `C:\\tmp\\work\\${name}`;
 const build = (raw, sessions = null) => buildLabelFilter({
@@ -64,30 +64,40 @@ describe('buildLabelFilter', () => {
     assert.match(result.skipped[0], /Pomodoro kapalı/);
   });
 
-  test('STUDY/BREAK: oturum başına bir drawtext, yalnızca kendi aralığında; iki sabit metin dosyası', () => {
+  test('durum yazısı: oturum başına bir drawtext, yalnızca kendi aralığında; ad başına bir metin dosyası', () => {
     const { filter, files } = build([{ id: 's', kind: 'pomodoro-status' }], SESSIONS);
     assert.equal(count(filter, 'drawtext='), SESSIONS.length);
     assert.match(filter, /enable='between\(t,0,3000\)'/);
     assert.match(filter, /enable='between\(t,3000,3600\)'/);
     assert.deepEqual(files, [
-      { name: 'label-s-work.txt', content: 'STUDY' },
-      { name: 'label-s-break.txt', content: 'BREAK' },
+      { name: 'label-s-status-1.txt', content: 'STUDY' },
+      { name: 'label-s-status-2.txt', content: 'BREAK' },
     ]);
-    // work → study dosyası, break → break dosyası
+    // aynı adlı oturumlar aynı dosyayı paylaşır
     const drawtexts = filter.split(',drawtext=');
-    assert.match(drawtexts[0], /label-s-work\.txt/);
-    assert.match(drawtexts[1], /label-s-break\.txt/);
-    assert.match(drawtexts[2], /label-s-work\.txt/);
+    assert.match(drawtexts[0], /label-s-status-1\.txt/);
+    assert.match(drawtexts[1], /label-s-status-2\.txt/);
+    assert.match(drawtexts[2], /label-s-status-1\.txt/);
   });
 
-  test('GET READY oturumu kendi yazısını alır (yalnızca oturumlarda geçen türler için dosya yazılır)', () => {
-    const sessions = [{ kind: 'ready', startSeconds: 0, endSeconds: 120 }, ...SESSIONS.map((s) => ({
+  test('GET READY ve özel durum adları yazıya olduğu gibi gelir (yalnızca geçen adlar için dosya yazılır)', () => {
+    const sessions = [{ name: 'GET READY', startSeconds: 0, endSeconds: 120 }, ...SESSIONS.map((s) => ({
       ...s, startSeconds: s.startSeconds + 120, endSeconds: s.endSeconds + 120,
     }))];
     const { filter, files } = build([{ id: 's', kind: 'pomodoro-status' }], sessions);
     assert.deepEqual(files.map((f) => f.content), ['GET READY', 'STUDY', 'BREAK']);
-    assert.match(filter.split(',drawtext=')[0], /label-s-ready\.txt/);
+    assert.match(filter.split(',drawtext=')[0], /label-s-status-1\.txt/);
     assert.match(filter, /enable='between\(t,0,120\)'/);
+  });
+
+  test('yeni bir durum adı (STRETCH, Türkçe harfli) kendi dosyasına yazılır', () => {
+    const sessions = [
+      { name: 'STUDY', startSeconds: 0, endSeconds: 600 },
+      { name: 'ESNEME ŞİMDİ', startSeconds: 600, endSeconds: 900 },
+    ];
+    const { filter, files } = build([{ id: 's', kind: 'pomodoro-status' }], sessions);
+    assert.deepEqual(files.map((f) => f.content), ['STUDY', 'ESNEME ŞİMDİ']);
+    assert.ok(!filter.includes('ŞİMDİ'), 'ad filtreye değil dosyaya yazılır (kaçış sorunu olmasın)');
   });
 
   test('geri sayım: oturumun bitişine göre ifade, oturum başına bir drawtext', () => {

@@ -209,7 +209,7 @@ export function planAspectCrop({ width, height, aspect }) {
  *   kırpar (varsayılan '16:9'); null/false verilirse adım kapalı
  * @param {number} [options.scaleWidth] verilirse bu genişliğe ölçekler
  * @param {{ width: number, height: number, fps: number }|null} [options.matchTo] verilirse
- *   çıktı bu boyut ve kare hızına getirilir (Pomodoro mola görüntüsü: çalışma
+ *   çıktı bu boyut ve kare hızına getirilir (Pomodoro durum görüntüleri: çalışma
  *   görüntüsüyle kopyayla birleşebilsin diye akış parametreleri aynı olmalı)
  * @param {number} [options.crf]
  * @param {string} [options.preset]

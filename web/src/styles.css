@@ -960,14 +960,12 @@ span.project-thumb::after {
   opacity: 0.55;
 }
 
-.asset-list,
 .evidence-list {
   display: grid;
   gap: 12px;
   margin: 0;
 }
 
-.asset-list div,
 .evidence-list div {
   display: grid;
   grid-template-columns: 140px minmax(0, 1fr);
@@ -976,19 +974,16 @@ span.project-thumb::after {
   border-bottom: 1px solid var(--border-subtle);
 }
 
-.asset-list div:last-child,
 .evidence-list div:last-child {
   padding-bottom: 0;
   border-bottom: 0;
 }
 
-.asset-list dt,
 .evidence-list dt {
   color: var(--text-muted);
   font-size: 14px;
 }
 
-.asset-list dd,
 .evidence-list dd {
   margin: 0;
   color: var(--text-main);
@@ -1834,7 +1829,6 @@ span.project-thumb::after {
 
   .page-header,
   .summary-row,
-  .asset-list div,
   .evidence-list div {
     align-items: start;
     grid-template-columns: 1fr;
@@ -2284,12 +2278,6 @@ span.project-thumb::after {
 .build-done-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2);
-}
-
-.build-status-row {
-  display: flex;
-  align-items: center;
   gap: var(--space-2);
 }
 
@@ -3665,8 +3653,12 @@ span.project-thumb::after {
 .visual-tile-text {
   display: grid;
   place-items: center;
+  padding: 4px;
   font: inherit;
   font-size: var(--text-xs);
+  line-height: 1.2;
+  text-align: center;
+  white-space: normal;
   color: inherit;
 }
 
@@ -3675,3 +3667,179 @@ span.project-thumb::after {
     grid-template-columns: 1fr;
   }
 }
+
+/* Pomodoro durum düzenleyicisi (StatusEditor): sürüklenebilir satırlar. */
+.status-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.status-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+
+.status-row.is-over {
+  border-color: var(--border-current);
+  background: var(--primary-subtle);
+}
+
+.status-handle {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: grab;
+}
+
+.status-handle:active { cursor: grabbing; }
+.status-handle:disabled { cursor: not-allowed; opacity: 0.5; }
+
+input.status-name,
+.field input.status-name {
+  width: auto;
+  flex: 1 1 140px;
+  min-width: 120px;
+  max-width: 220px;
+  min-height: 28px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-surface-elevated);
+  color: var(--text-main);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.status-name[aria-invalid='true'] { border-color: var(--danger, #c0392b); }
+
+.status-minutes {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  font: inherit;
+  font-size: 13px;
+}
+
+select.status-minutes,
+.status-minutes input {
+  width: auto;
+  min-height: 28px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-surface-elevated);
+  color: var(--text-main);
+}
+
+.status-minutes input,
+.field .status-minutes input { width: 64px; }
+select.status-minutes { flex: none; min-width: 92px; }
+
+input.status-set-name,
+.field input.status-set-name {
+  width: 260px;
+  max-width: 100%;
+  min-height: 28px;
+  min-width: 200px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-surface-elevated);
+  color: var(--text-main);
+  font: inherit;
+  font-size: 13px;
+}
+
+/* Video adımı: GET READY | STUDY | BREAK sekme çubuğu (StatusTabs). */
+.status-tabbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.status-tab {
+  padding: 6px 14px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-sm, 13px);
+  cursor: pointer;
+}
+
+.status-tab:hover { color: var(--text-main); }
+
+.status-tab.is-active {
+  border-color: var(--border-subtle);
+  background: var(--bg-surface);
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+.status-panel {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-top: 0;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  background: var(--bg-surface);
+}
+
+.status-panel-preview {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.status-panel-preview .visual-slot-frame { width: 200px; flex: none; }
+
+/* Projeler: 5 parçalı adım çubuğu (dolu = tamam, vurgulu = sırada, boş = bekliyor). */
+.mini-steps {
+  display: flex;
+  gap: 4px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mini-step {
+  flex: 1 1 0;
+  max-width: 44px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border-subtle);
+}
+
+.mini-step.is-done { background: var(--text-muted); }
+.mini-step.is-current { background: var(--primary); }
+
+.project-card-step {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm, 13px);
+}
+
+/* Araç çubukları dar ekranda alt satıra sarar; dosya sayısı hep sağda ve tek satır. */
+.toolbar { flex-wrap: wrap; }
+.mimi-count { margin-left: auto; white-space: nowrap; }

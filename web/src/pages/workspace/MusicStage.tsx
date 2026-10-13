@@ -151,18 +151,6 @@ export function MusicSection({ project, assets, onProjectUpdate }: StageProps) {
     }
   };
 
-  const handleRefresh = async () => {
-    try {
-      const updated = await fetchProject(project.id);
-      if (onProjectUpdate) {
-        onProjectUpdate(updated);
-      }
-      setCompleteSuccess('Ses klasörü yeniden okundu.');
-    } catch {
-      setCompleteError('Parçalar okunamadı. Ses klasörünü kontrol edip tekrar dene.');
-    }
-  };
-
   const handleOpenFolder = async () => {
     try {
       await openProjectFolder(project.id, 'audio');
@@ -184,7 +172,11 @@ export function MusicSection({ project, assets, onProjectUpdate }: StageProps) {
         {/* Pomodoro burada: videonun kaç dakika olacağına karar veren ayar,
             müzik seçilirken bilinmeli — kullanıcı ne kadar parça gerektiğini
             parçaları eklemeden önce görsün. */}
-        <PomodoroPicker projectId={project.id} />
+        <PomodoroPicker
+          projectId={project.id}
+          // Ayar değişince çalışma alanı da yenilensin: Video adımı sekmeleri ve başlık çipi sayfa yenilemeden güncel görünsün.
+          onSaved={async () => onProjectUpdate?.(await fetchProject(project.id))}
+        />
         {/* Arka plan sesi — videonun tamamı boyunca döner. Montaja kadar
             değiştirilebilir; seçim project.json'daki `ambient` alanına yazılır. */}
         <AmbientPicker
@@ -217,8 +209,8 @@ export function MusicSection({ project, assets, onProjectUpdate }: StageProps) {
         }}
       />
       <p className="field-hint">
-        Zip'i <code>audio\</code> klasörüne elle de bırakabilirsin: sayfayı yenileyince (🔄 Klasörü yeniden
-        kontrol et) içindeki müzikler eklenir, zip <code>audio\zip-arsivi\</code> içine taşınır.
+        Parçaları ya da zip'i <code>audio\</code> klasörüne elle de bırakabilirsin; “🔄 Klasörü yeniden kontrol et”
+        ile eklenir (zip açılır, kendisi <code>audio\zip-arsivi\</code> içine taşınır).
       </p>
       <div className="music-summary">
         {music?.concept ? (
@@ -376,9 +368,6 @@ export function MusicSection({ project, assets, onProjectUpdate }: StageProps) {
         ) : null}
         <button className="button" type="button" onClick={handleOpenFolder}>
           audio/ klasörünü aç
-        </button>
-        <button className="button" type="button" disabled={isCompleting} onClick={handleRefresh}>
-          Ses dosyalarını yenile
         </button>
         {!isMusicReady ? (
           <button

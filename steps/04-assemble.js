@@ -15,8 +15,8 @@
  * akış parametreleri (SPS/PPS) birebir aynı çıkar ve kopyayla eklenebilir.
  * Aynı çıkmazsa sessizce bozuk dosya üretmek yerine tam encode'a düşülür.
  *
- * Pomodoro'da çalışma ve mola için ayrı görüntü verilebilir (`sessionVideo`):
- * her oturum KENDİ görüntüsünün döngüsüyle, o oturumun süresi kadar kurulur ve
+ * Pomodoro'da her durum (STUDY, BREAK, STRETCH…) ve GET READY için ayrı görüntü
+ * verilebilir (`sessionVideo`): her oturum KENDİ görüntüsünün döngüsüyle, o oturumun süresi kadar kurulur ve
  * sırayla birleştirilir (kare planı: core/session-video.js). Gövde/kuyruk
  * mantığı aynı, yalnızca oturum başına uygulanır; tek görüntüde hiçbir şey değişmez.
  */
@@ -28,7 +28,7 @@ import { ffmpeg, ffprobe } from '../core/ffmpeg.js';
 import { concatLine } from '../core/files.js';
 import { parameterSetMismatches, readParameterSets } from '../core/h264.js';
 import { durationsMatch, probe } from '../core/probe.js';
-import { planSessionFrames, sessionJunctionPoints } from '../core/session-video.js';
+import { MAIN_VISUAL_KEY, planSessionFrames, sessionJunctionPoints } from '../core/session-video.js';
 
 const DEFAULTS = {
   fadeOut: 5,
@@ -60,9 +60,11 @@ const NOOP_LOGGER = { info() {}, warn() {} };
  *   uyumsuzlukta tam encode'a düşer. full: her zaman tam encode.
  * @param {string|null} [options.overlayFilter] etiket (drawtext) zinciri —
  *   core/label-filter.js. Verilirse strateji `full`'a zorlanır; null/yoksa eski davranış.
- * @param {{ sessions: Array<{ kind: 'ready'|'work'|'break', startSeconds: number, endSeconds: number }>,
- *   breakVideoPath: string }|null} [options.sessionVideo] Pomodoro: `videoPath` çalışma
- *   görüntüsü, `breakVideoPath` mola görüntüsü (aynı boyut ve kare hızında base). null → tek görüntü.
+ * @param {{ sessions: Array<{ kind: 'ready'|'status', visual?: string|null, startSeconds: number, endSeconds: number }>,
+ *   bases: Record<string, string> }|null} [options.sessionVideo] Pomodoro: `videoPath` ana
+ *   görüntü (`visual` boş oturumlar), `bases` diğer görüntülerin base'leri — anahtar oturumun
+ *   `visual` değeri (core/session-video.js `visualKeyOf`); hepsi ana görüntüyle aynı boyut ve
+ *   kare hızında olmalı. null → tek görüntü.
  * @param {{ info: Function, warn: Function }} [options.logger]
  * @param {(seconds: number) => void} [options.onProgress]
  * @returns {Promise<object>} rapor
@@ -109,14 +111,19 @@ export async function assembleVideo(options) {
   if (!video.fps) throw new Error(`Kare hızı okunamadı: ${videoPath}`);
 
   // 2 — Planı kare cinsinden kur (saniye yuvarlaması birikmesin)
-  const breakVideo = sessionVideo ? await probe(sessionVideo.breakVideoPath) : null;
-  if (breakVideo) {
-    if (!breakVideo.hasVideo) throw new Error(`Mola görüntüsünde video akışı yok: ${sessionVideo.breakVideoPath}`);
-    if (breakVideo.width !== video.width || breakVideo.height !== video.height || breakVideo.fps !== video.fps) {
-      throw new Error(
-        `Mola görüntüsü çalışma görüntüsüyle aynı boyut ve kare hızında değil: ` +
-        `${breakVideo.width}×${breakVideo.height}@${breakVideo.fps} / ${video.width}×${video.height}@${video.fps}.`,
-      );
+  const paths = sessionVideo ? { [MAIN_VISUAL_KEY]: videoPath, ...sessionVideo.bases } : null;
+  const clipFrames = {};
+  if (paths) {
+    for (const [key, path] of Object.entries(paths)) {
+      const info = key === MAIN_VISUAL_KEY ? video : await probe(path);
+      if (!info.hasVideo) throw new Error(`Oturum görüntüsünde video akışı yok: ${path}`);
+      if (info.width !== video.width || info.height !== video.height || info.fps !== video.fps) {
+        throw new Error(
+          `Oturum görüntüsü ana görüntüyle aynı boyut ve kare hızında değil (${path}): ` +
+          `${info.width}×${info.height}@${info.fps} / ${video.width}×${video.height}@${video.fps}.`,
+        );
+      }
+      clipFrames[key] = Math.round(info.duration * video.fps);
     }
   }
 
@@ -124,10 +131,7 @@ export async function assembleVideo(options) {
     ? planSessionFrames({
       sessions: sessionVideo.sessions,
       fps: video.fps,
-      clipFrames: {
-        work: Math.round(video.duration * video.fps),
-        break: Math.round(breakVideo.duration * video.fps),
-      },
+      clipFrames,
       totalFrames: Math.round(audio.duration * video.fps),
       fadeFrames: Math.min(Math.round(fadeOut * video.fps), Math.round(audio.duration * video.fps)),
     })
@@ -156,7 +160,6 @@ export async function assembleVideo(options) {
   let sessionList = null;
 
   if (sessionVideo) {
-    const paths = { work: videoPath, break: sessionVideo.breakVideoPath };
     // Etiket/fade filtreyle gelecekse (tam encode) kuyruğa fade yazılmaz: iki kez kararırdı.
     const withFade = method !== 'full-encode';
     sessionList = await buildSessionList({ plan, paths, workspace, crf, preset, withFade, logger });
@@ -425,7 +428,7 @@ function signatureMismatches(a, b) {
  *
  * @param {object} p
  * @param {ReturnType<typeof planSessionFrames>} p.plan
- * @param {{ work: string, break: string }} p.paths
+ * @param {Record<string, string>} p.paths görüntü anahtarı → base yolu (ana görüntü: `main`)
  * @param {boolean} p.withFade son oturumun kuyruğuna fade yazılsın mı
  * @param {boolean} [p.allEncoded] tekrarlar da kuyruk gibi encode edilir
  * @returns {Promise<{ listPath: string, mismatch: string|null }>}
@@ -433,16 +436,19 @@ function signatureMismatches(a, b) {
 async function buildSessionList({
   plan, paths, workspace, crf, preset, withFade, allEncoded = false, logger,
 }) {
-  const baseSignatures = {
-    work: await streamSignature(paths.work),
-    break: await streamSignature(paths.break),
-  };
-  const baseDiff = signatureMismatches(baseSignatures.work, baseSignatures.break);
+  const mainSignature = await streamSignature(paths[MAIN_VISUAL_KEY]);
+  const baseDiff = [];
+  for (const [key, path] of Object.entries(paths)) {
+    if (key === MAIN_VISUAL_KEY) continue;
+    for (const diff of signatureMismatches(mainSignature, await streamSignature(path))) {
+      if (!baseDiff.includes(diff)) baseDiff.push(diff);
+    }
+  }
   // Yeniden encode edince yalnızca boyut/zaman tabanı farkı kurtarılamaz;
   // extradata/profil farkı encode'la zaten ortadan kalkar.
   const unfixable = baseDiff.filter((key) => ['width', 'height', 'timescale'].includes(key));
   let mismatch = (allEncoded ? unfixable : baseDiff).length > 0
-    ? `çalışma ve mola görüntüsü: ${(allEncoded ? unfixable : baseDiff).join(', ')}`
+    ? `oturum görüntüleri: ${(allEncoded ? unfixable : baseDiff).join(', ')}`
     : null;
 
   const lines = [];

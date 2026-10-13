@@ -137,11 +137,11 @@ export type ProjectReadiness = {
   pomodoro?: {
     enabled: boolean;
     preset?: string | null;
-    workMinutes?: number;
-    breakMinutes?: number;
+    statuses?: PomodoroStatus[];
+    intro?: { visual: string | null };
     rounds?: number;
+    countdownBeep?: boolean;
     totalMinutes?: number;
-    breakClip?: string | null;
   };
   build: {
     ready: boolean;
@@ -177,9 +177,13 @@ export type ProjectDetail = {
   clip?: ProjectFileEvidence;
   /** Yalnızca zip işlenen yanıtta: müzik klasöründeki zip'lerin açılma sonucu. */
   audioZip?: AudioZipResult;
-  /** Pomodoro mola görüntüsü için seçilebilecek dosyalar (proje klasörüne göreli, iki klasörden). */
-  breakCandidates?: string[];
-  breakClip?: { value: string; exists: boolean };
+  /** Pomodoro durum görüntüleri için seçilebilecek dosyalar (proje klasörüne göreli, iki klasörden). */
+  visualCandidates?: string[];
+  /** GET READY ve her durumun kayıtlı görüntüsü (`statuses` ile aynı sırada); boş value = ana görüntüyle aynı. */
+  pomodoroVisuals?: {
+    intro: { value: string; exists: boolean };
+    statuses: Array<{ value: string; exists: boolean }>;
+  };
   audioDir?: string;
   audioCount?: number;
   output?: ProjectFileEvidence;
@@ -257,25 +261,42 @@ export type ProjectAmbient = {
 
 // ------------------------------------------------------------------ Pomodoro
 
-/** Hazır düzen — core/pomodoro-plan.js POMODORO_PRESETS aynası. */
-export type PomodoroPreset = {
-  id: string;
-  workMinutes: number;
-  breakMinutes: number;
+/** Döngüdeki bir durum (STUDY, BREAK, STRETCH…) — core/pomodoro-plan.js `PomodoroStatus` aynası. */
+export type PomodoroStatus = {
+  /** Ekranda yazan ad. */
+  name: string;
+  minutes: number;
+  /** Bitişinde 3 bip çalsın mı. */
+  beep: boolean;
+  /** Görüntü yolu (proje klasörüne göreli); null → ana görüntüyle aynı. */
+  visual: string | null;
 };
+
+/** Kayıtlı set (yalnızca ad, dakika, bip) — GET /api/pomodoro-sets. Hazır düzenler `builtin: true`. */
+export type PomodoroSet = {
+  id: string;
+  name: string;
+  builtin: boolean;
+  statuses: Array<Pick<PomodoroStatus, 'name' | 'minutes' | 'beep'>>;
+  updatedAt: string | null;
+  /** Dosya bozuksa sebebi; bozuk set seçilemez. */
+  error?: string;
+};
+
+export type PomodoroSetsResponse = { sets: PomodoroSet[]; limits: { name: number } };
 
 /** project.json'daki normalize edilmiş Pomodoro ayarı. */
 export type PomodoroSettings = {
-  workMinutes: number;
-  breakMinutes: number;
+  /** Bir turun durumları, sırayla tekrarlanır. */
+  statuses: PomodoroStatus[];
+  /** GET READY görüntüsü; null → ana görüntü. */
+  intro: { visual: string | null };
   rounds: number;
   /** Değerler bir hazır düzene denk geliyorsa onun kimliği. */
   preset: string | null;
   countdownSeconds: number;
   /** Her oturumun son 3 saniyesinde 3 bip. */
   countdownBeep: boolean;
-  /** Mola görüntüsü (proje klasörüne göreli yol); null → mola da çalışma görüntüsünü kullanır. */
-  breakClip: string | null;
   cue: {
     volumeDb: number;
     beepFile: string | null;
@@ -308,21 +329,27 @@ export type ProjectLabels = {
   aspect: string;
   /** Önizleme arka planı: sunucunun verdiği adres (klip, görsel ya da Shorts kaynağı). */
   preview: { url: string; kind: 'image' | 'video' } | null;
-  /** Pomodoro mola oturumunda arkada görünen görüntü; null → çalışma görüntüsüyle aynı. */
-  breakPreview?: { url: string; kind: 'image' | 'video' } | null;
+  /** GET READY oturumunda arkada görünen görüntü; null → ana görüntüyle aynı. */
+  introPreview?: { url: string; kind: 'image' | 'video' } | null;
+  /** Her durumun (döngüdeki sırayla) arkada görünen görüntüsü; null → ana görüntüyle aynı. */
+  statusPreviews?: Array<{ url: string; kind: 'image' | 'video' } | null>;
   /** Yalnızca OKUNUR — oturum zamanlarını gösterir, Pomodoro ayarı burada değişmez. */
   pomodoro: { enabled: boolean; totalSeconds: number; sessions: PomodoroSession[] };
 };
 
 export type UpdateLabelsPayload = { labels: Array<Partial<VideoLabel> & { id: string }> };
 
-/** Bir WORK ya da BREAK oturumu. */
+/** Timeline'daki bir oturum: GET READY ya da döngüdeki bir durum (STUDY, BREAK, STRETCH…). */
 export type PomodoroSession = {
   index: number;
   /** 'ready' = videonun başındaki 2 dakikalık GET READY oturumu. */
-  kind: 'ready' | 'work' | 'break';
+  kind: 'ready' | 'status';
+  /** Döngüdeki sırası (GET READY için -1). */
+  statusIndex: number;
+  /** Ekranda yazan ad: "GET READY", "STUDY", "BREAK"… */
+  name: string;
   round: number;
-  /** "GET READY" / "WORK 01" / "BREAK 03". */
+  /** "GET READY" / "STUDY 01" / "BREAK 03". */
   label: string;
   startSeconds: number;
   endSeconds: number;
@@ -359,8 +386,7 @@ export type PomodoroTrim = {
 /** GET/PUT /api/projects/:id/pomodoro yanıtı. */
 export type ProjectPomodoro = {
   enabled: boolean;
-  presets: PomodoroPreset[];
-  defaults: Omit<PomodoroSettings, 'preset'> & { enabled: boolean };
+  defaults: Pick<PomodoroSettings, 'statuses' | 'rounds' | 'countdownSeconds' | 'countdownBeep'> & { enabled: boolean };
   /** Kapalıyken null. */
   settings: PomodoroSettings | null;
   /** project.json'daki pomodoro bloğu bozuksa açıklamalar. */
@@ -387,14 +413,12 @@ export type ProjectPomodoro = {
 /** PUT /api/projects/:id/pomodoro gövdesi. `enabled: false` ayarı kaldırır. */
 export type UpdatePomodoroPayload = {
   enabled: boolean;
-  preset?: string;
-  workMinutes?: number;
-  breakMinutes?: number;
   rounds?: number;
+  /** Durum listesi; `visual` yoksa o durum ana görüntüyü kullanır. */
+  statuses?: Array<{ name: string; minutes: number; beep?: boolean; visual?: string }>;
+  intro?: { visual?: string };
   countdownSeconds?: number;
   countdownBeep?: boolean;
-  /** Proje klasörüne göreli yol; boş metin mola görüntüsünü kaldırır. */
-  breakClip?: string;
 };
 
 /** PUT /api/projects/:id/ambient gövdesi. */
@@ -430,8 +454,7 @@ export type CreateProjectPayload = {
   aspect?: string;
   /** Yalnızca "Pomodoro" seçildiyse; Ambiance'ta hiç gönderilmez. */
   pomodoro?: {
-    workMinutes: number;
-    breakMinutes: number;
+    statuses: Array<{ name: string; minutes: number; beep?: boolean }>;
     rounds: number;
     countdownBeep?: boolean;
   };

@@ -256,9 +256,9 @@ export async function setProjectLabels(projectPath, rawLabels) {
  * bir artık olurdu; kapalı Pomodoro bugünkü sistemin ta kendisi.
  *
  * @param {string} projectPath
- * @param {object|null} settings `{ enabled, preset?, workMinutes?, breakMinutes?,
- *   rounds?, countdownSeconds?, countdownBeep?,
- *   cue? }` — null ya da `enabled: false` seçimi kaldırır
+ * @param {object|null} settings `{ enabled, statuses?, intro?, rounds?, countdownSeconds?,
+ *   countdownBeep?, cue? }` (eski `preset/workMinutes/breakMinutes/breakClip` anahtarlarını API reddeder; yalnızca dosyadan okunurlar) —
+ *   null ya da `enabled: false` seçimi kaldırır
  * @returns {Promise<{ pomodoro: object|null, plan: object|null, warnings: string[] }>}
  */
 export async function setProjectPomodoro(projectPath, settings) {
@@ -269,10 +269,14 @@ export async function setProjectPomodoro(projectPath, settings) {
     throw new ProjectFileError(`Pomodoro ayarı geçersiz:\n  - ${problems.join('\n  - ')}`);
   }
 
-  // Mola görüntüsü: proje klasörünün içinde var olan bir resim/klip. Yol `./videolar/x.mp4`
-  // biçimine çevrilir (setProjectClip ile aynı) — build göreli yolu proje klasörüne çözüyor.
-  if (plan !== null && plan.breakClip !== null) {
-    plan.breakClip = await resolveBreakClip(projectPath, plan.breakClip);
+  // Durum ve GET READY görüntüleri: proje klasörünün içinde var olan bir resim/klip. Yol
+  // `./videolar/x.mp4` biçimine çevrilir (setProjectClip ile aynı) — build göreli yolu
+  // proje klasörüne çözüyor.
+  if (plan !== null) {
+    for (const status of plan.statuses) {
+      if (status.visual !== null) status.visual = await resolveVisual(projectPath, status.visual);
+    }
+    if (plan.intro.visual !== null) plan.intro.visual = await resolveVisual(projectPath, plan.intro.visual);
   }
 
   const json = await readProjectObject(projectPath);
@@ -318,22 +322,22 @@ function addPomodoroLabels(json) {
   return added;
 }
 
-/** Mola görüntüsü uzantıları: döngü videosu ya da resim (core/config.js ile aynı iki tür). */
-const BREAK_CLIP_VIDEO_EXTENSION = '.mp4';
+/** Durum görüntüsü uzantıları: döngü videosu ya da resim (core/config.js ile aynı iki tür). */
+const VISUAL_VIDEO_EXTENSION = '.mp4';
 
-async function resolveBreakClip(projectPath, breakClip) {
+async function resolveVisual(projectPath, visual) {
   const dir = dirname(resolve(projectPath));
-  const target = resolve(dir, breakClip);
+  const target = resolve(dir, visual);
   const rel = relative(dir, target);
 
   if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
-    throw new ProjectFileError(`Mola görüntüsü proje klasörünün içinde olmalı: ${target}`);
+    throw new ProjectFileError(`Görüntü proje klasörünün içinde olmalı: ${target}`);
   }
-  if (!isImagePath(target) && !target.toLowerCase().endsWith(BREAK_CLIP_VIDEO_EXTENSION)) {
-    throw new ProjectFileError(`Mola görüntüsü resim ya da .mp4 olmalı: ${target}`);
+  if (!isImagePath(target) && !target.toLowerCase().endsWith(VISUAL_VIDEO_EXTENSION)) {
+    throw new ProjectFileError(`Görüntü resim ya da .mp4 olmalı: ${target}`);
   }
   const info = await stat(target).catch(() => null);
-  if (!info?.isFile()) throw new ProjectFileError(`Mola görüntüsü bulunamadı: ${target}`);
+  if (!info?.isFile()) throw new ProjectFileError(`Görüntü bulunamadı: ${target}`);
   return `./${rel.split(sep).join('/')}`;
 }
 

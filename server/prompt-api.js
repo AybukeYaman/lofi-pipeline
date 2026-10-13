@@ -12,10 +12,11 @@ import {
   PROMPT_ID_PATTERN, PROMPT_LIBRARY_DIR, PROMPT_LIMITS, PROMPT_TAGS, PromptLibraryError,
   deletePrompt, listPrompts, loadPrompt, promptIdFrom, writePrompt,
 } from '../prep/prompt-library.js';
+import { createExclusive } from './exclusive.js';
 import { ApiError, parseBody } from './project-api.js';
 
 /** Aynı promptu iki istek birlikte yazmasın. */
-const writing = new Set();
+const exclusive = createExclusive('Prompt is being updated');
 
 /** Prompt gövdesi: başlık ve metin zorunlu, not ve etiketler isteğe bağlı. */
 const PROMPT_BODY = { title: 'string', text: 'string', note: 'string', tags: 'array' };
@@ -140,14 +141,4 @@ function toApiError(error, id) {
     return new ApiError(404, `Prompt "${id}" not found`);
   }
   return new ApiError(422, error.message, { problems: error.problems });
-}
-
-async function exclusive(id, fn) {
-  if (writing.has(id)) throw new ApiError(409, 'Prompt is being updated');
-  writing.add(id);
-  try {
-    return await fn();
-  } finally {
-    writing.delete(id);
-  }
 }

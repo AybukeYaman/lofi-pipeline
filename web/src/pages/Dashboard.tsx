@@ -164,16 +164,19 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
 
             return (
               <div className="project-card" key={mainProject.id}>
-                {/* Alt proje sekmeleri. Tek satırda kalır (sarmaz): sarınca
-                    yan yana duran kartların başlık yüksekliği birbirini
-                    tutmuyor ve ızgara kayık görünüyordu. Taşarsa yatay kayar. */}
-                <ProjectTabs
-                  main={mainProject}
-                  subprojects={subprojects}
-                  activeId={activeId}
-                  onSelect={(targetId) => handleSelectTab(mainProject.id, targetId)}
-                  showCount
-                />
+                {/* Alt proje sekmeleri yalnızca alt proje varsa: tek başına duran projede
+                    sekme, aşağıdaki başlığın aynı adını ve küçük resmini ikinci kez gösteriyordu.
+                    Tek satırda kalır (sarmaz): sarınca yan yana duran kartların başlık
+                    yüksekliği birbirini tutmuyor ve ızgara kayık görünüyordu. Taşarsa yatay kayar. */}
+                {subprojects.length > 0 ? (
+                  <ProjectTabs
+                    main={mainProject}
+                    subprojects={subprojects}
+                    activeId={activeId}
+                    onSelect={(targetId) => handleSelectTab(mainProject.id, targetId)}
+                    showCount
+                  />
+                ) : null}
 
                 {/* Seçili projenin gövdesi */}
                 <button
@@ -197,7 +200,15 @@ export function Dashboard({ onOpenProject, onNewProject }: DashboardProps) {
                           </span>
                         ) : null}
                       </div>
-                      <p>Adım: {stepLabel}</p>
+                      {/* Adım ilerlemesi: 5 parçalı çubuk (dolu = tamam, vurgulu = sırada) + kısa yazı. */}
+                      {flow ? (
+                        <ol className="mini-steps" aria-label={`Adım ${stepLabel}`} title={`Adım ${stepLabel}`}>
+                          {flow.steps.map((step) => (
+                            <li key={step.id} className={`mini-step is-${step.status}`} title={step.title} />
+                          ))}
+                        </ol>
+                      ) : null}
+                      <p className="project-card-step">{stepLabel}</p>
                       <time dateTime={new Date(currentProject.mtimeMs).toISOString()}>
                         Güncellendi: {formatDateTime(currentProject.mtimeMs)}
                       </time>

@@ -1,31 +1,15 @@
 /** 6. adım — Yayın: çıktı dosyası, tracklist ve açıklama metni. */
-import { useState } from 'react';
-import { fetchProject, getProjectOutputUrl, openProjectFolder } from '../../api';
+import { getProjectOutputUrl, openProjectFolder } from '../../api';
 import { AssetPreview } from '../../components/AssetPreview';
 import { EmptyState } from '../../components/Feedback';
 import { fileName } from './assetState';
 import { CopyPrompt } from './StepWidgets';
 import { StagePanel, type StageProps } from './StagePanel';
 
-export function OutputStage({ project, assets, stageStatus, onProjectUpdate }: StageProps) {
+export function OutputStage({ project, assets, stageStatus }: StageProps) {
   const outputName = fileName(project.output?.path);
   const tracklist = project.readiness?.output?.tracklist;
   const outputUrl = project.output?.exists && outputName ? getProjectOutputUrl(project.id, outputName) : null;
-  const [isRefreshing, setIsRefreshing] = useState(false);
-
-  const handleRefreshOutput = async () => {
-    setIsRefreshing(true);
-    try {
-      const updated = await fetchProject(project.id);
-      if (onProjectUpdate) {
-        onProjectUpdate(updated);
-      }
-    } catch {
-      // ignore
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
 
   return (
     <StagePanel section="publish" title="5. Yayın" status={assets.output} stageStatus={stageStatus}>
@@ -35,15 +19,7 @@ export function OutputStage({ project, assets, stageStatus, onProjectUpdate }: S
           <div className="stage-actions">
             <dl className="readiness-list">
               <div>
-                <dt>Çıktı</dt>
-                <dd>{outputName}</dd>
-              </div>
-              <div>
-                <dt>Ses dosyaları</dt>
-                <dd>{project.audioCount ?? 0}</dd>
-              </div>
-              <div>
-                <dt>Çıktı yolu</dt>
+                <dt>Video dosyası</dt>
                 <dd><code>{project.output?.path ?? 'out/final_ambient.mp4'}</code></dd>
               </div>
             </dl>
@@ -77,21 +53,10 @@ export function OutputStage({ project, assets, stageStatus, onProjectUpdate }: S
           </div>
         </div>
       ) : (
-        <div>
-          <EmptyState compact title="Henüz çıktı yok.">
-            The video will be assembled and written to <code>{outputName ?? 'out/final_ambient.mp4'}</code> when build completes.
-          </EmptyState>
-          <div style={{ marginTop: 10 }}>
-            <button
-              type="button"
-              className="button"
-              disabled={isRefreshing}
-              onClick={handleRefreshOutput}
-            >
-              {isRefreshing ? 'out/ kontrol ediliyor...' : '🔄 Çıktıyı Kontrol Et / Yenile'}
-            </button>
-          </div>
-        </div>
+        <EmptyState compact title="Henüz çıktı yok.">
+          Montaj bitince video <code>{outputName ?? 'out/final_ambient.mp4'}</code> olarak buraya yazılır.
+          Dışarıda bir şey değiştirdiysen aşağıdaki “Klasörü yeniden kontrol et” düğmesini kullan.
+        </EmptyState>
       )}
     </StagePanel>
   );

@@ -33,6 +33,10 @@ async function fakeProbe(path) {
 
 const options = () => ({ videosDir, probeFn: fakeProbe });
 
+/** 50/10 durum listesi (API gövdesi): eski preset anahtarı artık yazılmıyor. */
+const CLASSIC = [{ name: 'STUDY', minutes: 50 }, { name: 'BREAK', minutes: 10 }];
+const withBreak = (visual) => [CLASSIC[0], { ...CLASSIC[1], ...(visual === undefined ? {} : { visual }) }];
+
 /** Toplamı `totalSeconds` olan `count` parçalık bir müzik seçimi. */
 function tracksFor(totalSeconds, count = 4) {
   const each = totalSeconds / count;
@@ -81,9 +85,9 @@ describe('GET /api/projects/:id/pomodoro', () => {
     assert.equal(res.enabled, false);
     assert.equal(res.settings, null);
     assert.equal(res.validation.ok, true);
-    // Presetler ve varsayılanlar kapalıyken de dönüyor: ekran seçenekleri
-    // göstermek için ikinci bir istek atmak zorunda kalmasın.
-    assert.deepEqual(res.presets.map((p) => p.id), ['50/10', '30/10']);
+    // Varsayılanlar kapalıyken de dönüyor; hazır düzenler artık /api/pomodoro-sets'te.
+    assert.equal('presets' in res, false);
+    assert.deepEqual(res.defaults.statuses.map((s) => [s.name, s.minutes]), [['STUDY', 50], ['BREAK', 10]]);
   });
 
   test('Test 1 — müzik tam oturuyorsa doğrulama geçer', async () => {
@@ -173,19 +177,21 @@ describe('GET /api/projects/:id/pomodoro', () => {
 describe('PUT /api/projects/:id/pomodoro', () => {
   test('ayarı project.json\'a yazar ve güncel doğrulamayı döner', async () => {
     await writeProject('write', { audio: tracksFor(242 * 60) });
-    const res = await updatePomodoro('write', { enabled: true, preset: '50/10', rounds: 4 }, options());
+    const res = await updatePomodoro('write', { enabled: true, rounds: 4, statuses: CLASSIC }, options());
 
     assert.equal(res.enabled, true);
     assert.equal(res.validation.ok, true);
     assert.deepEqual((await readProjectJson('write')).pomodoro, {
-      enabled: true, preset: '50/10', workMinutes: 50, breakMinutes: 10, rounds: 4,
+      enabled: true,
+      rounds: 4,
+      statuses: [{ name: 'STUDY', minutes: 50 }, { name: 'BREAK', minutes: 10 }],
     });
   });
 
   test('kırpma onayı alanı artık yok: gönderilirse bilinmeyen alan olarak reddedilir', async () => {
     await writeProject('confirm', { audio: tracksFor(255 * 60) });
     await assert.rejects(
-      updatePomodoro('confirm', { enabled: true, preset: '50/10', rounds: 4, trimExcess: true }, options()),
+      updatePomodoro('confirm', { enabled: true, statuses: CLASSIC, rounds: 4, trimExcess: true }, options()),
       (error) => error instanceof ApiError && error.status === 400,
     );
   });
@@ -223,7 +229,7 @@ describe('PUT /api/projects/:id/pomodoro', () => {
     const put = await fetch(`${url}/api/projects/http/pomodoro`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ enabled: true, preset: '50/10', rounds: 4 }),
+      body: JSON.stringify({ enabled: true, statuses: CLASSIC, rounds: 4 }),
     });
     assert.equal(put.status, 200);
     assert.equal((await put.json()).validation.ok, true);
@@ -247,27 +253,28 @@ describe('PUT /api/projects/:id/pomodoro — mola görüntüsü', () => {
   test('mola görüntüsünü ./göreli yol olarak yazar; ayar geri okununca aynı gelir', async () => {
     await projectWithFiles('break-write');
     const res = await updatePomodoro(
-      'break-write', { enabled: true, preset: '50/10', rounds: 4, breakClip: 'resimler/mola.png' }, options(),
+      'break-write', { enabled: true, rounds: 4, statuses: withBreak('resimler/mola.png') }, options(),
     );
 
-    assert.equal(res.settings.breakClip, './resimler/mola.png');
-    assert.equal((await readProjectJson('break-write')).pomodoro.breakClip, './resimler/mola.png');
+    assert.equal(res.settings.statuses[1].visual, './resimler/mola.png');
+    assert.equal((await readProjectJson('break-write')).pomodoro.statuses[1].visual, './resimler/mola.png');
+    assert.equal(Object.hasOwn((await readProjectJson('break-write')).pomodoro, 'breakClip'), false);
   });
 
-  test('boş metin mola görüntüsünü kaldırır (mola da çalışma görüntüsünü kullanır)', async () => {
+  test('görüntüsüz gönderilen durum ana görüntüyü kullanır (görüntü kaldırılır)', async () => {
     await projectWithFiles('break-clear');
-    await updatePomodoro('break-clear', { enabled: true, rounds: 4, breakClip: 'videolar/mola.mp4' }, options());
-    const res = await updatePomodoro('break-clear', { enabled: true, rounds: 4, breakClip: '' }, options());
+    await updatePomodoro('break-clear', { enabled: true, rounds: 4, statuses: withBreak('videolar/mola.mp4') }, options());
+    const res = await updatePomodoro('break-clear', { enabled: true, rounds: 4, statuses: withBreak() }, options());
 
-    assert.equal(res.settings.breakClip, null);
-    assert.equal(Object.hasOwn((await readProjectJson('break-clear')).pomodoro, 'breakClip'), false);
+    assert.equal(res.settings.statuses[1].visual, null);
+    assert.equal(Object.hasOwn((await readProjectJson('break-clear')).pomodoro.statuses[1], 'visual'), false);
   });
 
   test('olmayan dosya, proje dışı yol ve yanlış tür 422 — dosya değişmez', async () => {
     await projectWithFiles('break-bad');
     for (const breakClip of ['videolar/yok.mp4', '../baska/mola.mp4', 'audio/' + tracksFor(60, 1)[0]]) {
       await assert.rejects(
-        updatePomodoro('break-bad', { enabled: true, rounds: 4, breakClip }, options()),
+        updatePomodoro('break-bad', { enabled: true, rounds: 4, statuses: withBreak(breakClip) }, options()),
         (error) => error instanceof ApiError && error.status === 422,
         breakClip,
       );
@@ -277,12 +284,118 @@ describe('PUT /api/projects/:id/pomodoro — mola görüntüsü', () => {
 
   test('proje durumu seçilebilecek dosyaları iki klasörden listeler', async () => {
     await projectWithFiles('break-list');
-    await updatePomodoro('break-list', { enabled: true, rounds: 4, breakClip: 'videolar/mola.mp4' }, options());
+    await updatePomodoro('break-list', { enabled: true, rounds: 4, statuses: withBreak('videolar/mola.mp4') }, options());
     const project = await getProject('break-list', { videosDir });
 
-    assert.deepEqual([...project.breakCandidates].sort(), ['resimler/mola.png', 'videolar/mola.mp4']);
-    assert.deepEqual(project.breakClip, { value: './videolar/mola.mp4', exists: true });
-    assert.equal(project.readiness.pomodoro.breakClip, './videolar/mola.mp4');
+    assert.deepEqual([...project.visualCandidates].sort(), ['resimler/mola.png', 'videolar/mola.mp4']);
+    assert.deepEqual(project.pomodoroVisuals, {
+      intro: { value: '', exists: false },
+      statuses: [{ value: '', exists: false }, { value: './videolar/mola.mp4', exists: true }],
+    });
+    assert.deepEqual(project.readiness.pomodoro.statuses.map((s) => [s.name, s.visual]), [
+      ['STUDY', null], ['BREAK', './videolar/mola.mp4'],
+    ]);
+    assert.equal(project.readiness.pomodoro.countdownBeep, true);
+    assert.equal(project.readiness.pomodoro.intro.visual, null);
+  });
+});
+
+describe('PUT /api/projects/:id/pomodoro — özel durumlar (statuses)', () => {
+  async function projectWithFiles(name) {
+    const dir = await writeProject(name, { audio: tracksFor(2 * 60 + 2 * 40 * 60) });
+    await mkdir(join(dir, 'resimler'), { recursive: true });
+    await writeFile(join(dir, 'resimler', 'esneme.png'), 'x');
+    await writeFile(join(dir, 'resimler', 'hazir.png'), 'x');
+    return dir;
+  }
+
+  const stretchCycle = [
+    { name: 'STUDY', minutes: 25 },
+    { name: 'STRETCH', minutes: 5, visual: 'resimler/esneme.png', beep: false },
+    { name: 'BREAK', minutes: 10 },
+  ];
+
+  test('durum listesini ve GET READY görüntüsünü yazar; ayar geri okununca aynı gelir', async () => {
+    await projectWithFiles('st-write');
+    const res = await updatePomodoro('st-write', {
+      enabled: true, rounds: 2, statuses: stretchCycle, intro: { visual: 'resimler/hazir.png' },
+    }, options());
+
+    assert.equal(res.validation.timeline.totalMinutes, 2 + 2 * 40);
+    assert.deepEqual(res.settings.statuses.map((s) => [s.name, s.minutes, s.beep]), [
+      ['STUDY', 25, true], ['STRETCH', 5, false], ['BREAK', 10, true],
+    ]);
+    assert.equal(res.settings.statuses[1].visual, './resimler/esneme.png');
+    assert.equal(res.settings.intro.visual, './resimler/hazir.png');
+
+    assert.deepEqual((await readProjectJson('st-write')).pomodoro, {
+      enabled: true,
+      rounds: 2,
+      statuses: [
+        { name: 'STUDY', minutes: 25 },
+        { name: 'STRETCH', minutes: 5, visual: './resimler/esneme.png', beep: false },
+        { name: 'BREAK', minutes: 10 },
+      ],
+      intro: { visual: './resimler/hazir.png' },
+    });
+  });
+
+  test('eski anahtarlar (preset, workMinutes, breakMinutes, breakClip) 400 ile reddedilir — dosya değişmez', async () => {
+    await projectWithFiles('st-legacy-body');
+    for (const extra of [{ preset: '50/10' }, { workMinutes: 30 }, { breakMinutes: 5 }, { breakClip: 'resimler/esneme.png' }]) {
+      await assert.rejects(
+        updatePomodoro('st-legacy-body', { enabled: true, rounds: 1, statuses: CLASSIC, ...extra }, options()),
+        (error) => error instanceof ApiError && error.status === 400 && /statuses/.test(error.message),
+        JSON.stringify(extra),
+      );
+    }
+    assert.equal(Object.hasOwn(await readProjectJson('st-legacy-body'), 'pomodoro'), false);
+  });
+
+  test('eski project.json (breakClip) okunur; ayar yeniden yazılınca BREAK görüntüsü korunur', async () => {
+    const dir = await projectWithFiles('st-legacy');
+    await writeFile(join(dir, 'project.json'), JSON.stringify({
+      clip: './videolar/in.mp4', audioDir: './audio', video: { cropBottom: 150 },
+      pomodoro: { enabled: true, workMinutes: 50, breakMinutes: 10, rounds: 2, breakClip: './resimler/esneme.png' },
+    }));
+    const before = await getPomodoro('st-legacy', options());
+    assert.deepEqual(before.settings.statuses.map((s) => s.name), ['STUDY', 'BREAK']);
+    assert.equal(before.settings.statuses[1].visual, './resimler/esneme.png');
+
+    await updatePomodoro('st-legacy', { enabled: true, rounds: 3, statuses: before.settings.statuses }, options());
+    const written = (await readProjectJson('st-legacy')).pomodoro;
+    assert.equal(written.rounds, 3);
+    assert.equal(written.statuses[1].visual, './resimler/esneme.png');
+    assert.equal('breakClip' in written, false);
+  });
+
+  test('geçersiz durumlar 422 ve anlaşılır mesaj — dosya değişmez', async () => {
+    await projectWithFiles('st-bad');
+    const cases = [
+      [{ statuses: [] }, /pomodoro\.statuses/],
+      [{ statuses: [{ name: 'A'.repeat(30), minutes: 5 }] }, /statuses\[0\]\.name/],
+      [{ statuses: [{ name: 'A', minutes: 500 }] }, /statuses\[0\]\.minutes/],
+      [{ statuses: [{ name: 'A', minutes: 5, visual: 'resimler/yok.png' }] }, /bulunamadı/],
+      [{ statuses: [{ name: 'A', minutes: 5 }], intro: { visual: '../disari.png' } }, /proje klasörünün içinde/],
+    ];
+    for (const [extra, pattern] of cases) {
+      await assert.rejects(
+        updatePomodoro('st-bad', { enabled: true, rounds: 2, ...extra }, options()),
+        (error) => error instanceof ApiError && error.status === 422 && pattern.test(error.message),
+        JSON.stringify(extra),
+      );
+    }
+    assert.equal(Object.hasOwn(await readProjectJson('st-bad'), 'pomodoro'), false);
+  });
+
+  test('yanlış türde alan 400', async () => {
+    await projectWithFiles('st-type');
+    for (const body of [{ statuses: 'x' }, { intro: 'x' }]) {
+      await assert.rejects(
+        updatePomodoro('st-type', { enabled: true, ...body }, options()),
+        (error) => error instanceof ApiError && error.status === 400,
+      );
+    }
   });
 });
 
@@ -313,23 +426,36 @@ describe('görsel kartları: küçük resimler ve etiket önizlemesi', () => {
     );
   });
 
-  test('etiket önizlemesi: mola görüntüsü seçiliyse breakPreview döner, yoksa null', async () => {
+  test('etiket önizlemesi: görüntüsü seçili durumlar kendi önizlemesini, öbürleri null verir', async () => {
     await projectWithVisuals('labels-break');
     const without = await getLabels('labels-break', { videosDir });
-    assert.equal(without.breakPreview, null);
+    assert.deepEqual(without.statusPreviews, []);
+    assert.equal(without.introPreview, null);
 
-    await updatePomodoro('labels-break', { enabled: true, rounds: 2, breakClip: 'resimler/mola.png' }, options());
-    const withBreak = await getLabels('labels-break', { videosDir });
-    assert.deepEqual(withBreak.breakPreview, {
+    await updatePomodoro('labels-break', { enabled: true, rounds: 2, statuses: withBreak('resimler/mola.png') }, options());
+    const labelsWithBreak = await getLabels('labels-break', { videosDir });
+    assert.equal(labelsWithBreak.introPreview, null);
+    assert.deepEqual(labelsWithBreak.statusPreviews, [null, {
       url: '/api/projects/labels-break/assets/visual/mola.png',
       kind: 'image',
-    });
+    }]);
   });
 
-  test('mola görüntüsü video ise breakPreview türü video', async () => {
+  test('GET READY ve özel durum görüntüleri de önizlemeye gelir; video ise türü video', async () => {
     await projectWithVisuals('labels-break-video');
-    await updatePomodoro('labels-break-video', { enabled: true, rounds: 2, breakClip: 'videolar/calisma.mp4' }, options());
-    assert.equal((await getLabels('labels-break-video', { videosDir })).breakPreview.kind, 'video');
+    await updatePomodoro('labels-break-video', {
+      enabled: true,
+      rounds: 2,
+      statuses: [
+        { name: 'STUDY', minutes: 25 },
+        { name: 'STRETCH', minutes: 5, visual: 'videolar/calisma.mp4' },
+      ],
+      intro: { visual: 'resimler/mola.png' },
+    }, options());
+    const labels = await getLabels('labels-break-video', { videosDir });
+    assert.equal(labels.statusPreviews[0], null);
+    assert.equal(labels.statusPreviews[1].kind, 'video');
+    assert.equal(labels.introPreview.kind, 'image');
   });
 });
 

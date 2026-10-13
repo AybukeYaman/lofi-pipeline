@@ -149,16 +149,20 @@ async function resolveProject(json, { projectPath, overrides = {} }) {
       cue[key] = at(cue[key]);
       await expectKind(cue[key], 'file', `pomodoro.cue.${key}`, problems);
     }
-    // Mola görüntüsü: tür (resim / döngü videosu) uzantıdan türer — çalışma
-    // görüntüsündeki `video.source` gibi ayrı bir alan yok.
-    let breakClip = null;
-    let breakSource = null;
-    if (pomodoroPlan.breakClip !== null) {
-      breakClip = at(pomodoroPlan.breakClip);
-      breakSource = isImagePath(breakClip) ? 'image' : 'clip';
-      await expectKind(breakClip, 'file', 'pomodoro.breakClip', problems);
+    // Durum ve GET READY görüntüleri: tür (resim / döngü videosu) uzantıdan türer —
+    // ana görüntüdeki `video.source` gibi ayrı bir alan yok. Boşsa ana görüntü (`clip`).
+    const resolveVisual = async (value, key) => {
+      if (value === null) return { visual: null, visualSource: null };
+      const visual = at(value);
+      await expectKind(visual, 'file', key, problems);
+      return { visual, visualSource: isImagePath(visual) ? 'image' : 'clip' };
+    };
+    const statuses = [];
+    for (const [i, status] of pomodoroPlan.statuses.entries()) {
+      statuses.push({ ...status, ...await resolveVisual(status.visual, `pomodoro.statuses[${i}].visual`) });
     }
-    pomodoro = { ...pomodoroPlan, cue, breakClip, breakSource };
+    const intro = await resolveVisual(pomodoroPlan.intro.visual, 'pomodoro.intro.visual');
+    pomodoro = { ...pomodoroPlan, statuses, intro, cue };
   }
 
   // Etiketler: şekil çözümlemesi core/label-plan.js'te. Bozuk kayıt sessizce
@@ -320,7 +324,7 @@ async function resolveProject(json, { projectPath, overrides = {} }) {
       video: resolve(outputDir, outName),
       tracklist: resolve(outputDir, tracklistName),
       report: resolve(outputDir, `${outName.replace(/\.[^.]+$/, '')}.report.json`),
-      // Pomodoro açıkken WORK/BREAK dökümü buraya yazılır (kapalıyken üretilmez).
+      // Pomodoro açıkken Oturum dökümü buraya yazılır (kapalıyken üretilmez).
       pomodoroTimeline: resolve(outputDir, 'pomodoro-timeline.txt'),
       // Yayın paketinin projedeki kopyası (yayın tarafına ayrıca yazılır).
       streamPackage: resolve(outputDir, 'stream-package'),

@@ -25,8 +25,8 @@ import { countFrames, extractFrame, makeDriftingClip, makeTone, ssim, tempDir } 
 const W = 320;
 const H = 180;
 const SESSIONS = [
-  { kind: 'work', startSeconds: 0, endSeconds: 2 },
-  { kind: 'break', startSeconds: 2, endSeconds: 4 },
+  { kind: 'status', name: 'STUDY', startSeconds: 0, endSeconds: 2 },
+  { kind: 'status', name: 'BREAK', startSeconds: 2, endSeconds: 4 },
 ];
 
 let hasFont = true;

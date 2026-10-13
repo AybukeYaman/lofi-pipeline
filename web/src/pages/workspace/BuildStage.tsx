@@ -107,10 +107,12 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
   const [isStarting, setIsStarting] = useState(false);
   const [buildError, setBuildError] = useState<string | null>(null);
 
+  // Video klibi ve Müzik hazırsa satır yok: adım listesinde zaten "tamam" yazıyor. Yalnızca
+  // eksik olan görünür (Başlat'ın neden kapalı olduğunu söyler).
   const rows = [
     { label: 'Video klibi', status: assets.clip },
     { label: 'Müzik', status: assets.music },
-  ];
+  ].filter((row) => row.status !== 'ready');
 
   // Initial fetch of build status
   useEffect(() => {
@@ -233,6 +235,9 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
 
   return (
     <StagePanel section="build" title="4. Montaj" status={assets.assembly} stageStatus={stageStatus}>
+      {/* Tek özet listesi: eksikler, ayarlar ve her ayarın yanında kendi düğmesi. Ambiance ve
+          Pomodoro burada yalnızca ÖZET: "unuttum" asıl montaj anında fark ediliyor, o yüzden durum
+          görünür; düzenleme tek yerde, 3. adımda. Pomodoro uymuyorsa Başlat zaten kapalı. */}
       <dl className="readiness-list">
         {rows.map((row) => (
           <div key={row.label}>
@@ -248,18 +253,6 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
             {cropDescription} → {project.projectJson?.data?.video?.aspect || '16:9'}
           </dd>
         </div>
-      </dl>
-
-      {!isBuildReady ? (
-        <p className="field-hint">
-          ℹ Montaj, gerekli adımlar (Video klibi, Müzik) hazır olunca başlatılabilir.
-        </p>
-      ) : null}
-
-      {/* Ambiance ve Pomodoro burada yalnızca ÖZET: "unuttum" asıl montaj anında
-          fark ediliyor, o yüzden durum görünür; ama düzenleme tek yerde,
-          3. adımda ("Değiştir"). Pomodoro uymuyorsa Başlat zaten kapalı. */}
-      <dl className="readiness-list">
         <div>
           <dt>Arka plan sesi (Ambiance)</dt>
           <dd>
@@ -267,24 +260,42 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
               ? '⚠ Seçilmemiş'
               : ambient && ambient.selected.length > 0
                 ? ambient.selected.map((track) => track.name).join(', ')
-                : 'Seçili'}
+                : 'Seçili'}{' '}
+            <button type="button" className="button button-compact" onClick={() => onGoToStep?.('music')}>
+              Değiştir
+            </button>
           </dd>
         </div>
+        {pomodoro?.enabled && pomodoro.settings ? (
+          <div>
+            <dt>Pomodoro</dt>
+            <dd>
+              {pomodoroSummary(pomodoro.settings.statuses, pomodoro.settings.rounds)} ·{' '}
+              {pomodoro.validation.ok
+                ? (pomodoro.validation.comparison?.status === 'excess'
+                  ? '⚠ Fazla müzik otomatik kırpılacak'
+                  : pomodoro.validation.comparison?.status === 'short'
+                    ? '⚠ Müzik kısa: kalanı arka plan sesiyle'
+                    : '✓ Müzik süreye uyuyor')
+                : '⚠ Müzik uymuyor'}{' '}
+              <button type="button" className="button button-compact" onClick={() => onGoToStep?.('music')}>
+                Değiştir
+              </button>
+            </dd>
+          </div>
+        ) : null}
         <div>
-          <dt>Pomodoro</dt>
+          <dt>Video üstü yazılar</dt>
           <dd>
-            {pomodoro === null
-              ? '…'
-              : !pomodoro.enabled || !pomodoro.settings
-                ? 'Kapalı'
-                : `${pomodoroSummary(pomodoro.settings.workMinutes, pomodoro.settings.breakMinutes, pomodoro.settings.rounds)} · ` +
-                  (pomodoro.validation.ok
-                    ? (pomodoro.validation.comparison?.status === 'excess'
-                      ? '⚠ Fazla müzik otomatik kırpılacak'
-                      : pomodoro.validation.comparison?.status === 'short'
-                        ? '⚠ Müzik kısa: kalanı arka plan sesiyle'
-                        : '✓ Müzik süreye uyuyor')
-                    : '⚠ Müzik uymuyor')}
+            {labelCount === null ? '…' : labelCount === 0 ? 'Yok' : `${labelCount} yazı`}{' '}
+            <button
+              type="button"
+              className="button button-compact"
+              aria-expanded={labelsOpen}
+              onClick={() => setLabelsOpen((open) => !open)}
+            >
+              {labelsOpen ? 'Kapat' : 'Yazıları yerleştir'}
+            </button>
           </dd>
         </div>
       </dl>
@@ -293,34 +304,6 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
             <p className="field-hint field-error" key={problem}>{problem}</p>
           ))
         : null}
-      <button
-        type="button"
-        className="button button-compact"
-        style={{ justifySelf: 'start' }}
-        onClick={() => onGoToStep?.('music')}
-      >
-        Müzik adımında değiştir
-      </button>
-
-      {/* Video üstü yazılar: yerleşim burada, ama STUDY/BREAK ve geri sayımın
-          zamanı Pomodoro'dan gelir — editör onu yalnızca okur. */}
-      <dl className="readiness-list">
-        <div>
-          <dt>Video üstü yazılar</dt>
-          <dd>
-            {labelCount === null ? '…' : labelCount === 0 ? 'Yok' : `${labelCount} yazı`}
-          </dd>
-        </div>
-      </dl>
-      <button
-        type="button"
-        className="button button-compact"
-        style={{ justifySelf: 'start' }}
-        aria-expanded={labelsOpen}
-        onClick={() => setLabelsOpen((open) => !open)}
-      >
-        {labelsOpen ? 'Kapat' : 'Yazıları yerleştir'}
-      </button>
       {labelsOpen ? (
         <LabelEditor projectId={project.id} onSaved={setLabelCount} />
       ) : null}
@@ -374,17 +357,6 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
 
       {buildJob && buildJob.state !== 'idle' ? (
         <div>
-          <div className="build-status-row">
-            <strong>Montaj durumu:</strong>
-            {buildJob.state === 'running' ? (
-              <StatusBadge status="processing" label="Çalışıyor" />
-            ) : buildJob.state === 'succeeded' ? (
-              <StatusBadge status="completed" label="Başarılı" />
-            ) : buildJob.state === 'failed' ? (
-              <StatusBadge status="failed" label="Başarısız" />
-            ) : null}
-          </div>
-
           {buildJob.error ? (
             <p className="field-hint field-error" role="alert">
               {buildJob.error}

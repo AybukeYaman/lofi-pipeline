@@ -26,7 +26,7 @@ const NOOP_LOGGER = { info() {}, warn() {} };
  * @param {object[]} options.labels core/label-plan.js `labels`
  * @param {string} [options.videoPath] yüksekliği buradan okunur (base.mp4); `height` verilirse gerekmez
  * @param {number} [options.height] çıktı kare yüksekliği (px) — Shorts için sabit 1920
- * @param {Array<{ kind: 'work'|'break', startSeconds: number, endSeconds: number }>|null} [options.sessions]
+ * @param {Array<{ name: string, startSeconds: number, endSeconds: number }>|null} [options.sessions]
  *   Pomodoro timeline oturumları; Pomodoro kapalıysa null
  * @param {object} options.workspace core/workspace.js örneği
  * @param {string} [options.fontFile]

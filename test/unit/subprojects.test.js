@@ -145,17 +145,41 @@ describe('alt proje ve müzik aktarımı (subprojects)', () => {
     const tempDir = await mkdtemp(join(tmpdir(), 'lofi-create-pomodoro-'));
     try {
       const pomodoro = await createProject(
-        { name: 'pomo-proj', pomodoro: { preset: '50/10', rounds: 2 } },
+        { name: 'pomo-proj', pomodoro: { statuses: [{ name: 'STUDY', minutes: 50 }, { name: 'BREAK', minutes: 10 }], rounds: 2 } },
         { videosDir: tempDir },
       );
       assert.deepEqual(pomodoro.project.projectJson.data.pomodoro, {
-        enabled: true, preset: '50/10', workMinutes: 50, breakMinutes: 10, rounds: 2,
+        enabled: true,
+        rounds: 2,
+        statuses: [{ name: 'STUDY', minutes: 50 }, { name: 'BREAK', minutes: 10 }],
       });
       assert.equal(pomodoro.project.readiness.pomodoro.totalMinutes, 122);
 
       const ambiance = await createProject({ name: 'ambiance-proj' }, { videosDir: tempDir });
       assert.equal(Object.hasOwn(ambiance.project.projectJson.data, 'pomodoro'), false);
       assert.equal(ambiance.project.readiness.pomodoro.enabled, false);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('createProject: özel durum listesi proje kurulurken yazılır', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'lofi-create-statuses-'));
+    try {
+      const statuses = [
+        { name: 'STUDY', minutes: 25 },
+        { name: 'STRETCH', minutes: 5, beep: false },
+        { name: 'BREAK', minutes: 10 },
+      ];
+      const created = await createProject({ name: 'custom-pomo', pomodoro: { statuses, rounds: 3 } }, { videosDir: tempDir });
+      assert.deepEqual(created.project.projectJson.data.pomodoro, { enabled: true, rounds: 3, statuses });
+      assert.equal(created.project.readiness.pomodoro.totalMinutes, 2 + 3 * 40);
+
+      await assert.rejects(
+        createProject({ name: 'bad-statuses', pomodoro: { statuses: [{ name: '', minutes: 5 }] } }, { videosDir: tempDir }),
+        (error) => error.status === 422 && error.details.problems.some((p) => p.includes('statuses[0].name')),
+      );
+      await assert.rejects(readFile(join(tempDir, 'bad-statuses', 'project.json')), { code: 'ENOENT' });
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }
@@ -170,11 +194,24 @@ describe('alt proje ve müzik aktarımı (subprojects)', () => {
       );
       await assert.rejects(readFile(join(tempDir, 'bad-pomo', 'project.json')), { code: 'ENOENT' });
 
-      // Mola dosyası proje yokken seçilemez.
-      await assert.rejects(
-        createProject({ name: 'bad-pomo2', pomodoro: { breakClip: 'videolar/x.mp4' } }, { videosDir: tempDir }),
-        (error) => error.status === 400,
-      );
+      // Eski anahtarlar (preset, workMinutes, breakMinutes, breakClip) API'de kabul edilmez.
+      for (const pomodoro of [{ preset: '50/10' }, { workMinutes: 50 }, { breakMinutes: 10 }, { breakClip: 'videolar/x.mp4' }]) {
+        await assert.rejects(
+          createProject({ name: 'bad-pomo2', pomodoro }, { videosDir: tempDir }),
+          (error) => error.status === 400 && /statuses/.test(error.message),
+        );
+      }
+      await assert.rejects(readFile(join(tempDir, 'bad-pomo2', 'project.json')), { code: 'ENOENT' });
+      // Durum ve GET READY görüntüleri de kurulumda verilemez.
+      for (const pomodoro of [
+        { statuses: [{ name: 'A', minutes: 5, visual: 'resimler/x.png' }] },
+        { intro: { visual: 'resimler/x.png' } },
+      ]) {
+        await assert.rejects(
+          createProject({ name: 'bad-pomo3', pomodoro }, { videosDir: tempDir }),
+          (error) => error.status === 400,
+        );
+      }
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

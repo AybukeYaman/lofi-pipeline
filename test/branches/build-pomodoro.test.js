@@ -72,8 +72,8 @@ describe('build — Pomodoro: kırpma, oturumlar ve işaret sesleri', () => {
       order: ['01-a.m4a', '02-b.m4a', '03-c.m4a', '04-d.m4a'],
       pomodoro: {
         enabled: true,
-        workMinutes: 1,
-        breakMinutes: 1,
+        // STUDY'nin bitişinde bip YOK (beep: false); GET READY ve BREAK'in (videonun sonu dahil) var.
+        statuses: [{ name: 'STUDY', minutes: 1, beep: false }, { name: 'BREAK', minutes: 1 }],
         rounds: 2,
         // Fazla 40 sn soru sorulmadan, otomatik kesilir.
         // İşaretleri müziğin üstünde net duyulur yap: ölçüm eşiği ayırabilsin.
@@ -117,27 +117,25 @@ describe('build — Pomodoro: kırpma, oturumlar ve işaret sesleri', () => {
     assert.deepEqual(text.trim().split('\n').map((line) => line.split('  ')[0]), ['0:00', '1:40', '3:20', '5:00']);
   });
 
-  test('timeline dosyası GET READY + WORK/BREAK dökümünü verir', async () => {
+  test('timeline dosyası GET READY + STUDY/BREAK dökümünü verir', async () => {
     const text = await readFile(config.output.pomodoroTimeline, 'utf8');
     assert.equal(text.trim(), [
       'GET READY', '00:00 - 02:00', '',
-      'WORK 01', '02:00 - 03:00', '',
+      'STUDY 01', '02:00 - 03:00', '',
       'BREAK 01', '03:00 - 04:00', '',
-      'WORK 02', '04:00 - 05:00', '',
+      'STUDY 02', '04:00 - 05:00', '',
       'BREAK 02', '05:00 - 06:00',
     ].join('\n'));
   });
 
-  test('Test 5 — her oturumun son 3 saniyesinde 3 bip: GET READY, çalışma, mola ve videonun sonu', async () => {
+  test('Test 5 — her oturumun son 3 saniyesinde 3 bip (beep: false hariç): GET READY, mola ve videonun sonu', async () => {
     const { onsets } = await findOnsets(config.output.video, { dir, ...onsetOptions() });
 
-    // 5 oturum (GET READY 0-120, WORK 120-180, BREAK 180-240, WORK 240-300, BREAK 300-360).
-    // Başlangıç sesi YOK: yalnızca her oturumun bitişinden önceki 3 bip.
+    // 5 oturum (GET READY 0-120, STUDY 120-180, BREAK 180-240, STUDY 240-300, BREAK 300-360).
+    // Başlangıç sesi YOK: yalnızca her oturumun bitişinden önceki 3 bip; STUDY'de beep kapalı.
     const expected = [
       117, 118, 119,   // GET READY'nin 2. dakikasının son 3 sn'si
-      177, 178, 179,   // WORK 01
       237, 238, 239,   // BREAK 01
-      297, 298, 299,   // WORK 02
       357, 358, 359,   // BREAK 02 = videonun son 3 sn'si (ses kararması bipleri kısmaz)
     ];
     assert.equal(onsets.length, expected.length, `bulunan işaretler: ${onsets.map((o) => o.toFixed(2))}`);
@@ -163,9 +161,12 @@ describe('build — Pomodoro: kırpma, oturumlar ve işaret sesleri', () => {
     assert.equal(report.pomodoroPlan.rounds, 2);
     assert.equal(report.pomodoroPlan.totalSeconds, 360);
     assert.deepEqual(report.pomodoroPlan.sessions.map((s) => s.label), [
-      'GET READY', 'WORK 01', 'BREAK 01', 'WORK 02', 'BREAK 02',
+      'GET READY', 'STUDY 01', 'BREAK 01', 'STUDY 02', 'BREAK 02',
     ]);
-    // 5 oturum × 3 bip
-    assert.equal(report.pomodoroPlan.cueEvents, 15);
+    assert.deepEqual(report.pomodoroPlan.statuses, [
+      { name: 'STUDY', minutes: 1, beep: false }, { name: 'BREAK', minutes: 1, beep: true },
+    ]);
+    // 3 bipli oturum (GET READY + 2 BREAK) × 3 bip
+    assert.equal(report.pomodoroPlan.cueEvents, 9);
   });
 });

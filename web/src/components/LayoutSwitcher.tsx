@@ -16,7 +16,7 @@ type LayoutSwitcherProps = {
 export function LayoutSwitcher({
   value,
   onChange,
-  ariaLabel = 'Görünüm düzeni: 1x liste veya 3x grid',
+  ariaLabel = 'Görünüm: liste ya da kartlar',
 }: LayoutSwitcherProps) {
   const currentCols: LayoutCols = value === 1 ? 1 : 3;
   const is3x = currentCols === 3;
@@ -32,11 +32,12 @@ export function LayoutSwitcher({
       role="switch"
       aria-checked={is3x}
       aria-label={ariaLabel}
-      title={`Şu anki görünüm: ${currentCols}x. Tıklayarak ${is3x ? '1x (Liste)' : '3x (Grid)'} görünümüne geçin.`}
+      title={is3x ? 'Kart görünümü açık. Liste görünümüne geçmek için tıkla.' : 'Liste görünümü açık. Kart görünümüne geçmek için tıkla.'}
       onClick={handleToggle}
     >
-      <span className={`layout-toggle-option ${!is3x ? 'active' : ''}`}>1x</span>
-      <span className={`layout-toggle-option ${is3x ? 'active' : ''}`}>3x</span>
+      {/* Sayı yerine simge: ☰ liste (tek sütun), ▦ kartlar (3 sütun). Anlam ipucu `title`da. */}
+      <span className={`layout-toggle-option ${!is3x ? 'active' : ''}`} aria-hidden="true">☰</span>
+      <span className={`layout-toggle-option ${is3x ? 'active' : ''}`} aria-hidden="true">▦</span>
       <span className={`layout-toggle-thumb ${is3x ? 'is-3x' : 'is-1x'}`} aria-hidden="true" />
     </button>
   );

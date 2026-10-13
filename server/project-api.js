@@ -21,7 +21,7 @@ import { CONFIG_DEFAULTS, VIDEO_SOURCES } from '../core/config.js';
 import { AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, imageMimeType, isImagePath, listFiles, uniqueFileName } from '../core/files.js';
 import { normalizeLabelPlan } from '../core/label-plan.js';
 import {
-  POMODORO_DEFAULTS, POMODORO_PRESETS, buildTimeline, normalizePomodoroSelection, validatePomodoro,
+  POMODORO_DEFAULTS, buildTimeline, legacyKeysIn, normalizePomodoroSelection, validatePomodoro,
 } from '../core/pomodoro-plan.js';
 import { probe } from '../core/probe.js';
 import { moveDirToTrash, moveFileToTrash } from '../core/trash.js';
@@ -605,7 +605,7 @@ export async function updateAmbient(
 
 /**
  * Etiket editorunun verisi: kayitli etiketler, onizleme kadrajinin orani, arka
- * plan olarak gosterilecek klip ve — Pomodoro aciksa — oturum zamanlari.
+ * plan olarak gosterilecek klip (+ Pomodoro durumlarinin kendi goruntuleri) ve — Pomodoro aciksa — oturum zamanlari.
  *
  * Oturumlar yalnizca OKUNUR (`buildTimeline`): editor "STUDY su aralikta, BREAK bu
  * aralikta" diye gosterebilsin diye. Pomodoro ayari buradan degismez.
@@ -631,17 +631,19 @@ export async function getLabels(id, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
       kind: status.videoSource === 'image' ? 'image' : 'video',
     };
   }
-  // Pomodoro: mola oturumunda arkada MOLA görüntüsü görünür; yoksa (null) çalışma görüntüsüyle aynı.
-  let breakPreview = null;
-  if (plan?.breakClip && !isShorts) {
-    const breakPath = resolve(projectDir, plan.breakClip);
-    if (await exists(breakPath)) {
-      breakPreview = {
-        url: assetUrl(id, 'visual', basename(breakPath)),
-        kind: isImagePath(breakPath) ? 'image' : 'video',
-      };
-    }
-  }
+  // Pomodoro: her durumun (ve GET READY'nin) oturumunda arkada KENDİ görüntüsü görünür;
+  // görüntüsü yoksa (null) ana görüntüyle aynı.
+  const previewOfVisual = async (visual) => {
+    if (!visual || isShorts) return null;
+    const visualPath = resolve(projectDir, visual);
+    if (!(await exists(visualPath))) return null;
+    return {
+      url: assetUrl(id, 'visual', basename(visualPath)),
+      kind: isImagePath(visualPath) ? 'image' : 'video',
+    };
+  };
+  const introPreview = await previewOfVisual(plan?.intro.visual);
+  const statusPreviews = plan ? await Promise.all(plan.statuses.map((s) => previewOfVisual(s.visual))) : [];
   const timeline = plan && !isShorts ? buildTimeline(plan) : null;
 
   return {
@@ -650,7 +652,8 @@ export async function getLabels(id, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
     warnings,
     aspect: isShorts ? '9:16' : (json.video?.aspect || CONFIG_DEFAULTS.video.aspect || '16:9'),
     preview,
-    breakPreview,
+    introPreview,
+    statusPreviews,
     pomodoro: timeline
       ? { enabled: true, totalSeconds: timeline.totalSeconds, sessions: timeline.sessions }
       : { enabled: false, totalSeconds: 0, sessions: [] },
@@ -708,7 +711,6 @@ export async function getPomodoro(id, { videosDir = DEFAULT_VIDEOS_DIR, probeFn 
 
   return {
     enabled: validation.enabled,
-    presets: POMODORO_PRESETS,
     defaults: POMODORO_DEFAULTS,
     settings: plan,
     // project.json elle bozulmussa ayar ekrani sessiz kalmasin.
@@ -738,23 +740,22 @@ export async function getPomodoro(id, { videosDir = DEFAULT_VIDEOS_DIR, probeFn 
  * isi (setProjectPomodoro → serializePomodoroPlan). `enabled: false` ayari
  * kaldirir ve sistem bugunku gibi calisir.
  *
- * @param {unknown} body `{ enabled, preset?, workMinutes?, breakMinutes?, rounds?,
- *   countdownSeconds?, countdownBeep?, breakClip? }`
+ * @param {unknown} body `{ enabled, statuses?, intro?, rounds?, countdownSeconds?, countdownBeep? }`
+ *   (eski `preset/workMinutes/breakMinutes/breakClip` anahtarları 400 ile reddedilir).
+ *   Durumların içeriğini `normalizePomodoroSelection` doğrular — kural tek yerde, hata 422.
  */
 export async function updatePomodoro(id, body, { videosDir = DEFAULT_VIDEOS_DIR, probeFn = probe } = {}) {
   const projectDir = await resolveProjectDir(id, videosDir);
+  rejectLegacyPomodoroKeys(body);
   const input = parseBody(body, {
     enabled: 'boolean',
-    preset: 'string',
-    workMinutes: 'number',
-    breakMinutes: 'number',
     rounds: 'number',
     countdownSeconds: 'number',
     countdownBeep: 'boolean',
-    // Mola görüntüsü (proje klasörüne göreli yol); '' → mola da çalışma görüntüsünü kullanır.
-    breakClip: 'string',
+    // Durum listesi ve GET READY görüntüsü; görüntü yolları proje klasörüne göreli.
+    statuses: 'array',
+    intro: 'object',
   }, ['enabled']);
-  if (input.breakClip === '') delete input.breakClip;
 
   const status = await inspectProject(projectDir);
   if (!status.projectJson.ok) {
@@ -1181,11 +1182,11 @@ export function describeReadiness(status) {
       : {
         enabled: true,
         preset: pomodoroPlan.preset,
-        workMinutes: pomodoroPlan.workMinutes,
-        breakMinutes: pomodoroPlan.breakMinutes,
+        statuses: pomodoroPlan.statuses,
+        intro: pomodoroPlan.intro,
         rounds: pomodoroPlan.rounds,
+        countdownBeep: pomodoroPlan.countdownBeep,
         totalMinutes: buildTimeline(pomodoroPlan).totalMinutes,
-        breakClip: pomodoroPlan.breakClip,
       },
     build: { ready: missing.length === 0, missing },
     output: { exists: status.output.exists },
@@ -1296,6 +1297,17 @@ async function exists(path) {
   return (await stat(path).catch(() => null)) !== null;
 }
 
+/**
+ * Eski Pomodoro anahtarları (`preset`, `workMinutes`, `breakMinutes`, `breakClip`) yalnızca
+ * dosyadan OKUNUR; API'ye yazılırken `statuses` kullanılmalı.
+ */
+function rejectLegacyPomodoroKeys(body) {
+  const found = legacyKeysIn(body);
+  if (found.length > 0) {
+    throw new ApiError(400, `Use "statuses" (and "intro") instead of: ${found.join(', ')}`, { legacyKeys: found });
+  }
+}
+
 function parseCreateBody(body) {
   const input = parseBody(
     body,
@@ -1305,9 +1317,13 @@ function parseCreateBody(body) {
   if (input.pomodoro !== undefined && (input.pomodoro === null || Array.isArray(input.pomodoro))) {
     throw new ApiError(400, 'pomodoro must be an object');
   }
-  // Mola görüntüsü dosyası proje kurulunca yüklenir; kurulum sırasında seçilemez.
-  if (input.pomodoro?.breakClip !== undefined) {
-    throw new ApiError(400, 'pomodoro.breakClip cannot be set while creating a project');
+  rejectLegacyPomodoroKeys(input.pomodoro);
+  // Görüntü dosyaları proje kurulunca yüklenir; kurulum sırasında seçilemez.
+  const visualGiven = input.pomodoro?.intro?.visual != null
+    || (Array.isArray(input.pomodoro?.statuses)
+      && input.pomodoro.statuses.some((status) => status?.visual != null));
+  if (visualGiven) {
+    throw new ApiError(400, 'Pomodoro visuals (intro.visual, statuses[].visual) cannot be set while creating a project');
   }
 
   const ambient = input.ambient ?? [];

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { positionExpressions, STATUS_TEXT as SERVER_STATUS_TEXT } from '../../core/label-filter.js';
+import { positionExpressions } from '../../core/label-filter.js';
 import { createLabel } from '../../core/label-plan.js';
 import {
   aspectRatioOf,
@@ -16,13 +16,12 @@ import {
   scaledSize,
   snapPosition,
   sessionAt,
-  STATUS_TEXT,
 } from './labelFrame';
 import type { PomodoroSession, VideoLabel } from './types';
 
 const SESSIONS: PomodoroSession[] = [
-  { index: 0, kind: 'work', round: 1, label: 'WORK 01', startSeconds: 0, endSeconds: 3000, durationSeconds: 3000 },
-  { index: 1, kind: 'break', round: 1, label: 'BREAK 01', startSeconds: 3000, endSeconds: 3600, durationSeconds: 600 },
+  { index: 0, kind: 'status', statusIndex: 0, name: 'STUDY', round: 1, label: 'STUDY 01', startSeconds: 0, endSeconds: 3000, durationSeconds: 3000 },
+  { index: 1, kind: 'status', statusIndex: 1, name: 'BREAK', round: 1, label: 'BREAK 01', startSeconds: 3000, endSeconds: 3600, durationSeconds: 600 },
 ];
 
 const label = (patch: Partial<VideoLabel>): VideoLabel => ({
@@ -47,10 +46,6 @@ describe('sunucu formülüyle sözleşme (önizleme = render)', () => {
     const mirror = labelTopLeft({ x, y }, text, frame);
     expect(mirror.left).toBeCloseTo(evalFfmpeg(server.x, vars), 6);
     expect(mirror.top).toBeCloseTo(evalFfmpeg(server.y, vars), 6);
-  });
-
-  test('STUDY/BREAK yazıları sunucuyla aynı', () => {
-    expect(STATUS_TEXT).toEqual(SERVER_STATUS_TEXT);
   });
 });
 
@@ -130,7 +125,7 @@ describe('önizleme metni (yalnızca okur, zamanlamayı sistem belirler)', () =>
   });
 
   test('sessionAt ve başlıklar', () => {
-    expect(sessionAt(SESSIONS, 3000)?.kind).toBe('break');
+    expect(sessionAt(SESSIONS, 3000)?.name).toBe('BREAK');
     expect(sessionAt(SESSIONS, -1)).toBeNull();
     expect(labelTitle(label({ text: 'Selam' }))).toBe('Selam');
     expect(labelTitle(label({ text: '' }))).toBe('Boş etiket');

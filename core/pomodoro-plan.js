@@ -1,64 +1,76 @@
 /**
- * Pomodoro seçimi → normalize edilmiş oturum planı, timeline ve cue olayları.
+ * Pomodoro seçimi → normalize edilmiş durum listesi, timeline ve cue olayları.
  *
  * Tek sorumluluk: `project.json`'daki `pomodoro` alanını TEK bir plana çevirmek,
- * o plandan WORK/BREAK oturumlarını ve ses işaretlerinin (countdown beep +
- * oturum başlangıç efekti) zamanlarını hesaplamak, seçilen müziğin bu
- * timeline'ı doldurup doldurmadığını söylemek.
+ * o plandan oturumları (GET READY + her turda durum listesi) ve ses işaretlerinin
+ * (3'lü bip) zamanlarını hesaplamak, seçilen müziğin bu timeline'ı doldurup
+ * doldurmadığını söylemek.
  *
  * Dosya sistemine dokunmaz, ffmpeg çağırmaz, ses ölçmez — kırpma
  * `steps/02-audio-concat.js`'in, işaret seslerinin üretimi
  * `steps/06-pomodoro-cues.js`'in, yolların çözülmesi `core/config.js`'in işi.
  * `core/ambient-plan.js` ile aynı desen: şekil çözümleme karıştırmadan ayrı
- * durur, böylece yeni bir preset ya da yeni bir oturum türü tek dosyada eklenir.
+ * durur, böylece yeni bir hazır düzen ya da yeni bir alan tek dosyada eklenir.
  *
- * Kabul edilen şekil:
+ * Kabul edilen şekil (yazılan şekil budur):
  *   "pomodoro": {
  *     "enabled": true,
- *     "preset": "50/10",        // workMinutes/breakMinutes'ı doldurur
- *     "workMinutes": 50,
- *     "breakMinutes": 10,
  *     "rounds": 4,
+ *     "statuses": [                      // bir döngü: sırayla tekrarlanır
+ *       { "name": "STUDY", "minutes": 50 },
+ *       { "name": "BREAK", "minutes": 10, "visual": "./resimler/mola.png", "beep": true }
+ *     ],
+ *     "intro": { "visual": null },        // GET READY görüntüsü; boşsa ana görüntü (`clip`)
  *     "countdownSeconds": 3,
- *     "countdownBeep": true,    // her oturumun (GET READY, WORK, BREAK) son 3 saniyesinde 3 bip
- *     "breakClip": null,        // mola görüntüsü (resim ya da döngü videosu); boşsa mola da çalışma görüntüsünü kullanır
+ *     "countdownBeep": true,              // her oturumun son 3 saniyesinde 3 bip
  *     "cue": { "volumeDb": -10, "beepFile": null }
  *   }
  *
- * Her Pomodoro videosu `INTRO_SECONDS` (2 dk) süren bir GET READY oturumuyla başlar;
- * `rounds` turluk WORK/BREAK ondan sonra gelir. Bip akışının TAMAMI budur:
+ * Eski `project.json` şekli OKUNMAYA devam eder (hiçbir proje bozulmaz): `preset`,
+ * `workMinutes`, `breakMinutes`, `breakClip` iki durumlu `[STUDY, BREAK]`
+ * listesine çevrilir; `statuses` varsa o kazanır. Bu anahtarlar artık YAZILMAZ ve API
+ * gövdesinde kabul edilmez (`legacyKeysIn`). Her durumun `visual`ı boşsa
+ * projenin ana görüntüsü (`clip`) gösterilir; `beep: false` o durumun
+ * bitişindeki bipi kapatır.
+ *
+ * Her Pomodoro videosu `INTRO_SECONDS` (2 dk) süren bir GET READY oturumuyla
+ * başlar; `rounds` turluk döngü ondan sonra gelir. Bip akışının TAMAMI budur:
  * her oturumun (hazırlık dahil) bitişinden önce 3 bip. Ayrı başlangıç sesi yok.
  */
 
 /**
- * Hazır düzenler. `id` kullanıcıya gösterilen ad ve `preset` alanına yazılan değer.
- * Yeni preset eklemek: buraya bir kayıt — başka hiçbir yer bilmek zorunda değil.
+ * Hazır düzenler (kayıtlı setlerin yerleşik hâli). `id` kullanıcıya gösterilen ad.
+ * Yeni hazır düzen eklemek: buraya bir kayıt — başka hiçbir yer bilmek zorunda değil.
  */
 export const POMODORO_PRESETS = [
-  { id: '50/10', workMinutes: 50, breakMinutes: 10 },
-  { id: '30/10', workMinutes: 30, breakMinutes: 10 },
+  classicPreset('50/10', 50, 10),
+  classicPreset('30/10', 30, 10),
 ];
 
-/** Tur içindeki oturum türleri. Timeline bu sırayla üretilir: her turda önce WORK, sonra BREAK. */
-export const SESSION_KINDS = ['work', 'break'];
+function classicPreset(id, workMinutes, breakMinutes) {
+  return {
+    id,
+    statuses: [
+      { name: 'STUDY', minutes: workMinutes, beep: true, visual: null },
+      { name: 'BREAK', minutes: breakMinutes, beep: true, visual: null },
+    ],
+  };
+}
 
 /** Videonun başındaki GET READY oturumu (sn): her Pomodoro videosunda var, ayarı yok. */
 export const INTRO_SECONDS = 120;
 
+/** GET READY oturumunun adı (ekranda yazan). Durum adları kullanıcıdan gelir. */
+export const INTRO_NAME = 'GET READY';
+
 /** Varsayılanlar — UI ve config aynı değerleri buradan okur. */
 export const POMODORO_DEFAULTS = {
   enabled: false,
-  workMinutes: 50,
-  breakMinutes: 10,
   rounds: 4,
+  /** Varsayılan döngü: STUDY 50 + BREAK 10. */
+  statuses: POMODORO_PRESETS[0].statuses,
   countdownSeconds: 3,
   countdownBeep: true,
-  /**
-   * Mola görüntüsü (resim ya da döngü videosu, proje klasörüne göreli yol).
-   * null → mola da çalışma görüntüsünü (`clip`) kullanır. Çalışma görüntüsü
-   * için ayrı alan yok: o `project.json` → `clip`.
-   */
-  breakClip: null,
   cue: {
     /** İşaret seslerinin müziğe göre seviyesi (LU). Müziği bastırmaz, duyulur. */
     volumeDb: -10,
@@ -69,12 +81,15 @@ export const POMODORO_DEFAULTS = {
 
 /** Sınırlar — uydurma değer yerine anlaşılır hata. */
 const RANGES = {
-  workMinutes: { min: 1, max: 180 },
-  breakMinutes: { min: 1, max: 60 },
+  minutes: { min: 1, max: 180 },
   rounds: { min: 1, max: 24 },
   countdownSeconds: { min: 0, max: 10 },
   volumeDb: { min: -60, max: 12 },
+  statusCount: { min: 1, max: 8 },
 };
+
+/** Ekranda yazan durum adının en uzun hâli (karakter). */
+export const STATUS_NAME_MAX = 24;
 
 /**
  * Müzik ile timeline'ın "eşit" sayıldığı en büyük fark (sn).
@@ -87,14 +102,21 @@ const RANGES = {
 export const MATCH_TOLERANCE_SECONDS = 1;
 
 /**
+ * @typedef {object} PomodoroStatus
+ * @property {string} name ekranda yazan ad (STUDY, BREAK, STRETCH…)
+ * @property {number} minutes süre, dakika
+ * @property {string|null} visual görüntü yolu (resim ya da döngü videosu); null → ana görüntü (`clip`)
+ * @property {boolean} beep bitişinde 3 bip çalsın mı
+ */
+
+/**
  * @typedef {object} PomodoroPlan
- * @property {number} workMinutes
- * @property {number} breakMinutes
+ * @property {PomodoroStatus[]} statuses bir döngü
+ * @property {{ visual: string|null }} intro GET READY görüntüsü (null → ana görüntü)
  * @property {number} rounds
- * @property {string|null} preset Eşleşen hazır düzenin kimliği, yoksa null.
+ * @property {string|null} preset döngü hazır bir düzene denk geliyorsa kimliği, yoksa null
  * @property {number} countdownSeconds
  * @property {boolean} countdownBeep
- * @property {string|null} breakClip Mola görüntüsünün yolu, yoksa null (mola = çalışma görüntüsü).
  * @property {{ volumeDb: number, beepFile: string|null }} cue
  */
 
@@ -125,15 +147,9 @@ export function normalizePomodoroSelection(raw, field = 'pomodoro') {
   // modu kapatabilsin, kapalı bir blok build'i durdurmasın.
   if (raw.enabled !== true) return { plan: null, problems };
 
-  const preset = readPreset(raw.preset, `${field}.preset`, problems);
-  const workMinutes = readNumber(
-    raw.workMinutes, `${field}.workMinutes`, RANGES.workMinutes,
-    preset?.workMinutes ?? POMODORO_DEFAULTS.workMinutes, problems,
-  );
-  const breakMinutes = readNumber(
-    raw.breakMinutes, `${field}.breakMinutes`, RANGES.breakMinutes,
-    preset?.breakMinutes ?? POMODORO_DEFAULTS.breakMinutes, problems,
-  );
+  const statuses = raw.statuses !== undefined && raw.statuses !== null
+    ? readStatuses(raw.statuses, `${field}.statuses`, problems)
+    : readLegacyStatuses(raw, field, problems);
   const rounds = readNumber(
     raw.rounds, `${field}.rounds`, RANGES.rounds, POMODORO_DEFAULTS.rounds, problems,
   );
@@ -143,15 +159,14 @@ export function normalizePomodoroSelection(raw, field = 'pomodoro') {
   );
 
   const plan = {
-    workMinutes,
-    breakMinutes,
+    statuses,
+    intro: readIntro(raw.intro, `${field}.intro`, problems),
     rounds,
-    // Değerler bir hazır düzene denk geliyorsa kimliği taşınır: UI "50/10"
+    // Döngü bir hazır düzene denk geliyorsa kimliği taşınır: UI "50/10"
     // düğmesini seçili gösterebilsin, kullanıcı elle yazsa bile.
-    preset: presetIdFor(workMinutes, breakMinutes),
+    preset: presetIdFor(statuses),
     countdownSeconds,
     countdownBeep: readBoolean(raw.countdownBeep, `${field}.countdownBeep`, POMODORO_DEFAULTS.countdownBeep, problems),
-    breakClip: readBreakClip(raw.breakClip, `${field}.breakClip`, problems),
     cue: readCue(raw.cue, `${field}.cue`, problems),
   };
 
@@ -159,15 +174,20 @@ export function normalizePomodoroSelection(raw, field = 'pomodoro') {
 }
 
 /**
- * Plandan oturumları üretir: önce 2 dk GET READY, sonra her turda WORK + BREAK.
+ * Plandan oturumları üretir: önce 2 dk GET READY, sonra her turda durum listesi sırayla.
  *
- * Spec örneği: 50/10 × 4 → GET READY, WORK 01 … BREAK 04, toplam 242 dk.
- * Tur sayısı değişince timeline kendiliğinden yeniden kurulur; başka hiçbir
- * yerde süre hesabı yok.
+ * Spec örneği: 50/10 × 4 → GET READY, STUDY 01 … BREAK 04, toplam 242 dk.
+ * Tur sayısı ya da liste değişince timeline kendiliğinden yeniden kurulur;
+ * başka hiçbir yerde süre hesabı yok.
+ *
+ * Oturum: `kind` 'ready' | 'status'; `name` ekranda yazan ad; `statusIndex` döngüdeki
+ * sırası (GET READY için -1); `visual` o oturumun görüntü yolu (null → ana görüntü);
+ * `beep` bitişinde bip çalar mı.
  *
  * @param {PomodoroPlan} plan
  * @returns {{
- *   sessions: Array<{ index: number, kind: 'ready'|'work'|'break', round: number, label: string,
+ *   sessions: Array<{ index: number, kind: 'ready'|'status', statusIndex: number, name: string,
+ *     round: number, label: string, visual: string|null, beep: boolean,
  *     startSeconds: number, endSeconds: number, durationSeconds: number }>,
  *   totalSeconds: number,
  *   totalMinutes: number,
@@ -177,8 +197,12 @@ export function buildTimeline(plan) {
   const sessions = [{
     index: 0,
     kind: 'ready',
+    statusIndex: -1,
+    name: INTRO_NAME,
     round: 0,
-    label: 'GET READY',
+    label: INTRO_NAME,
+    visual: plan.intro?.visual ?? null,
+    beep: true,
     startSeconds: 0,
     endSeconds: INTRO_SECONDS,
     durationSeconds: INTRO_SECONDS,
@@ -186,19 +210,23 @@ export function buildTimeline(plan) {
   let elapsed = INTRO_SECONDS;
 
   for (let round = 1; round <= plan.rounds; round++) {
-    for (const kind of SESSION_KINDS) {
-      const durationSeconds = (kind === 'work' ? plan.workMinutes : plan.breakMinutes) * 60;
+    plan.statuses.forEach((status, statusIndex) => {
+      const durationSeconds = status.minutes * 60;
       sessions.push({
         index: sessions.length,
-        kind,
+        kind: 'status',
+        statusIndex,
+        name: status.name,
         round,
-        label: `${kind === 'work' ? 'WORK' : 'BREAK'} ${String(round).padStart(2, '0')}`,
+        label: `${status.name} ${String(round).padStart(2, '0')}`,
+        visual: status.visual,
+        beep: status.beep,
         startSeconds: elapsed,
         endSeconds: elapsed + durationSeconds,
         durationSeconds,
       });
       elapsed += durationSeconds;
-    }
+    });
   }
 
   return { sessions, totalSeconds: elapsed, totalMinutes: elapsed / 60 };
@@ -207,15 +235,15 @@ export function buildTimeline(plan) {
 /**
  * Timeline'a yerleşecek bip olayları.
  *
- * Bip akışının TAMAMI: her oturumun (GET READY, her WORK, her BREAK — videonun
- * son oturumu dahil) bitişinden `countdownSeconds` saniye önce birer saniye
- * arayla bip'ler (T-3, T-2, T-1). Başlangıç sesi yok.
+ * Bip akışının TAMAMI: her oturumun (GET READY, her durum — videonun son oturumu
+ * dahil) bitişinden `countdownSeconds` saniye önce birer saniye arayla bip'ler
+ * (T-3, T-2, T-1). `beep: false` olan durumda bip yok. Başlangıç sesi yok.
  *
  * Her oturum en az 1 dk sürdüğü için hiçbir bip videonun başından önceye düşmez.
  *
  * @param {PomodoroPlan} plan
  * @param {ReturnType<typeof buildTimeline>} timeline
- * @returns {{ events: Array<{ atSeconds: number, type: 'beep', kind: 'ready'|'work'|'break',
+ * @returns {{ events: Array<{ atSeconds: number, type: 'beep', kind: 'ready'|'status',
  *   session: number, label: string }> }}
  */
 export function buildCueEvents(plan, timeline) {
@@ -223,6 +251,7 @@ export function buildCueEvents(plan, timeline) {
 
   if (plan.countdownBeep && plan.countdownSeconds > 0) {
     for (const session of timeline.sessions) {
+      if (!session.beep) continue;
       for (let n = plan.countdownSeconds; n >= 1; n--) {
         events.push({
           atSeconds: session.endSeconds - n,
@@ -349,7 +378,7 @@ export function formatClock(seconds) {
 export function describeComparison(comparison, plan) {
   const head =
     `Pomodoro timeline: ${formatClock(comparison.timelineSeconds)} ` +
-    `(${plan.workMinutes}/${plan.breakMinutes} × ${plan.rounds} tur + ${INTRO_SECONDS / 60} dk hazırlık)\n` +
+    `(${describeCycle(plan.statuses)} × ${plan.rounds} tur + ${INTRO_SECONDS / 60} dk hazırlık)\n` +
     `Müzik toplamı: ${formatClock(comparison.musicSeconds)}`;
 
   if (comparison.status === 'excess') {
@@ -372,7 +401,7 @@ export function describeComparison(comparison, plan) {
 /**
  * Timeline'ın okunur dökümü — rapora ve `pomodoro-timeline.txt` çıktısına yazılır.
  *
- *   WORK 01
+ *   STUDY 01
  *   00:00 - 50:00
  *
  * @param {ReturnType<typeof buildTimeline>} timeline
@@ -477,8 +506,9 @@ export class PomodoroValidationError extends Error {
 }
 
 /**
- * Plandan `project.json`'a yazılacak sade şekil — varsayılandan sapmayan alan
- * yazılmaz, eski projelerin dosyası şişmez (`serializeAmbientPlan` ile aynı kural).
+ * Plandan `project.json`'a yazılacak sade şekil — yazılan şekil YALNIZCA `statuses`
+ * (eski `workMinutes/breakMinutes/breakClip/preset` yazılmaz; dosyada varsa okunmaya devam eder).
+ * Varsayılandan sapmayan alan yazılmaz, dosya şişmez (`serializeAmbientPlan` ile aynı kural).
  *
  * @param {PomodoroPlan|null} plan null → anahtar silinir
  * @returns {object|undefined}
@@ -488,14 +518,18 @@ export function serializePomodoroPlan(plan) {
 
   const out = {
     enabled: true,
-    ...(plan.preset === null ? {} : { preset: plan.preset }),
-    workMinutes: plan.workMinutes,
-    breakMinutes: plan.breakMinutes,
     rounds: plan.rounds,
+    statuses: plan.statuses.map((status) => ({
+      name: status.name,
+      minutes: status.minutes,
+      ...(status.visual === null ? {} : { visual: status.visual }),
+      ...(status.beep ? {} : { beep: false }),
+    })),
   };
+  if (plan.intro.visual !== null) out.intro = { visual: plan.intro.visual };
 
   const defaults = POMODORO_DEFAULTS;
-  for (const key of ['countdownSeconds', 'countdownBeep', 'breakClip']) {
+  for (const key of ['countdownSeconds', 'countdownBeep']) {
     if (plan[key] !== defaults[key]) out[key] = plan[key];
   }
 
@@ -510,11 +544,121 @@ export function serializePomodoroPlan(plan) {
 
 // ---------------------------------------------------------------- yardımcılar
 
-/** Değerlere denk gelen hazır düzenin kimliği, yoksa null. */
-export function presetIdFor(workMinutes, breakMinutes) {
-  return POMODORO_PRESETS.find(
-    (p) => p.workMinutes === workMinutes && p.breakMinutes === breakMinutes,
-  )?.id ?? null;
+/**
+ * Döngünün hazır bir düzene denk gelen kimliği, yoksa null. Yalnızca süreler
+ * karşılaştırılır (ad ve görüntü değil): "50/10" düğmesi, ad ya da görüntü
+ * değişse de aynı süreleri gösterir.
+ *
+ * @param {PomodoroStatus[]} statuses
+ */
+export function presetIdFor(statuses) {
+  return POMODORO_PRESETS.find((preset) => (
+    preset.statuses.length === statuses.length
+    && preset.statuses.every((status, i) => status.minutes === statuses[i].minutes)
+  ))?.id ?? null;
+}
+
+/** Döngünün kısa özeti: süreler `/` ile (`50/10`, `25/5/15`). Tek yerde: ekran ve hata metinleri. */
+export function describeCycle(statuses) {
+  return statuses.map((status) => status.minutes).join('/');
+}
+
+/** Eski `project.json` anahtarları: yalnızca OKUNUR; yeni yazımda ve API gövdesinde kullanılmaz. */
+const LEGACY_KEYS = ['preset', 'workMinutes', 'breakMinutes', 'breakClip'];
+
+/**
+ * Bir gövdede eski anahtar var mı: API bunları reddeder (`statuses` kullanılmalı).
+ *
+ * @param {unknown} raw
+ * @returns {string[]} bulunan eski anahtarlar
+ */
+export function legacyKeysIn(raw) {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return [];
+  return LEGACY_KEYS.filter((key) => raw[key] !== undefined);
+}
+
+/** Eski şekil (`preset`/`workMinutes`/`breakMinutes`/`breakClip`) → `[STUDY, BREAK]` listesi. */
+function readLegacyStatuses(raw, field, problems) {
+  const preset = readPreset(raw.preset, `${field}.preset`, problems);
+  const [defaultWork, defaultBreak] = (preset ?? POMODORO_PRESETS[0]).statuses;
+  const work = readNumber(
+    raw.workMinutes, `${field}.workMinutes`, RANGES.minutes, defaultWork.minutes, problems,
+  );
+  const rest = readNumber(
+    raw.breakMinutes, `${field}.breakMinutes`, { min: 1, max: 60 }, defaultBreak.minutes, problems,
+  );
+  return [
+    { name: 'STUDY', minutes: work, visual: null, beep: true },
+    {
+      name: 'BREAK',
+      minutes: rest,
+      visual: readVisual(raw.breakClip, `${field}.breakClip`, problems),
+      beep: true,
+    },
+  ];
+}
+
+/**
+ * Durum listesini tek başına doğrular (kayıtlı setler de aynı kuralı kullanır).
+ *
+ * @param {unknown} value
+ * @param {string} [key] hata mesajlarındaki alan adı
+ * @returns {{ statuses: PomodoroStatus[], problems: string[] }}
+ */
+export function normalizeStatusList(value, key = 'statuses') {
+  const problems = [];
+  const statuses = readStatuses(value, key, problems);
+  return { statuses, problems };
+}
+
+function readStatuses(value, key, problems) {
+  const fallback = POMODORO_DEFAULTS.statuses.map((status) => ({ ...status }));
+  const { min, max } = RANGES.statusCount;
+  if (!Array.isArray(value) || value.length < min || value.length > max) {
+    problems.push(`${key}: ${min} ile ${max} arasında durum içeren bir liste olmalı`);
+    return fallback;
+  }
+
+  return value.map((item, i) => {
+    const at = `${key}[${i}]`;
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+      problems.push(`${at}: nesne olmalı ({ "name": "STUDY", "minutes": 50 })`);
+      return { name: `DURUM ${i + 1}`, minutes: 10, visual: null, beep: true };
+    }
+    return {
+      name: readStatusName(item.name, `${at}.name`, i, problems),
+      minutes: readNumber(item.minutes, `${at}.minutes`, RANGES.minutes, 10, problems),
+      visual: readVisual(item.visual, `${at}.visual`, problems),
+      beep: readBoolean(item.beep, `${at}.beep`, true, problems),
+    };
+  });
+}
+
+function readStatusName(value, key, index, problems) {
+  const fallback = `DURUM ${index + 1}`;
+  if (typeof value !== 'string' || value.trim() === '') {
+    problems.push(`${key}: ekranda yazacak bir ad gerekli (örn. "STUDY")`);
+    return fallback;
+  }
+  const name = value.trim();
+  if (name.length > STATUS_NAME_MAX) {
+    problems.push(`${key}: en fazla ${STATUS_NAME_MAX} karakter olabilir (verilen: ${name.length})`);
+    return fallback;
+  }
+  if (/[\r\n]/.test(name)) {
+    problems.push(`${key}: tek satır olmalı`);
+    return fallback;
+  }
+  return name;
+}
+
+function readIntro(raw, key, problems) {
+  if (raw === undefined || raw === null) return { visual: null };
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    problems.push(`${key}: nesne olmalı ({ "visual": "./resimler/hazir.png" })`);
+    return { visual: null };
+  }
+  return { visual: readVisual(raw.visual, `${key}.visual`, problems) };
 }
 
 function readPreset(value, key, problems) {
@@ -550,10 +694,11 @@ function readBoolean(value, key, fallback, problems) {
   return value;
 }
 
-function readBreakClip(value, key, problems) {
+/** Görüntü yolu: boş/yok → null (ana görüntü kullanılır). */
+function readVisual(value, key, problems) {
   if (value === undefined || value === null) return null;
   if (typeof value !== 'string' || value.trim() === '') {
-    problems.push(`${key}: boş olmayan bir dosya yolu olmalı (mola da aynı görüntüyü kullansın diye alanı hiç yazma)`);
+    problems.push(`${key}: boş olmayan bir dosya yolu olmalı (ana görüntü kullanılsın diye alanı hiç yazma)`);
     return null;
   }
   return value;

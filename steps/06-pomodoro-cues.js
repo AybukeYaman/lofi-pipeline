@@ -2,7 +2,7 @@
  * Aşama 6 — Pomodoro bip sesleri (her oturumun son saniyelerinde geri sayım).
  *
  * Oturum geçişlerini duyulur kılar. Zamanlar `core/pomodoro-plan.js`
- * `buildCueEvents`'ten gelir (her oturumun — GET READY, WORK, BREAK, videonun
+ * `buildCueEvents`'ten gelir (her oturumun — GET READY, her durum, videonun
  * son oturumu dahil — bitişinden önce 3 bip); bu katman yalnızca "o anlara
  * sesi nasıl koyarım" sorusunu yanıtlar. Başka ses yok: bip akışının tamamı bu.
  *

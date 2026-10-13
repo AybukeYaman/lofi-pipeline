@@ -18,14 +18,18 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { fetchProjectPomodoro, updateProjectPomodoro } from '../api';
-import { pomodoroPayload, pomodoroSummary } from '../pomodoroSetup';
+import {
+  pomodoroPayload, pomodoroSummary, statusesPayload, type PomodoroChoice,
+} from '../pomodoroSetup';
 import { PickerPanel } from './PickerPanel';
-import { PomodoroSetup, type PomodoroChoice } from './PomodoroSetup';
+import { StatusEditor } from './StatusEditor';
 import type { ProjectPomodoro, UpdatePomodoroPayload } from '../types';
 
 type PomodoroPickerProps = {
   projectId: string;
   label?: string;
+  /** Ayar sunucuya yazıldıktan sonra çağrılır (üst ekran projeyi yeniden okusun diye). */
+  onSaved?: () => void | Promise<void>;
 };
 
 /** `mm:ss` — core/pomodoro-plan.js formatClock aynası (dakika saate çevrilmez). */
@@ -38,12 +42,14 @@ function formatClock(seconds: number | null | undefined): string {
 
 /** Ekrandaki düğmelerin değeri: ayar yoksa (Pomodoro kapalı) varsayılanlar. */
 function choiceOf(data: ProjectPomodoro): PomodoroChoice {
-  const current = data.settings ?? { ...data.defaults, preset: null };
+  const current = data.settings ?? data.defaults;
   return {
-    workMinutes: current.workMinutes,
-    breakMinutes: current.breakMinutes,
+    // Eski dosyalardaki genel "bip kapalı" ayarı satırlara yansır (hepsi sessiz görünür);
+    // sonraki kayıtta satır başına yazılır, genel anahtar açık kalır.
+    statuses: current.countdownBeep
+      ? current.statuses
+      : current.statuses.map((status) => ({ ...status, beep: false })),
     rounds: current.rounds,
-    sounds: current.countdownBeep,
   };
 }
 
@@ -66,6 +72,7 @@ function statusColor(status: string | undefined, ok: boolean | undefined): strin
 export function PomodoroPicker({
   projectId,
   label = 'Pomodoro modu',
+  onSaved,
 }: PomodoroPickerProps) {
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<ProjectPomodoro | null>(null);
@@ -116,6 +123,7 @@ export function PomodoroPicker({
         projectId,
         changes === null ? { enabled: false } : pomodoroPayload(data, changes),
       ));
+      await onSaved?.();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Pomodoro ayarı kaydedilemedi.');
     } finally {
@@ -132,7 +140,7 @@ export function PomodoroPicker({
       label={label}
       badge={
         data
-          ? `(${settings ? pomodoroSummary(settings.workMinutes, settings.breakMinutes, settings.rounds) : 'kapalı'})`
+          ? `(${settings ? pomodoroSummary(settings.statuses, settings.rounds) : 'kapalı'})`
           : undefined
       }
       open={open}
@@ -157,23 +165,16 @@ export function PomodoroPicker({
 
           {data ? (
             <>
-              <p className="field-hint">
-                Çalışma/mola oturumları · her oturumdan{' '}
-                {settings?.countdownSeconds ?? data.defaults.countdownSeconds} sn önce geri sayım
-              </p>
-
-              {/* --- düzen, süre, sesler: proje formuyla AYNI bileşen */}
-              <PomodoroSetup
-                presets={data.presets}
+              {/* --- durum listesi ve süre: proje formuyla AYNI bileşen */}
+              <StatusEditor
                 isOff={!data.enabled}
                 disabled={saving}
                 onTurnOff={() => void save(null)}
                 value={choiceOf(data)}
                 onChange={(next) => void save({
-                  workMinutes: next.workMinutes,
-                  breakMinutes: next.breakMinutes,
+                  statuses: statusesPayload(next.statuses),
                   rounds: next.rounds,
-                  countdownBeep: next.sounds,
+                  countdownBeep: true,
                 })}
               />
 
@@ -201,18 +202,6 @@ export function PomodoroPicker({
                           <span className="field-hint"> ({data.music.trackCount} parça)</span>
                         </dd>
                       </div>
-                      {comparison?.status === 'excess' ? (
-                        <div>
-                          <dt>Fazla</dt>
-                          <dd>{formatClock(comparison.excessSeconds)}</dd>
-                        </div>
-                      ) : null}
-                      {comparison?.status === 'short' ? (
-                        <div>
-                          <dt>Eksik</dt>
-                          <dd>{formatClock(comparison.shortSeconds)}</dd>
-                        </div>
-                      ) : null}
                     </dl>
 
                     {validation?.problems.map((problem) => (
@@ -230,8 +219,7 @@ export function PomodoroPicker({
                   {validation?.timeline ? (
                     <details style={{ marginTop: 10 }}>
                       <summary className="field-hint" style={{ cursor: 'pointer' }}>
-                        Oturum dökümü ({validation.timeline.sessions.length} oturum,
-                        {' '}{validation.cueCount} ses işareti)
+                        Oturum listesi ({validation.timeline.sessions.length} oturum)
                       </summary>
                       <ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 12.5 }}>
                         {validation.timeline.sessions.map((session) => (

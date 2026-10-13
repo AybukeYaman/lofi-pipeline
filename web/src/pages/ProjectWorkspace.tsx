@@ -4,7 +4,6 @@ import { fetchProject, fetchProjects, ProjectNotFoundError } from '../api';
 import { EmptyState } from '../components/Feedback';
 import { PageHeader } from '../components/PageHeader';
 import { ProjectTabs } from '../components/ProjectTabs';
-import { StatusBadge } from '../components/StatusBadge';
 import { describeAudioZip } from '../audioZip';
 import { pomodoroSummary } from '../pomodoroSetup';
 import { showSuccess, showWarning } from '../toast';
@@ -281,19 +280,16 @@ function WorkspaceContent({
         </nav>
 
         <div className="workspace-main">
-          {pomodoroInfo ? (
+          {/* Özet çipi yalnızca Proje ve Video adımlarında: Müzik adımında kutunun rozeti, Montaj'da özet satırı aynı cümleyi zaten gösteriyor. */}
+          {pomodoroInfo && (activeStep === 'project' || activeStep === 'video') ? (
             <p className="pomodoro-chip field-hint" role="note">
               <strong>Pomodoro</strong> · {pomodoroSummary(
-                pomodoroInfo.workMinutes ?? 50, pomodoroInfo.breakMinutes ?? 10, pomodoroInfo.rounds ?? 1,
+                pomodoroInfo.statuses ?? [], pomodoroInfo.rounds ?? 1,
               )}
-              {activeStep !== 'music' ? (
-                <>
-                  {' '}·{' '}
-                  <button type="button" className="button button-compact" onClick={() => goTo('music')}>
-                    düzeni değiştir
-                  </button>
-                </>
-              ) : null}
+              {' '}·{' '}
+              <button type="button" className="button button-compact" onClick={() => goTo('music')}>
+                düzeni değiştir
+              </button>
             </p>
           ) : null}
 
@@ -340,15 +336,10 @@ function WorkspaceContent({
           ) : null}
 
           <details className="panel evidence-panel">
-            <summary>Proje dosyaları ve disk kanıtı</summary>
-            <dl className="asset-list">
-              {project.parentId ? <AssetRow label="Ana proje" value={project.parentId} /> : null}
-              <AssetRow label="Video klibi" value={<StatusBadge status={assets.clip} />} />
-              <AssetRow label="Müzik" value={<StatusBadge status={assets.music} />} />
-              <AssetRow label="Arka plan sesi" value={<StatusBadge status={assets.ambient} />} />
-              <AssetRow label="Çıktı" value={<StatusBadge status={assets.output} />} />
-            </dl>
+            {/* Durum rozetleri (klip/müzik/ses/çıktı) burada yoktu da olur: adım listesi ve Montaj özeti gösteriyor. Yalnızca dosya yolları. */}
+            <summary>Dosya yolları</summary>
             <dl className="evidence-list">
+              {project.parentId ? <AssetRow label="Ana proje" value={project.parentId} /> : null}
               <AssetRow label="Proje klasörü" value={project.dir} />
               <AssetRow label="Video dosyası" value={project.clip?.path ?? project.clip?.value} />
               <AssetRow

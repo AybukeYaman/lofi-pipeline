@@ -60,6 +60,9 @@ import {
   uploadMimiAsset,
 } from './mimi-api.js';
 import {
+  createPomodoroSet, getPomodoroSet, getPomodoroSets, removePomodoroSet, updatePomodoroSet,
+} from './pomodoro-set-api.js';
+import {
   createPrompt, getPrompt, getPrompts, removePrompt, updatePrompt,
 } from './prompt-api.js';
 import {
@@ -94,6 +97,11 @@ export function createDefaultProjectApi({ buildJobs = createBuildJobs() } = {}) 
     createPrompt: (body) => createPrompt(body),
     updatePrompt: (id, body) => updatePrompt(id, body),
     removePrompt: (id) => removePrompt(id),
+    getPomodoroSets: () => getPomodoroSets(),
+    getPomodoroSet: (id) => getPomodoroSet(id),
+    createPomodoroSet: (body) => createPomodoroSet(body),
+    updatePomodoroSet: (id, body) => updatePomodoroSet(id, body),
+    removePomodoroSet: (id) => removePomodoroSet(id),
     uploadProjectImage: (id, body) => uploadProjectImage(id, body),
     uploadProjectClip: (id, body) => uploadProjectClip(id, body),
     uploadProjectAudio: (id, name, stream, options) => uploadProjectAudio(id, name, stream, options),
@@ -174,6 +182,28 @@ export const ROUTES = [
     handle: async (api, { id }) => [200, await api.removePrompt(id)],
   },
   { method: 'GET', pattern: /^\/api\/projects$/, handle: async (api) => [200, await api.getProjects()] },
+  // Kayıtlı Pomodoro setleri (durum listeleri) — projeden bağımsız.
+  { method: 'GET', pattern: /^\/api\/pomodoro-sets$/, handle: async (api) => [200, await api.getPomodoroSets()] },
+  {
+    method: 'POST',
+    pattern: /^\/api\/pomodoro-sets$/,
+    handle: async (api, { body }) => [201, await api.createPomodoroSet(body)],
+  },
+  {
+    method: 'GET',
+    pattern: /^\/api\/pomodoro-sets\/([^/]+)$/,
+    handle: async (api, { id }) => [200, await api.getPomodoroSet(id)],
+  },
+  {
+    method: 'PUT',
+    pattern: /^\/api\/pomodoro-sets\/([^/]+)$/,
+    handle: async (api, { id, body }) => [200, await api.updatePomodoroSet(id, body)],
+  },
+  {
+    method: 'DELETE',
+    pattern: /^\/api\/pomodoro-sets\/([^/]+)$/,
+    handle: async (api, { id }) => [200, await api.removePomodoroSet(id)],
+  },
   {
     method: 'POST',
     pattern: /^\/api\/projects$/,

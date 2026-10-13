@@ -17,12 +17,13 @@ import type {
   UpdateAmbientPayload,
   UpdatePomodoroPayload,
   ProjectSummary,
+  PomodoroSet,
+  PomodoroSetsResponse,
   PromptLibraryResponse,
   PromptPayload,
   VideoSource,
   VideoSourceResponse,
 } from './types';
-import { pomodoroPayload } from './pomodoroSetup';
 
 export class ApiError extends Error {
   status: number;
@@ -202,6 +203,36 @@ export async function updateProjectCrop(
   return handleResponse<ProjectDetail>(response, 'Crop settings could not be updated.');
 }
 
+// ------------------------------------------------- kayıtlı Pomodoro setleri (projeden bağımsız)
+
+const setUrl = (id: string) => `/api/pomodoro-sets/${encodeURIComponent(id)}`;
+
+/** Hazır düzenler (50/10, 30/10) + kullanıcının kaydettiği setler. */
+export async function fetchPomodoroSets(): Promise<PomodoroSetsResponse> {
+  const response = await fetch('/api/pomodoro-sets');
+  return handleResponse<PomodoroSetsResponse>(response, 'Pomodoro sets could not be loaded.');
+}
+
+/** Yeni set ekler; kimlik addan türetilir. Yalnızca ad, dakika ve bip kaydedilir (görüntü girmez). */
+export async function createPomodoroSet(
+  payload: { name: string; statuses: PomodoroSet['statuses'] },
+): Promise<{ set: PomodoroSet }> {
+  return sendJson('POST', '/api/pomodoro-sets', payload, 'Pomodoro set could not be saved.');
+}
+
+/** Kayıtlı seti günceller; ad değişse de kimlik sabit kalır. */
+export async function updatePomodoroSet(
+  id: string,
+  payload: { name?: string; statuses?: PomodoroSet['statuses'] },
+): Promise<{ set: PomodoroSet }> {
+  return sendJson('PUT', setUrl(id), payload, 'Pomodoro set could not be updated.');
+}
+
+export async function deletePomodoroSet(id: string): Promise<{ ok: boolean; deleted: string }> {
+  const response = await fetch(setUrl(id), { method: 'DELETE' });
+  return handleResponse(response, 'Pomodoro set could not be deleted.');
+}
+
 // ------------------------------------------------- prompt kütüphanesi (projeden bağımsız)
 
 const promptUrl = (id: string) => `/api/prompts/${encodeURIComponent(id)}`;
@@ -299,15 +330,6 @@ export async function updateProjectAmbient(
 export async function fetchProjectLabels(id: string): Promise<ProjectLabels> {
   const response = await fetch(projectUrl(id, 'labels'));
   return handleResponse<ProjectLabels>(response, 'Labels could not be loaded.');
-}
-
-/**
- * Pomodoro mola görüntüsünü yazar; diğer ayarlar olduğu gibi korunur. Boş metin
- * kaldırır (mola da çalışma görüntüsünü kullanır). Pomodoro kapalıyken çağrılmaz.
- */
-export async function setProjectBreakClip(id: string, breakClip: string): Promise<ProjectPomodoro> {
-  const current = await fetchProjectPomodoro(id);
-  return updateProjectPomodoro(id, pomodoroPayload(current, { breakClip }));
 }
 
 /** Etiketleri yazar (boş liste hepsini kaldırır). Pomodoro ayarına dokunmaz. */

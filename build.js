@@ -41,6 +41,7 @@ import { prepareLabelOverlay } from './steps/04a-label-overlay.js';
 import { writeTracklist } from './steps/05-tracklist.js';
 import { mixPomodoroCues } from './steps/06-pomodoro-cues.js';
 import { buildStreamPackage } from './steps/07-stream-package.js';
+import { distinctVisuals } from './core/session-video.js';
 
 /** Disk tahminine eklenen pay: ses, geçici wav'lar, tahmin hatası. */
 const DISK_MARGIN = { ratio: 1.1, bytes: 200 * 1024 * 1024 };
@@ -237,33 +238,50 @@ export async function runBuild(config, options = {}) {
       logger,
     })).catch((error) => keepCropFrame(error, config.output.dir));
 
-    // --- 1b: Pomodoro mola görüntüsü (opsiyonel). Çalışma görüntüsünün BOYUTUNA ve
-    // kare hızına getirilir: oturumlar kopyayla birleşebilsin. Kırpma değerleri
-    // aynı; çalışma klibi için verilen onay burada yeniden sorulmaz.
-    const breakVideo = config.pomodoro?.breakClip
-      ? await step('01b', 'Mola görüntüsü hazırlığı', (logger) => prepareVideo({
-        clipPath: config.pomodoro.breakClip,
-        source: config.pomodoro.breakSource,
-        outputPath: workspace.path('base.break.mp4'),
-        workspace,
-        cropBottom: config.video.cropBottom,
-        cropTop: config.video.cropTop,
-        cropLeft: config.video.cropLeft,
-        cropRight: config.video.cropRight,
-        cropFromConfig: true,
-        aspect: config.video.aspect,
-        matchTo: {
-          width: video.result.width,
-          height: video.result.height,
-          fps: video.result.fps,
-        },
-        crf: config.video.crf,
-        preset: config.video.preset,
-        crossfadeSeconds: config.video.crossfadeSeconds,
-        loopTest: false,
-        logger,
-      }))
-      : null;
+    // --- 1b: Pomodoro durum görüntüleri (opsiyonel). Her FARKLI görüntü (durumlar +
+    // GET READY; ana görüntüden ayrı olanlar) ana görüntünün BOYUTUNA ve kare hızına
+    // getirilir: oturumlar kopyayla birleşebilsin. Kırpma değerleri aynı; ana klip
+    // için verilen onay burada yeniden sorulmaz. Aynı dosya iki durumda → tek base.
+    const visuals = distinctVisuals(config.pomodoro, config.clip);
+    const sessionBases = {};
+    // Bir durumun görüntüsü ana klibin kendisiyse ana base kullanılır (ayrı base üretilmez).
+    const usesMainClip = config.pomodoro
+      && [config.pomodoro.intro, ...config.pomodoro.statuses].some((item) => item.visual === config.clip);
+    if (usesMainClip) sessionBases[config.clip] = video.output;
+    if (visuals.length > 0) {
+      await step('01b', 'Durum görüntüleri hazırlığı', async (logger) => {
+        const items = [];
+        const warnings = [];
+        for (const [i, visual] of visuals.entries()) {
+          const prepared = await prepareVideo({
+            clipPath: visual.path,
+            source: visual.source,
+            outputPath: workspace.path(`base.${i + 1}.mp4`),
+            workspace,
+            cropBottom: config.video.cropBottom,
+            cropTop: config.video.cropTop,
+            cropLeft: config.video.cropLeft,
+            cropRight: config.video.cropRight,
+            cropFromConfig: true,
+            aspect: config.video.aspect,
+            matchTo: {
+              width: video.result.width,
+              height: video.result.height,
+              fps: video.result.fps,
+            },
+            crf: config.video.crf,
+            preset: config.video.preset,
+            crossfadeSeconds: config.video.crossfadeSeconds,
+            loopTest: false,
+            logger,
+          });
+          sessionBases[visual.path] = prepared.output;
+          items.push({ visual: visual.path, ...prepared });
+          warnings.push(...(prepared.warnings ?? []));
+        }
+        return { items, warnings };
+      });
+    }
 
     let configLine = null;
     if (video.crop.approval.required && !config.video.cropFromConfig) {
@@ -378,9 +396,9 @@ export async function runBuild(config, options = {}) {
       outputPath: finalVideo,
       overlayFilter: labelOverlay.filter,
       fadeAudio: cues === null,
-      // Çalışma ve mola ayrı görüntüyse her oturum kendi görüntüsüyle kurulur.
-      sessionVideo: pomodoro && breakVideo
-        ? { sessions: pomodoro.timeline.sessions, breakVideoPath: breakVideo.output }
+      // Durumlar ayrı görüntü kullanıyorsa her oturum kendi görüntüsüyle kurulur.
+      sessionVideo: pomodoro && Object.keys(sessionBases).length > 0
+        ? { sessions: pomodoro.timeline.sessions, bases: sessionBases }
         : null,
       workspace,
       fadeOut: config.video.fadeOut,
@@ -403,7 +421,7 @@ export async function runBuild(config, options = {}) {
     if (signal?.aborted) throw new BuildCancelledError();
     await rename(finalVideo, config.output.video);
     await rename(tracklist.output, config.output.tracklist);
-    // WORK/BREAK dökümü ayrı dosyada: tracklist YouTube'un biçimi, bu ise
+    // Oturum dökümü (STUDY/BREAK…) ayrı dosyada: tracklist YouTube'un biçimi, bu ise
     // oturum planı. Pomodoro kapalıyken üretilmez.
     if (pomodoro) {
       await writeTextFile(config.output.pomodoroTimeline, describeTimeline(pomodoro.timeline));
@@ -476,8 +494,7 @@ export async function runBuild(config, options = {}) {
       labels: labelOverlay.labelCount,
       pomodoroPlan: pomodoro
         ? {
-          workMinutes: config.pomodoro.workMinutes,
-          breakMinutes: config.pomodoro.breakMinutes,
+          statuses: config.pomodoro.statuses.map(({ name, minutes, beep }) => ({ name, minutes, beep })),
           rounds: config.pomodoro.rounds,
           preset: config.pomodoro.preset,
           totalSeconds: pomodoro.timeline.totalSeconds,

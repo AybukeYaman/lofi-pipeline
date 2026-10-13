@@ -22,6 +22,7 @@ import {
 } from 'react';
 
 import { fetchProjectLabels, updateProjectLabels } from '../api';
+import { INTRO_TAB, statusTabs } from '../pomodoroSetup';
 import {
   aspectRatioOf,
   dragPosition,
@@ -185,8 +186,8 @@ export function LabelEditor({ projectId, onSaved }: LabelEditorProps) {
   const [draft, setDraft] = useState<VideoLabel[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
-  /** Önizlemede hangi anın gösterileceği: Pomodoro yazıları için çalışma ya da mola. */
-  const [phase, setPhase] = useState<'ready' | 'work' | 'break'>('work');
+  /** Önizlemede hangi anın gösterileceği: sekme anahtarı (GET READY ya da bir durum adı); null → ilk durum. */
+  const [phase, setPhase] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -266,8 +267,13 @@ export function LabelEditor({ projectId, onSaved }: LabelEditorProps) {
   const sessions = data?.pomodoro.sessions ?? [];
   const pomodoroOn = data?.pomodoro.enabled === true;
 
-  // Önizleme anı: çalışma → ilk çalışma oturumunun 10. sn'si, mola → ilk molanın 10. sn'si.
-  const sessionOfPhase = sessions.find((session) => session.kind === phase) ?? null;
+  // Önizleme anı: seçilen durumun ilk oturumunun 10. sn'si. Düğmeler durum listesinden gelir
+  // (GET READY + her farklı durum adı), listeyle birlikte kendiliğinden değişir.
+  const phaseTabs = statusTabs(sessions.filter((session) => session.kind === 'status'));
+  const activePhase = phaseTabs.find((tab) => tab.key === phase)?.key ?? phaseTabs[1]?.key ?? INTRO_TAB;
+  const sessionOfPhase = sessions.find((session) => (
+    activePhase === INTRO_TAB ? session.kind === 'ready' : session.name === activePhase
+  )) ?? null;
   const previewTime = sessionOfPhase ? sessionOfPhase.startSeconds + 10 : 0;
 
   // --- sürükleme (taşı / boyutlandır): window dinleyicileri, Shorts ile aynı
@@ -388,8 +394,11 @@ export function LabelEditor({ projectId, onSaved }: LabelEditorProps) {
   if (!data) return <p className="field-hint">Yükleniyor...</p>;
 
   const hasKind = (kind: LabelKind) => draft.some((item) => item.kind === kind);
-  // Pomodoro: mola anında arkada MOLA görüntüsü (yoksa çalışma görüntüsü) görünür.
-  const preview = (phase === 'break' ? data.breakPreview : null) ?? data.preview;
+  // Pomodoro: seçilen durumun kendi görüntüsü (yoksa ana görüntü) görünür.
+  const phasePreview = !sessionOfPhase ? null
+    : sessionOfPhase.kind === 'ready' ? data.introPreview
+      : data.statusPreviews?.[sessionOfPhase.statusIndex];
+  const preview = phasePreview ?? data.preview;
   const orphanSystem = !pomodoroOn ? draft.filter((item) => item.kind !== 'text') : [];
 
   return (
@@ -498,31 +507,18 @@ export function LabelEditor({ projectId, onSaved }: LabelEditorProps) {
         {pomodoroOn ? (
           <div className="label-time" role="group" aria-label="Önizlemede gösterilen an">
             <span>Önizlemede göster:</span>
-            <button
-              type="button"
-              className={phase === 'ready' ? 'button button-compact button-selected' : 'button button-compact'}
-              aria-pressed={phase === 'ready'}
-              onClick={() => setPhase('ready')}
-            >
-              GET READY
-            </button>
-            <button
-              type="button"
-              className={phase === 'work' ? 'button button-compact button-selected' : 'button button-compact'}
-              aria-pressed={phase === 'work'}
-              onClick={() => setPhase('work')}
-            >
-              Çalışma
-            </button>
-            <button
-              type="button"
-              className={phase === 'break' ? 'button button-compact button-selected' : 'button button-compact'}
-              aria-pressed={phase === 'break'}
-              onClick={() => setPhase('break')}
-            >
-              Mola
-            </button>
-            <span className="field-hint">Yalnızca önizleme. Çalışma/mola zamanları Pomodoro ayarından gelir.</span>
+            {phaseTabs.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                className={tab.key === activePhase ? 'button button-compact button-selected' : 'button button-compact'}
+                aria-pressed={tab.key === activePhase}
+                onClick={() => setPhase(tab.key)}
+              >
+                {tab.label}
+              </button>
+            ))}
+            <span className="field-hint">Yalnızca önizleme. Durumların zamanları Pomodoro ayarından gelir.</span>
           </div>
         ) : null}
 

@@ -4,7 +4,8 @@ import { POMODORO_PRESETS } from '../../../core/pomodoro-plan.js';
 import { validateVideoName } from '../../../core/project-name.js';
 import { createProject, fetchProjects, ApiError } from '../api';
 import { PageHeader } from '../components/PageHeader';
-import { PomodoroSetup, type PomodoroChoice } from '../components/PomodoroSetup';
+import { StatusEditor } from '../components/StatusEditor';
+import { statusesPayload, type PomodoroChoice } from '../pomodoroSetup';
 import { showError, showSuccess } from '../toast';
 import type { LoadState, ProjectSummary } from '../types';
 
@@ -14,7 +15,10 @@ type FormErrors = Partial<Record<'name' | 'mode' | 'form', string>>;
 type VideoMode = 'ambiance' | 'pomodoro';
 
 /** Pomodoro seçilince ilk düğmeler: 50/10 ve 2 saat (2 tur), sesler açık. */
-const DEFAULT_POMODORO: PomodoroChoice = { workMinutes: 50, breakMinutes: 10, rounds: 2, sounds: true };
+const DEFAULT_POMODORO: PomodoroChoice = {
+  statuses: POMODORO_PRESETS[0].statuses.map((status: PomodoroChoice['statuses'][number]) => ({ ...status })),
+  rounds: 2,
+};
 
 // Görsel kaynağı (tek resim / döngü videosu) burada sorulmaz: tek yeri
 // workspace'in 2. adımı (VideoStage). Proje varsayılan `clip` ile kurulur;
@@ -61,7 +65,13 @@ export function NewProject({
       if (draft.name) setName(draft.name);
       if (draft.concept) setConcept(draft.concept);
       if (draft.mode === 'ambiance' || draft.mode === 'pomodoro') setMode(draft.mode);
-      if (draft.pomodoro) setPomodoro({ ...DEFAULT_POMODORO, ...draft.pomodoro });
+      // Eski taslaklar (çalışma/mola dakikası) durum listesi taşımaz: onlar atılır, varsayılan kalır.
+      if (draft.pomodoro && Array.isArray(draft.pomodoro.statuses) && draft.pomodoro.statuses.length > 0) {
+        setPomodoro({
+          statuses: draft.pomodoro.statuses,
+          rounds: Number.isInteger(draft.pomodoro.rounds) ? draft.pomodoro.rounds : DEFAULT_POMODORO.rounds,
+        });
+      }
       if (draft.parentId && !presetParentId) {
         setParentId(draft.parentId);
         setIsEditingParent(true);
@@ -153,10 +163,8 @@ export function NewProject({
         ...(mode === 'pomodoro'
           ? {
             pomodoro: {
-              workMinutes: pomodoro.workMinutes,
-              breakMinutes: pomodoro.breakMinutes,
+              statuses: statusesPayload(pomodoro.statuses),
               rounds: pomodoro.rounds,
-              ...(pomodoro.sounds ? {} : { countdownBeep: false }),
             },
           }
           : {}),
@@ -276,14 +284,13 @@ export function NewProject({
           {errors.mode ? <p className="field-error" role="alert">{errors.mode}</p> : null}
           {mode === 'pomodoro' ? (
             <div style={{ marginTop: 8 }}>
-              <PomodoroSetup
-                presets={[...POMODORO_PRESETS]}
+              <StatusEditor
                 value={pomodoro}
                 disabled={isSubmitting}
                 onChange={edit(setPomodoro)}
               />
               <p className="field-hint" style={{ marginTop: 8 }}>
-                Çalışma ve mola için ayrı görüntü sonraki adımda (Video) seçilir. Bunları sonradan da değiştirebilirsin.
+                Her durum için ayrı görüntü sonraki adımda (Video) seçilir. Bunları sonradan da değiştirebilirsin.
               </p>
             </div>
           ) : null}

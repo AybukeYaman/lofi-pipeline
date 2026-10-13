@@ -1,7 +1,7 @@
 /**
  * Pomodoro görüntü planı — hangi oturumda hangi görüntü, kaç kare.
  *
- * Tek sorumluluk: WORK/BREAK oturumlarını KARE cinsinden parçalara bölmek.
+ * Tek sorumluluk: oturumları (GET READY + durumlar) KARE cinsinden parçalara bölmek.
  * Dosya okumaz, ffmpeg çağırmaz; kopyalama/encode `steps/04-assemble.js`'in işi,
  * oturum zamanları `core/pomodoro-plan.js` `buildTimeline`'ın.
  *
@@ -14,11 +14,46 @@
  * yuvarlamak 48 oturumda birkaç karelik kayma biriktirirdi.
  */
 
+/** Görüntüsü verilmemiş oturumların anahtarı: projenin ana görüntüsü (`clip`). */
+export const MAIN_VISUAL_KEY = 'main';
+
+/**
+ * Oturumun görüntü anahtarı: kendi görüntüsü varsa onun yolu, yoksa ana görüntü.
+ * Plan, `build.js` ve montaj aynı anahtarı kullanır — tek yerde.
+ *
+ * @param {{ visual?: string|null }} session
+ */
+export function visualKeyOf(session) {
+  return session.visual ?? MAIN_VISUAL_KEY;
+}
+
+/**
+ * Montajda hazırlanması gereken FARKLI görüntüler (durumlar + GET READY; ana
+ * görüntüden ayrı olanlar). Aynı dosya iki yerde geçse tek kez döner; ana klibin
+ * kendisi (`mainClip`) listeye girmez — onun base'i zaten hazır, `build.js` ona bağlar.
+ * Girdi `core/config.js`in çözdüğü plan: `visual` mutlak yol, `visualSource` 'image' | 'clip'.
+ *
+ * @param {{ statuses: Array<{ visual: string|null, visualSource: string|null }>,
+ *   intro: { visual: string|null, visualSource: string|null } }|null} pomodoro
+ * @param {string|null} [mainClip] ana klibin mutlak yolu
+ * @returns {Array<{ path: string, source: 'image'|'clip' }>}
+ */
+export function distinctVisuals(pomodoro, mainClip = null) {
+  if (!pomodoro) return [];
+  const found = new Map();
+  for (const item of [pomodoro.intro, ...pomodoro.statuses]) {
+    if (item.visual !== null && item.visual !== mainClip && !found.has(item.visual)) {
+      found.set(item.visual, { path: item.visual, source: item.visualSource });
+    }
+  }
+  return [...found.values()];
+}
+
 /**
  * @typedef {object} SessionPart
  * @property {number} index oturum sırası
- * @property {'ready'|'work'|'break'} kind oturum türü
- * @property {'work'|'break'} visual hangi görüntü gösterilir (GET READY çalışma görüntüsünü kullanır)
+ * @property {'ready'|'status'} kind oturum türü
+ * @property {string} visual hangi görüntü gösterilir: oturumun görüntü anahtarı (`visualKey`)
  * @property {number} startFrame
  * @property {number} frames parçanın toplam kare sayısı
  * @property {number} clipFrames bu oturumun görüntüsünün tek tekrar kare sayısı
@@ -29,9 +64,9 @@
 
 /**
  * @param {object} input
- * @param {Array<{ kind: 'ready'|'work'|'break', startSeconds: number, endSeconds: number }>} input.sessions
+ * @param {Array<{ kind: 'ready'|'status', visual?: string|null, startSeconds: number, endSeconds: number }>} input.sessions
  * @param {number} input.fps
- * @param {{ work: number, break: number }} input.clipFrames görüntü başına tek tekrar kare sayısı
+ * @param {Record<string, number>} input.clipFrames görüntü anahtarı → tek tekrar kare sayısı
  * @param {number} input.totalFrames videonun toplam kare sayısı (sesin süresinden)
  * @param {number} [input.fadeFrames] sondaki kararma, kare
  * @returns {{ fps: number, totalFrames: number, fadeFrames: number, parts: SessionPart[] }}
@@ -40,8 +75,8 @@ export function planSessionFrames({ sessions, fps, clipFrames, totalFrames, fade
   if (!Array.isArray(sessions) || sessions.length === 0) {
     throw new Error('Pomodoro görüntü planı için en az bir oturum gerekir.');
   }
-  for (const kind of ['work', 'break']) {
-    if (!(clipFrames[kind] > 0)) throw new Error(`Geçersiz ${kind} görüntüsü: ${clipFrames[kind]} kare.`);
+  for (const [key, frames] of Object.entries(clipFrames)) {
+    if (!(frames > 0)) throw new Error(`Geçersiz görüntü (${key}): ${frames} kare.`);
   }
   if (!(totalFrames > 0)) throw new Error(`Geçersiz toplam süre: ${totalFrames} kare.`);
 
@@ -56,11 +91,12 @@ export function planSessionFrames({ sessions, fps, clipFrames, totalFrames, fade
       : Math.min(totalFrames, Math.round(session.endSeconds * fps));
     const frames = endFrame - startFrame;
     if (frames <= 0) {
-      throw new Error(`${session.kind} oturumu ${index + 1} için kare kalmadı (süre çok kısa ya da ses timeline'dan kısa).`);
+      throw new Error(`${index + 1}. oturum için kare kalmadı (süre çok kısa ya da ses timeline'dan kısa).`);
     }
 
-    const visual = session.kind === 'break' ? 'break' : 'work';
+    const visual = visualKeyOf(session);
     const clip = clipFrames[visual];
+    if (!(clip > 0)) throw new Error(`${index + 1}. oturumun görüntüsü hazırlanmamış: ${visual}`);
     const fade = index === last ? Math.min(fadeFrames, frames) : 0;
     const copies = Math.floor((frames - fade) / clip);
 

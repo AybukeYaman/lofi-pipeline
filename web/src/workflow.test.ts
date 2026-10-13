@@ -91,7 +91,7 @@ describe('stepGuide', () => {
     for (const id of ['project', 'video', 'music', 'build'] as const) {
       expect(stepGuide(id, true)).not.toBe(STEP_GUIDE[id]);
     }
-    expect(stepGuide('video', true).lines.join(' ')).toMatch(/Mola/);
+    expect(stepGuide('video', true).lines.join(' ')).toMatch(/sekmelerden/);
     expect(stepGuide('build', true).who).toBe('system');
   });
 

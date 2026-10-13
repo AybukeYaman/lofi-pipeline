@@ -206,10 +206,23 @@ export function MimiGallery() {
     }
   };
 
-  const imageCount = items.filter((item) => item.kind === 'image').length;
-  const videoCount = items.length - imageCount;
   const pendingCount = items.filter((item) => item.needsVideo).length;
   const isConverting = converting.length > 0;
+
+  const loopSecondsControl = (
+    <label className="mimi-seconds">
+      Loop süresi
+      <select
+        value={loopSeconds}
+        onChange={(event) => setLoopSeconds(Number(event.target.value))}
+        disabled={isConverting}
+      >
+        {LOOP_SECONDS_CHOICES.map((seconds) => (
+          <option key={seconds} value={seconds}>{seconds} sn</option>
+        ))}
+      </select>
+    </label>
+  );
 
   return (
     <section className="page">
@@ -258,15 +271,14 @@ export function MimiGallery() {
         </p>
       ) : null}
 
-      {/* Dönüşüm durumu tek bakışta: kaç resim hâlâ video bekliyor. */}
+      {/* Dönüşüm durumu tek bakışta: kaç resim hâlâ video bekliyor. Loop süresi seçimi
+          bu bölümün parçası (hem "Hepsini çevir" hem kart düğmeleri onu kullanır); bekleyen
+          yokken araç çubuğunda durur — iki yerde birden görünmez. */}
       {pendingCount > 0 ? (
         <p className="notice notice-muted mimi-pending-notice" role="status">
           <strong>Videoya çevrilecek</strong>
-          <span>
-            {pendingCount} resmin loop videosu yok. Kartlardaki şeritte
-            {' '}<span className="mimi-chip is-missing">video yok</span>{' '}
-            olarak görünürler.
-          </span>
+          <span>{pendingCount} resmin loop videosu yok.</span>
+          {loopSecondsControl}
           <button
             className="button button-primary"
             type="button"
@@ -304,22 +316,9 @@ export function MimiGallery() {
             </button>
           ))}
         </div>
-        <label className="mimi-seconds">
-          Loop süresi
-          <select
-            value={loopSeconds}
-            onChange={(event) => setLoopSeconds(Number(event.target.value))}
-            disabled={isConverting}
-          >
-            {LOOP_SECONDS_CHOICES.map((seconds) => (
-              <option key={seconds} value={seconds}>{seconds} sn</option>
-            ))}
-          </select>
-        </label>
-        <span className="muted">
-          {loadState === 'loading'
-            ? 'Galeri yükleniyor...'
-            : `${visible.length} dosya · ${imageCount} resim · ${videoCount} video · ${pendingCount} video bekliyor`}
+        {pendingCount > 0 ? null : loopSecondsControl}
+        <span className="muted mimi-count">
+          {loadState === 'loading' ? 'Galeri yükleniyor...' : `${visible.length} dosya`}
         </span>
       </div>
 
@@ -359,7 +358,6 @@ export function MimiGallery() {
                     <video src={item.previewUrl} preload="metadata" muted playsInline />
                   )}
                   <span className={`mimi-kind kind-${item.role}`}>{ROLE_LABELS[item.role]}</span>
-                  {item.needsVideo ? <span className="mimi-kind mimi-kind-right is-missing">VİDEO YOK</span> : null}
                 </button>
 
                 <div className="mimi-card-body">
@@ -514,7 +512,8 @@ function TransitionStrip({ image, video, converting, seconds, onOpen }: Transiti
           </div>
         )}
       </div>
-      <span className="mimi-transition-status">{status}</span>
+      {/* Video yokken yazı yok: şeritteki boş kutu ve kartın "Videoya Çevir" düğmesi aynı şeyi söylüyor. */}
+      {converting || video ? <span className="mimi-transition-status">{status}</span> : null}
     </div>
   );
 }
