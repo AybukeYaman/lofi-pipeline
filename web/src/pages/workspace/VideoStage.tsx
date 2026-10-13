@@ -259,125 +259,123 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
   return (
     <StagePanel section="video" title="2. Video" status={assets.clip} stageStatus={stageStatus}>
       <div className="stage-media">
-        <AssetPreview
-          kind={isStill ? 'image' : 'video'}
-          fileName={previewName}
-          src={previewUrl}
-          emptyLabel={
-            clipMissing
-              ? `Ayarlı klip bulunamadı: ${project.clip?.value}`
-              : isStill
-                ? 'Henüz görsel yok. resimler\\ klasörüne bir görsel yükleyin veya ekleyin.'
-                : 'Klip seçilmedi. Döngü klibini (.mp4) videolar\\ klasörüne koy.'
-          }
-        />
+        {/* Pomodoro: ana görüntü sorulmaz (sunucu durum görüntülerinden türetir); yalnızca
+            "hangi görüntü ne zaman" sekmeleri. Ambiance: kaynak türü, yükleme ve klip listesi. */}
+        {isPomodoro ? null : (
+          <AssetPreview
+            kind={isStill ? 'image' : 'video'}
+            fileName={previewName}
+            src={previewUrl}
+            emptyLabel={
+              clipMissing
+                ? `Ayarlı klip bulunamadı: ${project.clip?.value}`
+                : isStill
+                  ? 'Henüz görsel yok. resimler\\ klasörüne bir görsel yükleyin veya ekleyin.'
+                  : 'Klip seçilmedi. Döngü klibini (.mp4) videolar\\ klasörüne koy.'
+            }
+          />
+        )}
         <div className="stage-actions">
-          <fieldset className="source-switch">
-            <legend>Görsel kaynağı</legend>
-            <div role="radiogroup" aria-label="Görsel kaynağı" className="source-switch-options">
-              {(['clip', 'image'] as VideoSource[]).map((source) => (
-                <label key={source} className="source-switch-option">
-                  <input
-                    type="radio"
-                    name={`video-source-${project.id}`}
-                    value={source}
-                    checked={(project.videoSource ?? 'clip') === source}
-                    disabled={isSwitchingSource}
-                    onChange={() => void handleSwitchSource(source)}
-                  />
-                  {source === 'clip' ? 'Döngü videosu (.mp4)' : 'Tek resim'}
-                  <span className="count">
-                    ({project.videoSourceCandidates?.[source]?.count ?? 0} aday)
-                  </span>
-                </label>
-              ))}
-            </div>
-            <p className="field-hint">Sonradan değiştirilebilir · kırpma korunur</p>
-          </fieldset>
-          {isStill ? (
-            <>
-              <p className="field-hint">
-                Tek resim modu: seçilen görsel videonun tamamı boyunca ekranda kalır. Klip üretmeye gerek yok.
-              </p>
-              <UploadButton
-                label="Görsel yükle (.png, .jpg, .webp)"
-                accept=".png,.jpg,.jpeg,.webp"
-                primary={!canSave && stageStatus !== 'done'}
-                multiple
-                onFiles={async (files) => {
-                  let latest = project;
-                  for (const file of files) latest = await uploadProjectImage(project.id, file);
-                  onProjectUpdate?.(latest);
-                }}
-              />
-            </>
-          ) : (
-            <UploadButton
-              label="Video klibi yükle (.mp4)"
-              accept=".mp4"
-              primary={!canSave && stageStatus !== 'done'}
-              multiple
-              onFiles={async (files) => {
-                let latest = project;
-                for (const file of files) latest = await uploadProjectClip(project.id, file);
-                onProjectUpdate?.(latest);
-              }}
-            />
-          )}
-          <div className="stage-section-head">
-            <h3>
-              {isPomodoro ? 'Ana görüntü' : isStill ? 'Klasördeki görseller' : 'Klasördeki klipler'} <span className="count">({clips.length})</span>
-            </h3>
-            <div className="tool-box-row">
-              <button type="button" className="button button-compact" onClick={handleOpenFolder}>
-                Klasörü aç
-              </button>
-            </div>
-          </div>
-          {/* Uzun klasör yolu yok: "Klasörü aç" düğmesi aynı yolu açıyor (tam yol "Dosya yolları"nda).
-              Pomodoro'da aynı cümleyi StatusTabs söylüyor. */}
-          {isPomodoro ? null : (
-            <p className="field-hint">
-              {isStill
-                ? <>MASTER ve açı görselleri (<code>Master1.jpg</code> …) <code>{mediaFolder}\</code> klasöründen seçilir.</>
-                : <>Döngü videosu (<code>.mp4</code>) dosyalarını <code>{mediaFolder}\</code> klasörüne koy ya da yukarıdan yükle.</>}
-            </p>
-          )}
           {isPomodoro ? (
-            // Pomodoro: liste yerine ana görüntü + "hangi görüntü ne zaman" sekmeleri (küçük resimli).
-            <StatusTabs
-              project={project}
-              workPath={selected}
-              workCandidates={clips}
-              onPickWork={(path) => { setSelected(path); setError(null); setSuccess(null); }}
-              onProjectUpdate={onProjectUpdate}
-            />
-          ) : clips.length > 0 ? (
-            <div className="option-list" role="radiogroup" aria-label={isStill ? 'Görseller' : 'Video klipleri'}>
-              {clips.map((path) => {
-                const name = fileName(path);
-                const isCurrent = path === currentClip || name === currentClipName;
-                return (
-                  <label key={path} className={selected === path ? 'option selected' : 'option'}>
-                    <input
-                      type="radio"
-                      name={`clip-${project.id}`}
-                      checked={selected === path}
-                      disabled={isSaving}
-                      onChange={() => {
-                        setSelected(path);
-                        setError(null);
-                        setSuccess(null);
-                      }}
-                    />
-                    <span>{name}</span>
-                    {isCurrent ? <StatusBadge status="selected" label="Kullanımda" /> : null}
-                  </label>
-                );
-              })}
-            </div>
+            <StatusTabs project={project} onProjectUpdate={onProjectUpdate} />
           ) : (
-            <EmptyState compact title={isStill ? 'resimler\\ klasöründe henüz MASTER görseli yok.' : 'videolar\\ klasöründe .mp4 klip yok.'} />
+            <>
+              <fieldset className="source-switch">
+                <legend>Görsel kaynağı</legend>
+                <div role="radiogroup" aria-label="Görsel kaynağı" className="source-switch-options">
+                  {(['clip', 'image'] as VideoSource[]).map((source) => (
+                    <label key={source} className="source-switch-option">
+                      <input
+                        type="radio"
+                        name={`video-source-${project.id}`}
+                        value={source}
+                        checked={(project.videoSource ?? 'clip') === source}
+                        disabled={isSwitchingSource}
+                        onChange={() => void handleSwitchSource(source)}
+                      />
+                      {source === 'clip' ? 'Döngü videosu (.mp4)' : 'Tek resim'}
+                      <span className="count">
+                        ({project.videoSourceCandidates?.[source]?.count ?? 0} aday)
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <p className="field-hint">Sonradan değiştirilebilir · kırpma korunur</p>
+              </fieldset>
+              {isStill ? (
+                <>
+                  <p className="field-hint">
+                    Tek resim modu: seçilen görsel videonun tamamı boyunca ekranda kalır. Klip üretmeye gerek yok.
+                  </p>
+                  <UploadButton
+                    label="Görsel yükle (.png, .jpg, .webp)"
+                    accept=".png,.jpg,.jpeg,.webp"
+                    primary={!canSave && stageStatus !== 'done'}
+                    multiple
+                    onFiles={async (files) => {
+                      let latest = project;
+                      for (const file of files) latest = await uploadProjectImage(project.id, file);
+                      onProjectUpdate?.(latest);
+                    }}
+                  />
+                </>
+              ) : (
+                <UploadButton
+                  label="Video klibi yükle (.mp4)"
+                  accept=".mp4"
+                  primary={!canSave && stageStatus !== 'done'}
+                  multiple
+                  onFiles={async (files) => {
+                    let latest = project;
+                    for (const file of files) latest = await uploadProjectClip(project.id, file);
+                    onProjectUpdate?.(latest);
+                  }}
+                />
+              )}
+              <div className="stage-section-head">
+                <h3>
+                  {isStill ? 'Klasördeki görseller' : 'Klasördeki klipler'} <span className="count">({clips.length})</span>
+                </h3>
+                <div className="tool-box-row">
+                  <button type="button" className="button button-compact" onClick={handleOpenFolder}>
+                    Klasörü aç
+                  </button>
+                </div>
+              </div>
+              {/* Uzun klasör yolu yok: "Klasörü aç" düğmesi aynı yolu açıyor (tam yol "Dosya yolları"nda). */}
+              <p className="field-hint">
+                {isStill
+                  ? <>MASTER ve açı görselleri (<code>Master1.jpg</code> …) <code>{mediaFolder}\</code> klasöründen seçilir.</>
+                  : <>Döngü videosu (<code>.mp4</code>) dosyalarını <code>{mediaFolder}\</code> klasörüne koy ya da yukarıdan yükle.</>}
+              </p>
+              {clips.length > 0 ? (
+                <div className="option-list" role="radiogroup" aria-label={isStill ? 'Görseller' : 'Video klipleri'}>
+                  {clips.map((path) => {
+                    const name = fileName(path);
+                    const isCurrent = path === currentClip || name === currentClipName;
+                    return (
+                      <label key={path} className={selected === path ? 'option selected' : 'option'}>
+                        <input
+                          type="radio"
+                          name={`clip-${project.id}`}
+                          checked={selected === path}
+                          disabled={isSaving}
+                          onChange={() => {
+                            setSelected(path);
+                            setError(null);
+                            setSuccess(null);
+                          }}
+                        />
+                        <span>{name}</span>
+                        {isCurrent ? <StatusBadge status="selected" label="Kullanımda" /> : null}
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : (
+                <EmptyState compact title={isStill ? 'resimler\\ klasöründe henüz MASTER görseli yok.' : 'videolar\\ klasöründe .mp4 klip yok.'} />
+              )}
+            </>
           )}
 
           {/* Kırpma ve format ayarlarının çoğu projede varsayılanla çalışır:

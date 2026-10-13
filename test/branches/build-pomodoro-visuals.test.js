@@ -21,6 +21,7 @@ import { loadProject } from '../../core/config.js';
 import { ffmpeg } from '../../core/ffmpeg.js';
 import { probe } from '../../core/probe.js';
 import { createWorkspace } from '../../core/workspace.js';
+import { setProjectPomodoro } from '../../prep/project-file.js';
 import { prepareVideo } from '../../steps/01-video-prep.js';
 import { assembleVideo } from '../../steps/04-assemble.js';
 import { DEFAULT_LABEL_FONT_FILE } from '../../steps/04a-label-overlay.js';
@@ -274,6 +275,39 @@ describe('build — Pomodoro: her durum için ayrı görüntü', () => {
       assert.equal(report.details['04'].sessions.length, 3);
       for (const [at, check, name] of [
         [60, isRed, 'GET READY (ana görüntü)'], [150, isBlue, 'BREAK'], [210, isRed, 'STUDY (ana klibin kendisi)'],
+      ]) assert.ok(check(colorAt(config.output.video, at)), name);
+    });
+  });
+
+  describe('ana görüntü elle seçilmemişse', () => {
+    test('durum görüntülerinden türetilir ve montaj o görüntüyle çalışır', async () => {
+      await mkdir(dir.path('audio3'));
+      await makeTone(dir.path('audio3/01-a.m4a'), { seconds: 240, frequency: 220 });
+      const json = projectJson('./out-auto-main');
+      json.clip = '';
+      json.audioDir = './audio3';
+      json.order = ['01-a.m4a'];
+      delete json.pomodoro;
+      await writeFile(dir.path('auto-main.json'), JSON.stringify(json));
+
+      // Arayüzün yaptığı gibi: yalnızca durum görüntüleri kaydedilir, ana görüntü sorulmaz.
+      await setProjectPomodoro(dir.path('auto-main.json'), {
+        enabled: true,
+        rounds: 1,
+        statuses: [
+          { name: 'BREAK', minutes: 1, visual: './break.png' },
+          { name: 'STUDY', minutes: 1, visual: './stretch.png' },
+        ],
+        countdownBeep: false,
+      });
+      const config = await loadProject(dir.path('auto-main.json'));
+      assert.match(config.clip, /stretch\.png$/, 'ana görüntü = ilk çalışmanın görüntüsü');
+      assert.equal(config.video.source, 'image');
+
+      await runBuild(config, { render: true });
+      // GET READY (boş → ana görüntü: yeşil), BREAK mavi, STUDY yeşil.
+      for (const [at, check, name] of [
+        [60, isGreen, 'GET READY (türetilen ana görüntü)'], [150, isBlue, 'BREAK'], [210, isGreen, 'STUDY'],
       ]) assert.ok(check(colorAt(config.output.video, at)), name);
     });
   });

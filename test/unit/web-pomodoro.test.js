@@ -18,6 +18,7 @@ import {
   ApiError, getAsset, getLabels, getPomodoro, getProject, startBuild, updatePomodoro,
 } from '../../server/project-api.js';
 import { createWebServer } from '../../server/web-server.js';
+import { setProjectClip } from '../../prep/project-file.js';
 
 let base;
 let videosDir;
@@ -449,6 +450,73 @@ describe('PUT /api/projects/:id/pomodoro — özel durumlar (statuses)', () => {
         (error) => error instanceof ApiError && error.status === 400,
       );
     }
+  });
+});
+
+describe('Pomodoro: ana görüntü durum görüntülerinden türer', () => {
+  async function projectNoClip(name, extra = {}) {
+    const dir = await writeProject(name, { project: { clip: '', ...extra }, audio: tracksFor(600) });
+    await mkdir(join(dir, 'resimler'), { recursive: true });
+    await mkdir(join(dir, 'videolar'), { recursive: true });
+    for (const file of ['resimler/calisma.png', 'resimler/mola.png', 'resimler/hazir.png', 'videolar/calisma.mp4', 'videolar/elle.mp4']) {
+      await writeFile(join(dir, file), 'x');
+    }
+    return dir;
+  }
+  const put = (id, statuses, extra = {}) => updatePomodoro(id, { enabled: true, rounds: 1, statuses, ...extra }, options());
+
+  test('ana görüntü boşsa ilk çalışma adımının görüntüsü olur; tür uzantıdan', async () => {
+    await projectNoClip('main-auto');
+    await put('main-auto', [
+      { name: 'BREAK', minutes: 5, visual: 'resimler/mola.png' },
+      { name: 'STUDY', minutes: 25, visual: 'resimler/calisma.png' },
+    ]);
+    let json = await readProjectJson('main-auto');
+    assert.equal(json.clip, './resimler/calisma.png');
+    assert.equal(json.video.source, 'image');
+    assert.equal(json.video.clipFromPomodoro, true);
+    assert.equal(json.video.cropBottom, 150, 'kırpma korunur');
+
+    // STUDY görüntüsü videoya dönünce ana görüntü de değişir (otomatik yazıldığı için).
+    await put('main-auto', [
+      { name: 'BREAK', minutes: 5, visual: 'resimler/mola.png' },
+      { name: 'STUDY', minutes: 25, visual: 'videolar/calisma.mp4' },
+    ]);
+    json = await readProjectJson('main-auto');
+    assert.equal(json.clip, './videolar/calisma.mp4');
+    assert.equal(json.video.source, 'clip');
+  });
+
+  test('öncelik: çalışmanın görüntüsü yoksa ilk görüntülü adım, o da yoksa GET READY; hiç yoksa boş', async () => {
+    await projectNoClip('main-order');
+    await put('main-order', [{ name: 'STUDY', minutes: 25 }, { name: 'BREAK', minutes: 5, visual: 'resimler/mola.png' }]);
+    assert.equal((await readProjectJson('main-order')).clip, './resimler/mola.png');
+
+    await put('main-order', [{ name: 'STUDY', minutes: 25 }], { intro: { visual: 'resimler/hazir.png' } });
+    assert.equal((await readProjectJson('main-order')).clip, './resimler/hazir.png');
+
+    await put('main-order', [{ name: 'STUDY', minutes: 25 }]);
+    assert.equal((await readProjectJson('main-order')).clip, '');
+  });
+
+  test('elle seçilmiş ana görüntü korunur', async () => {
+    await projectNoClip('main-manual', { clip: './videolar/elle.mp4' });
+    await put('main-manual', [{ name: 'STUDY', minutes: 25, visual: 'resimler/calisma.png' }]);
+    const json = await readProjectJson('main-manual');
+    assert.equal(json.clip, './videolar/elle.mp4');
+    assert.equal(json.video.clipFromPomodoro, undefined);
+  });
+
+  test('başka bir dosya elle seçilince otomatik işaret kalkar; aynı dosya yeniden kaydedilince kalır', async () => {
+    const dir = await projectNoClip('main-switch');
+    await put('main-switch', [{ name: 'STUDY', minutes: 25, visual: 'videolar/calisma.mp4' }]);
+    const projectPath = join(dir, 'project.json');
+    await setProjectClip(projectPath, './videolar/calisma.mp4');
+    assert.equal((await readProjectJson('main-switch')).video.clipFromPomodoro, true);
+    await setProjectClip(projectPath, './videolar/elle.mp4');
+    const json = await readProjectJson('main-switch');
+    assert.equal(json.clip, './videolar/elle.mp4');
+    assert.equal(json.video.clipFromPomodoro, undefined);
   });
 });
 

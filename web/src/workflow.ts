@@ -99,8 +99,8 @@ const POMODORO_STEP_GUIDE: Partial<Record<ViewStepId, { who: 'user' | 'system'; 
   video: {
     who: 'user',
     lines: [
-      'Önce ana görüntüyü seç (resim ya da döngü videosu).',
-      'Sonra sekmelerden (GET READY, STUDY, BREAK…) istediğin durum için ayrı bir görüntü seç; seçmezsen o durum ana görüntüyü kullanır.',
+      'Sekmelerden (GET READY, STUDY, BREAK…) her durum için bir resim ya da döngü videosu seç.',
+      'Boş bıraktığın durum ilk çalışma adımının görüntüsünü kullanır.',
     ],
   },
   music: {

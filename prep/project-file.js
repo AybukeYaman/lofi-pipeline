@@ -16,7 +16,7 @@ import { isImagePath } from '../core/files.js';
 import {
   SYSTEM_LABEL_KINDS, createLabel, normalizeLabelPlan, serializeLabelPlan,
 } from '../core/label-plan.js';
-import { normalizePomodoroSelection, serializePomodoroPlan } from '../core/pomodoro-plan.js';
+import { flattenSets, normalizePomodoroSelection, serializePomodoroPlan } from '../core/pomodoro-plan.js';
 import { readJsonFile, writeTextFile } from '../core/workspace.js';
 
 /** Watermark kırpması — Hailuo'da ölçülen değer (HANDOFF bölüm 4). */
@@ -86,7 +86,14 @@ export async function setProjectClip(projectPath, clipPath) {
   if (!info?.isFile()) throw new ProjectFileError(`klip dosyası bulunamadı: ${target}`);
 
   const json = await readProjectObject(projectPath);
-  json.clip = `./${rel.split(sep).join('/')}`;
+  const next = `./${rel.split(sep).join('/')}`;
+  // Başka bir dosya elle seçildi: artık Pomodoro görüntülerinden türetilmez.
+  // Aynı dosya yeniden kaydediliyorsa (ör. yalnızca kırpma değişti) işaret kalır.
+  if (next !== json.clip && json.video?.clipFromPomodoro === true) {
+    const { clipFromPomodoro: _auto, ...video } = videoBlock(json);
+    json.video = video;
+  }
+  json.clip = next;
 
   const source = videoSourceForClip(target);
   if (source !== currentVideoSource(json)) {
@@ -289,6 +296,8 @@ export async function setProjectPomodoro(projectPath, settings) {
   if (written === undefined) delete json.pomodoro;
   else json.pomodoro = written;
 
+  if (plan !== null) applyPomodoroMainVisual(json, pomodoroMainVisual(plan));
+
   const warnings = [];
   if (turnedOn && addPomodoroLabels(json)) {
     warnings.push('Ekrana çalışma/mola yazısı ve kalan süre sayacı eklendi — yerini 4. adımdan değiştirebilirsin.');
@@ -301,6 +310,44 @@ export async function setProjectPomodoro(projectPath, settings) {
   }
 
   return { pomodoro: written ?? null, plan, warnings };
+}
+
+/**
+ * Pomodoro'da ana görüntü (`clip`) arayüzde sorulmaz; durumların görüntüsünden türer.
+ * Sistem onu yine kullanır: boş bırakılan durumlar, videonun boyutu/kare hızı, canlı
+ * yayın paketi ve küçük resim. Öncelik: ilk ÇALIŞMA adımının görüntüsü → görüntüsü olan
+ * ilk adım → GET READY görüntüsü → yok (null).
+ *
+ * @param {{ sets: Array<{ repeat: number, steps: Array<{ kind: string, visual: string|null }> }>, intro: { visual: string|null } }} plan
+ * @returns {string|null} proje klasörüne göreli yol
+ */
+export function pomodoroMainVisual(plan) {
+  const steps = flattenSets(plan.sets);
+  return steps.find((step) => step.kind === 'work' && step.visual !== null)?.visual
+    ?? steps.find((step) => step.visual !== null)?.visual
+    ?? plan.intro.visual
+    ?? null;
+}
+
+/**
+ * Ana görüntüyü durum görüntülerinden yazar — YALNIZCA `clip` boşsa ya da daha önce yine
+ * bu kuralla yazılmışsa (`video.clipFromPomodoro`). Elle seçilmiş ana görüntü korunur.
+ * Görsel kaynağı türü uzantıdan türer (setProjectClip ile aynı kural).
+ *
+ * @param {object} json project.json nesnesi (yerinde değişir)
+ * @param {string|null} visual
+ */
+function applyPomodoroMainVisual(json, visual) {
+  const clipEmpty = typeof json.clip !== 'string' || json.clip.trim() === '';
+  const auto = json.video?.clipFromPomodoro === true;
+  if (!clipEmpty && !auto) return;
+  if (visual === null) {
+    // Bütün görüntüler kaldırıldı: otomatik yazılmış ana görüntü de gider.
+    if (auto) json.clip = '';
+    return;
+  }
+  json.clip = visual;
+  json.video = { ...videoBlock(json), source: videoSourceForClip(visual), clipFromPomodoro: true };
 }
 
 /**
