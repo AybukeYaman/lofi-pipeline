@@ -388,8 +388,8 @@ export function LabelEditor({ projectId, onSaved }: LabelEditorProps) {
   if (!data) return <p className="field-hint">Yükleniyor...</p>;
 
   const hasKind = (kind: LabelKind) => draft.some((item) => item.kind === kind);
-  const preview = data.preview;
-  const hasPomodoroLabel = draft.some((item) => item.kind !== 'text');
+  // Pomodoro: mola anında arkada MOLA görüntüsü (yoksa çalışma görüntüsü) görünür.
+  const preview = (phase === 'break' ? data.breakPreview : null) ?? data.preview;
   const orphanSystem = !pomodoroOn ? draft.filter((item) => item.kind !== 'text') : [];
 
   return (
@@ -440,9 +440,9 @@ export function LabelEditor({ projectId, onSaved }: LabelEditorProps) {
           onDoubleClick={addAtPointer}
           aria-label="Video önizlemesi"
         >
-          {preview?.kind === 'image' ? <img src={preview.url} alt="" draggable={false} /> : null}
+          {preview?.kind === 'image' ? <img key={preview.url} src={preview.url} alt="" draggable={false} /> : null}
           {preview?.kind === 'video' ? (
-            <video src={`${preview.url}#t=10`} muted playsInline preload="metadata" />
+            <video key={preview.url} src={`${preview.url}#t=10`} muted playsInline preload="metadata" />
           ) : null}
           {!preview ? <span className="label-frame-empty">Önce bir klip ya da görsel seç</span> : null}
 
@@ -495,7 +495,7 @@ export function LabelEditor({ projectId, onSaved }: LabelEditorProps) {
           </p>
         ) : null}
 
-        {pomodoroOn && hasPomodoroLabel ? (
+        {pomodoroOn ? (
           <div className="label-time" role="group" aria-label="Önizlemede gösterilen an">
             <span>Önizlemede göster:</span>
             <button
@@ -504,7 +504,7 @@ export function LabelEditor({ projectId, onSaved }: LabelEditorProps) {
               aria-pressed={phase === 'ready'}
               onClick={() => setPhase('ready')}
             >
-              Hazırlık anı
+              GET READY
             </button>
             <button
               type="button"
@@ -512,7 +512,7 @@ export function LabelEditor({ projectId, onSaved }: LabelEditorProps) {
               aria-pressed={phase === 'work'}
               onClick={() => setPhase('work')}
             >
-              Çalışma anı
+              Çalışma
             </button>
             <button
               type="button"
@@ -520,7 +520,7 @@ export function LabelEditor({ projectId, onSaved }: LabelEditorProps) {
               aria-pressed={phase === 'break'}
               onClick={() => setPhase('break')}
             >
-              Mola anı
+              Mola
             </button>
             <span className="field-hint">Yalnızca önizleme. Çalışma/mola zamanları Pomodoro ayarından gelir.</span>
           </div>

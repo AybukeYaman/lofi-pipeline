@@ -12,7 +12,7 @@ import {
   ApiError,
 } from '../../api';
 import { AssetPreview } from '../../components/AssetPreview';
-import { BreakVisualPicker } from '../../components/BreakVisualPicker';
+import { PomodoroVisuals } from '../../components/PomodoroVisuals';
 import { EmptyState } from '../../components/Feedback';
 import { StatusBadge } from '../../components/StatusBadge';
 import type { ProjectDetail, VideoSource } from '../../types';
@@ -23,6 +23,8 @@ import { StagePanel, type StageProps } from './StagePanel';
 export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: StageProps) {
   // Tek resim modu: clips = resimler\ altındaki bütün görseller (sunucu ada göre sıralar).
   const isStill = project.videoSource === 'image';
+  // Pomodoro açıksa görüntüler "hangi an için" kartlarıyla seçilir (PomodoroVisuals).
+  const isPomodoro = project.readiness?.pomodoro?.enabled === true;
   const clips = project.clips ?? [];
   const currentClip = project.clip?.exists ? project.clip.path : null;
   // Tek klip varsa ve seçim yoksa onu öner; birden fazlaysa kullanıcı seçer.
@@ -356,7 +358,16 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
               {project.dir || project.name}\{mediaFolder}\
             </code>.
           </p>
-          {clips.length > 0 ? (
+          {isPomodoro ? (
+            // Pomodoro: liste yerine "hangi görüntü ne zaman" kartları (çalışma + mola, küçük resimli).
+            <PomodoroVisuals
+              project={project}
+              workPath={selected}
+              workCandidates={clips}
+              onPickWork={(path) => { setSelected(path); setError(null); setSuccess(null); }}
+              onProjectUpdate={onProjectUpdate}
+            />
+          ) : clips.length > 0 ? (
             <div className="option-list" role="radiogroup" aria-label={isStill ? 'Görseller' : 'Video klipleri'}>
               {clips.map((path) => {
                 const name = fileName(path);
@@ -383,11 +394,6 @@ export function VideoStage({ project, assets, stageStatus, onProjectUpdate }: St
           ) : (
             <EmptyState compact title={isStill ? 'resimler\\ klasöründe henüz MASTER görseli yok.' : 'videolar\\ klasöründe .mp4 klip yok.'} />
           )}
-
-          {/* Pomodoro'da mola için ikinci görüntü; Ambiance projelerinde hiç görünmez. */}
-          {project.readiness?.pomodoro?.enabled ? (
-            <BreakVisualPicker project={project} onProjectUpdate={onProjectUpdate} />
-          ) : null}
 
           {/* Kırpma ve format ayarlarının çoğu projede varsayılanla çalışır:
               varsayılan dışı bir değer varsa açık, yoksa katlı başlar. */}

@@ -88,26 +88,6 @@ export function pomodoroPayload(
     rounds: current?.rounds ?? data.defaults.rounds,
     countdownBeep: current?.countdownBeep ?? data.defaults.countdownBeep,
     ...(current?.breakClip ? { breakClip: current.breakClip } : {}),
-    // Düzen değişince eski kırpma onayı taşınmaz: yeni timeline'da ne kadar
-    // fazla olduğu farklı, kullanıcı yeniden görüp onaylasın.
-    trimExcess: changes.trimExcess ?? (changes.rounds === undefined && changes.workMinutes === undefined
-      ? current?.trimExcess ?? false
-      : false),
     ...changes,
   };
-}
-
-/**
- * Müziğe sığan en çok tur: GET READY düşüldükten sonra tam turlar. En az 1.
- * "Süreyi müziğe uydur" düğmesi bunu kullanır; geriye kalan küçük fazlalık
- * kırpma onayıyla (`trimExcess`) kesilir, eksik bırakılmaz.
- */
-export function roundsFittingMusic(
-  musicSeconds: number,
-  workMinutes: number,
-  breakMinutes: number,
-): number {
-  const cycleSeconds = cycleMinutes(workMinutes, breakMinutes) * 60;
-  const available = musicSeconds - INTRO_MINUTES * 60;
-  return Math.min(24, Math.max(1, Math.floor(available / cycleSeconds)));
 }

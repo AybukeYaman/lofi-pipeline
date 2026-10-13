@@ -9,15 +9,16 @@
  *      (core/pomodoro-plan.js) — burada iki ayrı kural olup birbirinden
  *      sapmasın diye hiçbir süre hesabı tekrarlanmıyor.
  *
- * Fazla müzik kullanıcı onayıyla kırpılır ("Fazlayı kırp" düğmesi
- * `trimExcess` ayarını yazar). Eksik müzikte yapılacak bir şey yok: parça
- * eklenmesi gerekiyor, montaj başlatılmaz.
+ * Fazla müzik UYARIYLA kendiliğinden kırpılır (soru yok, düğme yok); hiç
+ * kullanılmayan parçalar montaj bitince Geri Dönüşüm Kutusu'na taşınır. Eksik
+ * müzik de engel değil: ses sessizlikle timeline süresine tamamlanır, kalanı arka
+ * plan sesi (Ambiance) doldurur. Yalnızca ölçülemeyen parça montajı durdurur.
  */
 
 import { useEffect, useRef, useState } from 'react';
 
 import { fetchProjectPomodoro, updateProjectPomodoro } from '../api';
-import { pomodoroPayload, pomodoroSummary, roundsFittingMusic, totalMinutes } from '../pomodoroSetup';
+import { pomodoroPayload, pomodoroSummary } from '../pomodoroSetup';
 import { PickerPanel } from './PickerPanel';
 import { PomodoroSetup, type PomodoroChoice } from './PomodoroSetup';
 import type { ProjectPomodoro, UpdatePomodoroPayload } from '../types';
@@ -44,6 +45,22 @@ function choiceOf(data: ProjectPomodoro): PomodoroChoice {
     rounds: current.rounds,
     sounds: current.countdownBeep,
   };
+}
+
+/**
+ * Müzik/süre durumunun kısa metni ve rengi. Uyuyor ✓; fazla ⚠ (montajda kendiliğinden kırpılır);
+ * kısa ⚠ (kalan süreyi arka plan sesi doldurur) — ikisi de engel değil, yalnızca ölçülemeyen parça engeller.
+ */
+function statusText(status: string | undefined, ok: boolean | undefined): string {
+  if (!ok) return '⚠ Müzik uymuyor';
+  if (status === 'excess') return '⚠ Fazla müzik: montajda otomatik kırpılacak';
+  if (status === 'short') return '⚠ Müzik kısa: kalanı arka plan sesiyle devam eder';
+  return '✓ Müzik süreye uyuyor';
+}
+
+function statusColor(status: string | undefined, ok: boolean | undefined): string {
+  if (!ok) return 'var(--danger, #c0392b)';
+  return status === 'excess' || status === 'short' ? 'var(--warning, #b7791f)' : 'var(--text-muted)';
 }
 
 export function PomodoroPicker({
@@ -123,8 +140,8 @@ export function PomodoroPicker({
       actions={
         /* Doğrulama durumu kutuyu açmadan da görünsün. */
         data?.enabled ? (
-          <span style={{ fontSize: 12, color: validation?.ok ? 'var(--text-muted)' : 'var(--danger, #c0392b)' }}>
-            {validation?.ok ? '✓ Müzik timeline\'a uyuyor' : '⚠ Müzik uymuyor'}
+          <span style={{ fontSize: 12, color: statusColor(comparison?.status, validation?.ok) }}>
+            {statusText(comparison?.status, validation?.ok)}
           </span>
         ) : null
       }
@@ -205,60 +222,9 @@ export function PomodoroPicker({
                     ))}
                     {validation?.warnings.map((warning) => (
                       <p className="field-hint" key={warning} style={{ marginTop: 4 }}>
-                        ℹ {warning}
+                        {comparison?.status === 'excess' || comparison?.status === 'short' ? '⚠' : 'ℹ'} {warning}
                       </p>
                     ))}
-
-                    {/* Müzik süreye uymuyorsa: süreyi müziğe sığan tur sayısına çek (kalan küçük fazla kırpılır). */}
-                    {comparison && comparison.status !== 'exact'
-                      && comparison.musicSeconds >= totalMinutes(settings.workMinutes, settings.breakMinutes, 1) * 60
-                      && roundsFittingMusic(comparison.musicSeconds, settings.workMinutes, settings.breakMinutes) !== settings.rounds ? (
-                        <button
-                          type="button"
-                          className="button"
-                          style={{ fontSize: 12.5, minHeight: 30, padding: '2px 12px', marginTop: 8 }}
-                          onClick={() => void save({
-                            rounds: roundsFittingMusic(comparison.musicSeconds, settings.workMinutes, settings.breakMinutes),
-                          })}
-                          disabled={saving}
-                        >
-                          Süreyi müziğe uydur ({pomodoroSummary(
-                            settings.workMinutes,
-                            settings.breakMinutes,
-                            roundsFittingMusic(comparison.musicSeconds, settings.workMinutes, settings.breakMinutes),
-                          )})
-                        </button>
-                      ) : null}
-
-                    {validation?.needsTrimConfirmation && validation.trim ? (
-                      <div style={{ marginTop: 8 }}>
-                        <p className="field-hint">
-                          {validation.trim.trimmedCount} parça kısaltılır,{' '}
-                          {validation.trim.droppedCount} parça kullanılmaz · dosyalara dokunulmaz
-                        </p>
-                        <button
-                          type="button"
-                          className="button button-primary"
-                          style={{ fontSize: 12.5, minHeight: 30, padding: '2px 12px' }}
-                          onClick={() => void save({ trimExcess: true })}
-                          disabled={saving}
-                        >
-                          ✂ Fazlayı kırp ve devam et
-                        </button>
-                      </div>
-                    ) : null}
-
-                    {settings.trimExcess && comparison?.status === 'excess' ? (
-                      <button
-                        type="button"
-                        className="button"
-                        style={{ fontSize: 12, minHeight: 26, padding: '2px 10px', marginTop: 6 }}
-                        onClick={() => void save({ trimExcess: false })}
-                        disabled={saving}
-                      >
-                        Kırpma onayını geri al
-                      </button>
-                    ) : null}
                   </div>
 
                   {validation?.timeline ? (

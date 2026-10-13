@@ -106,7 +106,7 @@ const POMODORO_STEP_GUIDE: Partial<Record<ViewStepId, { who: 'user' | 'system'; 
   music: {
     who: 'user',
     lines: [
-      'Müzik parçalarını yükle: toplam süre Pomodoro süresine eşit olmalı. Fazlaysa tek tuşla kırpılır, eksikse parça eklemen gerekir.',
+      'Müzik parçalarını yükle: toplam süre Pomodoro süresine eşit olmalı. Fazlaysa montajda otomatik kırpılır (hiç kullanılmayan parçalar Geri Dönüşüm Kutusuna taşınır), eksikse kalan süreyi arka plan sesi (Ambiance) doldurur.',
       'Sonra sırayı seç.',
     ],
   },

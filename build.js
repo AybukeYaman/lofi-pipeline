@@ -36,6 +36,7 @@ import { concatAudio } from './steps/02-audio-concat.js';
 import { mixAmbient } from './steps/03-ambient-mix.js';
 import { assembleVideo } from './steps/04-assemble.js';
 import { hasAudioZips } from './prep/audio-zip.js';
+import { discardUnusedMusic } from './prep/unused-music.js';
 import { prepareLabelOverlay } from './steps/04a-label-overlay.js';
 import { writeTracklist } from './steps/05-tracklist.js';
 import { mixPomodoroCues } from './steps/06-pomodoro-cues.js';
@@ -76,6 +77,8 @@ export class BuildCancelledError extends Error {
  *   kaplıyor; VOD gerektiğinde açıkça istenir.
  * @param {boolean} [options.keep] workspace silinmez
  * @param {AbortSignal} [options.signal] adımlar arasında denetlenir
+ * @param {(path: string) => Promise<void>} [options.trashFile] hiç kullanılmayan müzik parçalarını
+ *   Geri Dönüşüm Kutusu'na taşıyan işlev (varsayılan: core/trash.js); testte sahte.
  * @param {(dir: string) => Promise<number>} [options.diskFree] klasörün bulunduğu
  *   sürücüdeki boş bayt. Varsayılan fs.statfs; testte dar disk taklidi için.
  * @returns {Promise<object>} rapor
@@ -90,6 +93,7 @@ export async function runBuild(config, options = {}) {
     keep = false,
     signal,
     diskFree = freeBytesOf,
+    trashFile,
   } = options;
 
   const log = loggerFor('build');
@@ -405,6 +409,25 @@ export async function runBuild(config, options = {}) {
       await writeTextFile(config.output.pomodoroTimeline, describeTimeline(pomodoro.timeline));
     }
 
+    // Fazla müzik montajda kırpıldı: hiç kullanılmayan parçalar klasörde kalmasın.
+    // Yalnızca montaj bitip teslim edildikten SONRA — yarıda kalan montaj müzik kaybettirmez.
+    let unusedMusic = null;
+    if (pomodoro?.trim && pomodoro.trim.droppedCount > 0) {
+      unusedMusic = await discardUnusedMusic({
+        trim: pomodoro.trim,
+        projectPath: config.projectPath,
+        ...(trashFile ? { trashFile } : {}),
+      });
+      if (unusedMusic.moved.length > 0) {
+        log.info(`Kullanılmayan ${unusedMusic.moved.length} müzik Geri Dönüşüm Kutusu'na taşındı: ${unusedMusic.moved.join(', ')}`);
+      }
+      for (const { file, error } of unusedMusic.failed) {
+        const message = `Kullanılmayan müzik taşınamadı (${file}): ${error}`;
+        warnings.push({ step: 'cleanup', message });
+        log.warn(message);
+      }
+    }
+
     const report = {
       project: config.projectPath,
       finishedAt: new Date().toISOString(),
@@ -448,6 +471,7 @@ export async function runBuild(config, options = {}) {
       // Düz metin alanı Ambiance ile aynı gerekçeyle: okuyan taraf tek bakışta
       // açık mı kapalı mı görsün, ayrıntı ayrı alanda.
       pomodoro: pomodoro ? 'applied' : 'off',
+      unusedMusic,
       // Videoya yakılan etiket sayısı (0 = etiket yok, montaj eski hızlı yoldan geçti).
       labels: labelOverlay.labelCount,
       pomodoroPlan: pomodoro
@@ -744,10 +768,7 @@ export async function main(argv) {
     // Çıkış kodu 2 → server/build-jobs.js bunu "config-invalid" olarak etiketler.
     if (error instanceof PomodoroValidationError) {
       console.error(
-        `\nPomodoro doğrulaması başarısız — montaj başlatılmadı.\n\n${error.message}` +
-        (error.validation.needsTrimConfirmation
-          ? '\n\nFazlayı kırpmak için project.json\'a: "pomodoro": { ..., "trimExcess": true }'
-          : ''),
+        `\nPomodoro doğrulaması başarısız — montaj başlatılmadı.\n\n${error.message}`,
       );
       return 2;
     }

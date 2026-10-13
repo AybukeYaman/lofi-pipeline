@@ -75,9 +75,7 @@ describe('build — Pomodoro: kırpma, oturumlar ve işaret sesleri', () => {
         workMinutes: 1,
         breakMinutes: 1,
         rounds: 2,
-        // Kırpma onaylı: fazla 40 sn sorulmadan kesilsin (onay akışı
-        // test/unit/web-pomodoro.test.js'te ayrıca doğrulanıyor).
-        trimExcess: true,
+        // Fazla 40 sn soru sorulmadan, otomatik kesilir.
         // İşaretleri müziğin üstünde net duyulur yap: ölçüm eşiği ayırabilsin.
         cue: { volumeDb: 12 },
       },

@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from
 import { request as httpRequest } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PassThrough } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { after, before, describe, test } from 'node:test';
 
@@ -960,8 +960,8 @@ describe('canonical akış — 8 adım, diskten kaldığı yer', () => {
     await updateCrop('flow', { watermark: true, cropBottom: 150 }, options());
     assert.equal(await current('flow'), 'music');
 
-    await uploadProjectAudio('flow', { name: 'b-song.mp3', data: b64('1') }, options());
-    await uploadProjectAudio('flow', { name: 'a-song.mp3', data: b64('2') }, options());
+    await uploadProjectAudio('flow', 'b-song.mp3', Readable.from([Buffer.from('1')]), options());
+    await uploadProjectAudio('flow', 'a-song.mp3', Readable.from([Buffer.from('2')]), options());
     assert.equal(await current('flow'), 'order');
 
     await assert.rejects(
@@ -1012,7 +1012,7 @@ describe('canonical akış — 8 adım, diskten kaldığı yer', () => {
     await bad(uploadProjectImage('custom-flow', { name: 'a.gif', data: b64('x') }, options()), 400);
     await bad(uploadProjectImage('custom-flow', { name: '../a.png', data: b64('x') }, options()), 400);
     await bad(uploadProjectClip('custom-flow', { name: 'a.mov', data: b64('x') }, options()), 400);
-    await bad(uploadProjectAudio('custom-flow', { name: 'a.mp3', data: '' }, options()), 400);
+    await bad(uploadProjectAudio('custom-flow', 'a.mp3', Readable.from([]), options()), 400);
     await bad(updateTrackOrder('custom-flow', { mode: 'alphabetical' }, options()), 409);
   });
 

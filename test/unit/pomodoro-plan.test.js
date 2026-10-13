@@ -69,7 +69,6 @@ describe('normalizePomodoroSelection', () => {
     const plan = planOf({});
     assert.equal(plan.countdownSeconds, POMODORO_DEFAULTS.countdownSeconds);
     assert.equal(plan.countdownBeep, POMODORO_DEFAULTS.countdownBeep);
-    assert.equal(plan.trimExcess, POMODORO_DEFAULTS.trimExcess);
     assert.deepEqual(plan.cue, POMODORO_DEFAULTS.cue);
   });
 
@@ -287,29 +286,48 @@ describe('validatePomodoro', () => {
     assert.equal(result.timeline.totalMinutes, 242);
   });
 
-  it('Test 2 — fazla müzik onay istemeden geçmez', () => {
+  it('Test 2 — fazla müzik montajı ENGELLEMEZ: soru sormaz, uyarır ve kırpma planını hazırlar', () => {
     const result = validatePomodoro({ plan: planOf({ preset: '50/10', rounds: 4 }), tracks: tracksOf(255 * 60) });
-    assert.equal(result.ok, false);
-    assert.equal(result.needsTrimConfirmation, true);
-    assert.ok(result.problems[0].includes('13:00'));
-    // Kırpmanın ne yapacağı onay öncesinde de gösterilir.
-    assert.equal(result.trim.trimmedSeconds, 13 * 60);
-  });
-
-  it('Test 2 — kırpma onaylanınca geçer ve uyarıya düşer', () => {
-    const plan = planOf({ preset: '50/10', rounds: 4, trimExcess: true });
-    const result = validatePomodoro({ plan, tracks: tracksOf(255 * 60) });
     assert.equal(result.ok, true);
-    assert.equal(result.needsTrimConfirmation, false);
+    assert.deepEqual(result.problems, []);
+    assert.equal(Object.hasOwn(result, 'needsTrimConfirmation'), false, 'onay kavramı kalmadı');
+    assert.equal(result.trim.trimmedSeconds, 13 * 60);
     assert.equal(result.trim.usedSeconds, 242 * 60);
-    assert.ok(result.warnings.some((w) => w.includes('13:00')));
+    assert.ok(result.warnings.some((w) => w.includes('13:00') && w.includes('otomatik kırpılacak')));
   });
 
-  it('Test 3 — eksik müzik onayla bile geçmez', () => {
-    const plan = planOf({ preset: '50/10', rounds: 4, trimExcess: true });
+  it('fazla müzik uyarısı kullanılmayacak parçaları ve Geri Dönüşüm Kutusu\'nu söyler', () => {
+    // 10 parça × 30 dk = 300 dk, timeline 242 dk: 9. parça kısalır, 10. parça tamamen dışarıda kalır.
+    const result = validatePomodoro({ plan: planOf({ preset: '50/10', rounds: 4 }), tracks: tracksOf(300 * 60, 10) });
+    const warning = result.warnings.find((w) => w.includes('otomatik kırpılacak'));
+    assert.ok(result.trim.droppedCount >= 1, 'bu senaryoda en az bir parça tamamen dışarıda kalmalı');
+    assert.match(warning, /kullanılmayacak/);
+    assert.match(warning, /Geri Dönüşüm Kutusu/);
+  });
+
+  it('eski project.json\'daki trimExcess alanı sessizce yok sayılır (proje yüklenir)', () => {
+    const { plan, problems } = normalizePomodoroSelection({ enabled: true, trimExcess: true });
+    assert.deepEqual(problems, []);
+    assert.equal(Object.hasOwn(plan, 'trimExcess'), false);
+    assert.equal(Object.hasOwn(serializePomodoroPlan(plan), 'trimExcess'), false);
+  });
+
+  it('Test 3 — eksik müzik engel DEĞİL: uyarır, kalan süreyi arka plan sesi doldurur', () => {
+    const plan = planOf({ preset: '50/10', rounds: 4 });
     const result = validatePomodoro({ plan, tracks: tracksOf(229.5 * 60) });
-    assert.equal(result.ok, false);
-    assert.ok(result.problems.some((p) => p.includes('12:30')));
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.problems, []);
+    assert.equal(result.comparison.status, 'short');
+    assert.equal(result.trim, null, 'eksik müzikte kırpılacak bir şey yok');
+    assert.ok(result.warnings.some((w) => w.includes('12:30') && w.includes('Ambiance')));
+    assert.match(result.message, /Eksik: 12:30/);
+    assert.match(result.message, /Ambiance/);
+  });
+
+  it('çok eksik müzik de engel değil (hiç müzik olmasa bile yalnızca ölçülemeyen parça durdurur)', () => {
+    const plan = planOf({ preset: '50/10', rounds: 2 });
+    assert.equal(validatePomodoro({ plan, tracks: [] }).ok, true);
+    assert.equal(validatePomodoro({ plan, tracks: [{ path: 'x.m4a', duration: null }] }).ok, false);
   });
 
   it('ölçülemeyen parça montajı durdurur', () => {
@@ -399,7 +417,7 @@ describe('serializePomodoroPlan', () => {
   });
 
   it('yazılan şekil geri okunduğunda aynı planı verir', () => {
-    const plan = planOf({ preset: '30/10', rounds: 6, trimExcess: true, cue: { volumeDb: -6 } });
+    const plan = planOf({ preset: '30/10', rounds: 6, cue: { volumeDb: -6 } });
     const { plan: reread, problems } = normalizePomodoroSelection(serializePomodoroPlan(plan));
     assert.deepEqual(problems, []);
     assert.deepEqual(reread, plan);

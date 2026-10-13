@@ -278,7 +278,13 @@ export function BuildStage({ project, assets, stageStatus, onProjectUpdate, onGo
               : !pomodoro.enabled || !pomodoro.settings
                 ? 'Kapalı'
                 : `${pomodoroSummary(pomodoro.settings.workMinutes, pomodoro.settings.breakMinutes, pomodoro.settings.rounds)} · ` +
-                  (pomodoro.validation.ok ? '✓ Müzik süreye uyuyor' : '⚠ Müzik uymuyor')}
+                  (pomodoro.validation.ok
+                    ? (pomodoro.validation.comparison?.status === 'excess'
+                      ? '⚠ Fazla müzik otomatik kırpılacak'
+                      : pomodoro.validation.comparison?.status === 'short'
+                        ? '⚠ Müzik kısa: kalanı arka plan sesiyle'
+                        : '✓ Müzik süreye uyuyor')
+                    : '⚠ Müzik uymuyor')}
           </dd>
         </div>
       </dl>

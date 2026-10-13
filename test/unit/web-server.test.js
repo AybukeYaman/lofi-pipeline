@@ -132,12 +132,16 @@ describe('web server project API', () => {
     try {
       assert.equal((await send('POST', '/api/projects/p/images', { slot: 'scene' })).status, 200);
       assert.equal((await send('POST', '/api/projects/p/clips', { name: 'a.mp4' })).status, 200);
-      assert.equal((await send('POST', '/api/projects/p/audio', { name: 'a.mp3' })).status, 200);
+      // Müzik JSON değil ham dosya akışı: ad sorguda, içerik türü octet-stream.
+      const audio = await fetch(`${server.url}/api/projects/p/audio?name=a.mp3`, {
+        method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: 'ses',
+      });
+      assert.equal(audio.status, 200);
       assert.equal((await send('PUT', '/api/projects/p/order', { mode: 'alphabetical' })).status, 200);
       assert.deepEqual(calls, [
         ['image', 'p', { slot: 'scene' }],
         ['clip', 'p', { name: 'a.mp4' }],
-        ['audio', 'p', { name: 'a.mp3' }],
+        ['audio', 'p', 'a.mp3'],
         ['order', 'p', { mode: 'alphabetical' }],
       ]);
       assert.equal((await send('GET', '/api/projects/p/order')).status, 405);

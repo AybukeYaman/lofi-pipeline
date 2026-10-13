@@ -341,6 +341,12 @@ export async function updateProjectPomodoro(
   );
 }
 
+/** Görsel kartlarının küçük resmi: videolar\ ve resimler\ altındaki her dosya (yol ya da ad verilebilir). */
+export function getProjectVisualUrl(projectId: string, pathOrName: string): string {
+  const name = pathOrName.split(/[\\/]/).pop() || pathOrName;
+  return `/api/projects/${encodeURIComponent(projectId)}/assets/visual/${encodeURIComponent(name)}`;
+}
+
 export function getProjectClipUrl(projectId: string, clipPathOrName?: string | null): string {
   if (!clipPathOrName) return '';
   const name = clipPathOrName.split(/[\\/]/).pop() || clipPathOrName;
@@ -423,9 +429,17 @@ export async function uploadProjectClip(id: string, file: File): Promise<Project
   return sendJson<ProjectDetail>('POST', projectUrl(id, 'clips'), { name: file.name, data }, 'Video could not be uploaded.');
 }
 
+/**
+ * Müzik ya da zip yükler. Dosya ham bayt olarak gönderilir (base64/JSON değil): tarayıcı
+ * dosyayı diskten akıtır, yüzlerce MB'lık zip bellekte kopyalanmaz.
+ */
 export async function uploadProjectAudio(id: string, file: File): Promise<ProjectDetail> {
-  const data = await readAsDataUrl(file);
-  return sendJson<ProjectDetail>('POST', projectUrl(id, 'audio'), { name: file.name, data }, 'Audio could not be uploaded.');
+  const response = await fetch(`${projectUrl(id, 'audio')}?name=${encodeURIComponent(file.name)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: file,
+  });
+  return handleResponse<ProjectDetail>(response, 'Audio could not be uploaded.');
 }
 
 /**

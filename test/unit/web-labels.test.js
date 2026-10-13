@@ -111,7 +111,7 @@ describe('PUT /api/projects/:id/labels', () => {
   });
 
   test('etiket yazmak başka konfige dokunmaz — özellikle `pomodoro` bloğuna', async () => {
-    const pomodoro = { enabled: true, preset: '30/10', rounds: 6, trimExcess: true, countdownBeep: false };
+    const pomodoro = { enabled: true, preset: '30/10', rounds: 6, countdownBeep: false };
     await writeProject('untouched', { pomodoro, ambient: ['./rain.mp3'], order: ['b', 'a'] });
     const before = await readProjectJson('untouched');
 

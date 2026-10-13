@@ -78,12 +78,7 @@ const MAX_UPLOAD_BODY_BYTES = 25 * 1024 * 1024;
 const MAX_AUDIO_UPLOAD_BODY_BYTES = 100 * 1024 * 1024;
 /** base64 ~%33 büyütür: 200 MB klip için gövde sınırı. */
 const MAX_CLIP_UPLOAD_BODY_BYTES = 280 * 1024 * 1024;
-/**
- * Proje müziği: tek parça 100 MB, ama zip 200 MB'a kadar (server/project-api.js
- * MAX_ZIP_UPLOAD_BYTES). Gövde sınırı bundan küçük kalırsa sunucu yükleme sürerken
- * bağlantıyı kesiyor ve tarayıcı yalnızca "Failed to fetch" diyor.
- */
-const MAX_PROJECT_AUDIO_UPLOAD_BODY_BYTES = MAX_CLIP_UPLOAD_BODY_BYTES;
+
 /** Yalnızca bu makineden: DNS rebinding ile başka bir sitenin API'yi okumasını engeller. */
 const LOCAL_HOST = /^(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/i;
 
@@ -101,7 +96,7 @@ export function createDefaultProjectApi({ buildJobs = createBuildJobs() } = {}) 
     removePrompt: (id) => removePrompt(id),
     uploadProjectImage: (id, body) => uploadProjectImage(id, body),
     uploadProjectClip: (id, body) => uploadProjectClip(id, body),
-    uploadProjectAudio: (id, body) => uploadProjectAudio(id, body),
+    uploadProjectAudio: (id, name, stream, options) => uploadProjectAudio(id, name, stream, options),
     copyTracksFromProject: (id, body) => copyTracksFromProject(id, body),
     updateTrackOrder: (id, body) => updateTrackOrder(id, body),
     listClips: (id) => listClips(id),
@@ -209,8 +204,10 @@ export const ROUTES = [
   {
     method: 'POST',
     pattern: /^\/api\/projects\/([^/]*)\/audio$/,
-    maxBodyBytes: MAX_PROJECT_AUDIO_UPLOAD_BODY_BYTES,
-    handle: async (api, { id, body }) => [200, await api.uploadProjectAudio(id, body)],
+    // Ham dosya akışı (base64/JSON değil): bellekte tutulmaz, boyut sınırı api'de (project-api.js).
+    raw: true,
+    handle: async (api, { id, query, stream, contentLength }) =>
+      [200, await api.uploadProjectAudio(id, query.name, stream, { declaredBytes: contentLength })],
   },
   {
     method: 'POST',
@@ -515,14 +512,21 @@ export function createWebServer({ projectApi = createDefaultProjectApi(), static
 
       const [id, ...params] = found.match.slice(1).map(decodeURIComponent);
       let body;
+      let stream;
+      let contentLength;
       if (request.method !== 'GET') {
-        assertSafeWrite(request);
-        if (request.method !== 'DELETE' || request.headers['content-type']) {
+        assertSafeWrite(request, found.route.raw ? RAW_CONTENT_TYPE : 'application/json');
+        if (found.route.raw) {
+          // Dosya yükleme: gövde JSON'a çevrilmez, akış olduğu gibi işleyiciye gider.
+          stream = request;
+          const declared = Number(request.headers['content-length']);
+          contentLength = Number.isFinite(declared) ? declared : undefined;
+        } else if (request.method !== 'DELETE' || request.headers['content-type']) {
           body = await readJsonBody(request, found.route.maxBodyBytes ?? MAX_BODY_BYTES);
         }
       }
 
-      const [status, payload] = await found.route.handle(projectApi, { id, params, body, query });
+      const [status, payload] = await found.route.handle(projectApi, { id, params, body, query, stream, contentLength });
       if (found.route.file) sendFile(request, response, payload);
       else sendJson(response, status, payload);
     } catch (error) {
@@ -543,17 +547,22 @@ export function createWebServer({ projectApi = createDefaultProjectApi(), static
         return;
       }
 
+      // Kullanıcı yüklemeyi yarıda kestiyse (sekme/pencere kapandı) yanıt verecek kimse yok: gürültü yapma.
+      if (request.destroyed || error?.message === 'aborted') return;
       console.error(error);
       sendJson(response, 500, { error: 'Internal server error' });
     }
   });
 }
 
+/** Ham dosya yükleyen rotaların içerik türü (JSON gibi tarayıcıda ön kontrol gerektirir). */
+const RAW_CONTENT_TYPE = 'application/octet-stream';
+
 /**
- * Yazan istekler JSON olmalı ve başka bir siteden gelmemeli: application/json
- * tarayıcıda ön kontrol (preflight) gerektirir, sunucu CORS izni vermez.
+ * Yazan istekler JSON (dosya yükleyenler octet-stream) olmalı ve başka bir siteden
+ * gelmemeli: ikisi de tarayıcıda ön kontrol (preflight) gerektirir, sunucu CORS izni vermez.
  */
-function assertSafeWrite(request) {
+function assertSafeWrite(request, expectedType = 'application/json') {
   const origin = request.headers.origin;
   if (origin !== undefined) {
     let host;
@@ -568,8 +577,8 @@ function assertSafeWrite(request) {
     return;
   }
   const type = (request.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
-  if (type !== 'application/json') {
-    throw new ApiError(415, 'Content-Type must be application/json');
+  if (type !== expectedType) {
+    throw new ApiError(415, `Content-Type must be ${expectedType}`);
   }
 }
 

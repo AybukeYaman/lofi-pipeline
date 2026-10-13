@@ -161,11 +161,20 @@ export async function concatAudio(options) {
 
   // 5 — Birleştir
   await mkdir(dirname(outputPath), { recursive: true });
-  await ffmpeg(buildFilterArgs(segments, outputPath), { onProgress });
+  // Pomodoro'da müzik timeline'dan KISA ise ses sessizlikle timeline süresine tamamlanır:
+  // video (ve Ambiance, etiketler, bipler) timeline kadar sürer, ses bitti diye yarıda kalmaz.
+  const padTo = validation.comparison?.status === 'short' ? validation.timeline.totalSeconds : null;
+  if (padTo !== null) {
+    logger.info(
+      `Müzik ${validation.comparison.shortSeconds.toFixed(1)} sn kısa: ses sessizlikle ` +
+      `${padTo} sn'ye tamamlanıyor (kalan süre Ambiance'a kalır).`,
+    );
+  }
+  await ffmpeg(buildFilterArgs(segments, outputPath, padTo), { onProgress });
 
-  // 6 — Doğrula (beklenen: çözülen sürelerin toplamı)
+  // 6 — Doğrula (beklenen: çözülen sürelerin toplamı; kısa müzikte tamamlanmış timeline süresi)
   const result = await probe(outputPath);
-  const expectedDuration = segments.reduce((sum, segment) => sum + segment.useDuration, 0);
+  const expectedDuration = padTo ?? segments.reduce((sum, segment) => sum + segment.useDuration, 0);
 
   if (!durationsMatch(result.duration, expectedDuration)) {
     throw new Error(
@@ -365,15 +374,19 @@ async function mapLimited(items, limit, fn) {
  * @param {Array<{ probe: { path: string, channels: number|null }, duration: number, useDuration: number }>} segments
  * @param {string} outputPath
  */
-function buildFilterArgs(segments, outputPath) {
+function buildFilterArgs(segments, outputPath, padTo = null) {
   const branches = segments.map(({ probe: input, duration, useDuration }, i) =>
     normalizeBranch(i, input, useDuration < duration ? useDuration : null));
   const labels = segments.map((_, i) => `[a${i}]`).join('');
+  // `apad whole_dur`: toplam süre padTo olana kadar sessizlik ekler (daha uzunsa dokunmaz).
+  const concat = padTo === null
+    ? `${labels}concat=n=${segments.length}:v=0:a=1[out]`
+    : `${labels}concat=n=${segments.length}:v=0:a=1[joined];[joined]apad=whole_dur=${padTo}[out]`;
 
   return [
     ...segments.flatMap(({ probe: input }) => ['-i', input.path]),
     '-filter_complex',
-    `${branches.join(';')};${labels}concat=n=${segments.length}:v=0:a=1[out]`,
+    `${branches.join(';')};${concat}`,
     '-map', '[out]',
     '-vn',
     '-c:a', TARGET.codec,

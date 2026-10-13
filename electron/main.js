@@ -52,6 +52,12 @@ async function createWindow(port) {
     Menu.setApplicationMenu(null);
   }
 
+  // Arayüz süreci çökerse (bellek vb.) pencere beyaz kalmasın: nedeni yaz, sayfayı yeniden yükle.
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    console.error(`Arayüz süreci kapandı (${details.reason}, kod ${details.exitCode}) — sayfa yeniden yükleniyor.`);
+    if (details.reason !== 'clean-exit') mainWindow?.webContents.reload();
+  });
+
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('http:') || url.startsWith('https:')) {
       shell.openExternal(url);

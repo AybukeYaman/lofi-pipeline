@@ -258,7 +258,7 @@ export async function setProjectLabels(projectPath, rawLabels) {
  * @param {string} projectPath
  * @param {object|null} settings `{ enabled, preset?, workMinutes?, breakMinutes?,
  *   rounds?, countdownSeconds?, countdownBeep?,
- *   trimExcess?, cue? }` — null ya da `enabled: false` seçimi kaldırır
+ *   cue? }` — null ya da `enabled: false` seçimi kaldırır
  * @returns {Promise<{ pomodoro: object|null, plan: object|null, warnings: string[] }>}
  */
 export async function setProjectPomodoro(projectPath, settings) {
@@ -373,6 +373,26 @@ export async function recordAudioAdded(projectPath, names) {
   json.workflow = { ...workflow, audioAdded };
   await writeTextFile(projectPath, JSON.stringify(json, null, 2) + '\n');
   return audioAdded;
+}
+
+/**
+ * Müzik klasöründen kaldırılan dosyaları project.json'daki sıradan (`order`) ve
+ * eklenme kaydından (`workflow.audioAdded`) çıkarır: olmayan dosya adı bir sonraki
+ * montajda "bulunamadı" hatası olmasın.
+ *
+ * @param {string} projectPath
+ * @param {string[]} names dosya adları (klasörsüz)
+ */
+export async function forgetAudioFiles(projectPath, names) {
+  if (names.length === 0) return;
+  const gone = new Set(names);
+  const json = await readProjectObject(projectPath);
+
+  if (Array.isArray(json.order)) json.order = json.order.filter((name) => !gone.has(name));
+  if (Array.isArray(json.workflow?.audioAdded)) {
+    json.workflow = { ...json.workflow, audioAdded: json.workflow.audioAdded.filter((name) => !gone.has(name)) };
+  }
+  await writeTextFile(projectPath, JSON.stringify(json, null, 2) + '\n');
 }
 
 /**

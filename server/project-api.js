@@ -7,14 +7,18 @@
  */
 
 import { spawn } from 'node:child_process';
-import { copyFile, mkdir, readdir, readFile, realpath, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { createWriteStream } from 'node:fs';
+import { copyFile, mkdir, readdir, readFile, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 
 import {
   AMBIENT_MODES, DEFAULT_AMBIENT_MODE, DEFAULT_CROSSFADE_SECONDS, normalizeAmbientSelection,
 } from '../core/ambient-plan.js';
 import { CONFIG_DEFAULTS, VIDEO_SOURCES } from '../core/config.js';
-import { AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, imageMimeType, listFiles, uniqueFileName } from '../core/files.js';
+import { AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, imageMimeType, isImagePath, listFiles, uniqueFileName } from '../core/files.js';
 import { normalizeLabelPlan } from '../core/label-plan.js';
 import {
   POMODORO_DEFAULTS, POMODORO_PRESETS, buildTimeline, normalizePomodoroSelection, validatePomodoro,
@@ -49,6 +53,8 @@ const ASSET_TYPES = {
   clip: { kind: ['video/', 'image/'], files: (status) => (status.clip.exists ? [status.clip.path] : []) },
   /** Seçim ekranı: selectClip'in kabul ettiği adaylar — videolar/*.mp4 ya da tek resim modunda resimler/ altındaki görseller */
   video: { kind: ['video/', 'image/'], files: (status) => status.clips },
+  /** Görsel seçimi: videolar\ ve resimler\ altındaki bütün klip/görseller (Pomodoro çalışma + mola kutuları). */
+  visual: { kind: ['video/', 'image/'], files: (status) => status.visualFiles ?? [] },
   /** Proje listesindeki küçük resim (inspectProject seçer). */
   thumbnail: { kind: 'image/', files: (status) => (status.thumbnail ? [status.thumbnail] : []) },
   /** Müzik: audioDir'deki ses dosyaları (inspectProject'in audioCount'u ile aynı liste). */
@@ -625,6 +631,17 @@ export async function getLabels(id, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
       kind: status.videoSource === 'image' ? 'image' : 'video',
     };
   }
+  // Pomodoro: mola oturumunda arkada MOLA görüntüsü görünür; yoksa (null) çalışma görüntüsüyle aynı.
+  let breakPreview = null;
+  if (plan?.breakClip && !isShorts) {
+    const breakPath = resolve(projectDir, plan.breakClip);
+    if (await exists(breakPath)) {
+      breakPreview = {
+        url: assetUrl(id, 'visual', basename(breakPath)),
+        kind: isImagePath(breakPath) ? 'image' : 'video',
+      };
+    }
+  }
   const timeline = plan && !isShorts ? buildTimeline(plan) : null;
 
   return {
@@ -633,6 +650,7 @@ export async function getLabels(id, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
     warnings,
     aspect: isShorts ? '9:16' : (json.video?.aspect || CONFIG_DEFAULTS.video.aspect || '16:9'),
     preview,
+    breakPreview,
     pomodoro: timeline
       ? { enabled: true, totalSeconds: timeline.totalSeconds, sessions: timeline.sessions }
       : { enabled: false, totalSeconds: 0, sessions: [] },
@@ -705,7 +723,6 @@ export async function getPomodoro(id, { videosDir = DEFAULT_VIDEOS_DIR, probeFn 
       message: validation.message,
       problems: validation.problems,
       warnings: validation.warnings,
-      needsTrimConfirmation: validation.needsTrimConfirmation,
       comparison: validation.comparison,
       trim: validation.trim,
       timeline: validation.timeline,
@@ -722,7 +739,7 @@ export async function getPomodoro(id, { videosDir = DEFAULT_VIDEOS_DIR, probeFn 
  * kaldirir ve sistem bugunku gibi calisir.
  *
  * @param {unknown} body `{ enabled, preset?, workMinutes?, breakMinutes?, rounds?,
- *   countdownSeconds?, countdownBeep?, trimExcess?, breakClip? }`
+ *   countdownSeconds?, countdownBeep?, breakClip? }`
  */
 export async function updatePomodoro(id, body, { videosDir = DEFAULT_VIDEOS_DIR, probeFn = probe } = {}) {
   const projectDir = await resolveProjectDir(id, videosDir);
@@ -734,7 +751,6 @@ export async function updatePomodoro(id, body, { videosDir = DEFAULT_VIDEOS_DIR,
     rounds: 'number',
     countdownSeconds: 'number',
     countdownBeep: 'boolean',
-    trimExcess: 'boolean',
     // Mola görüntüsü (proje klasörüne göreli yol); '' → mola da çalışma görüntüsünü kullanır.
     breakClip: 'string',
   }, ['enabled']);
@@ -1449,8 +1465,12 @@ function workflowOf(status) {
 
 const MAX_CLIP_UPLOAD_BYTES = 200 * 1024 * 1024;
 const MAX_AUDIO_UPLOAD_BYTES = 100 * 1024 * 1024;
-/** Tarayıcıdan yüklenen zip üst sınırı; daha büyüğü doğrudan audio\ klasörüne bırakılır (orada sınır yok). */
-const MAX_ZIP_UPLOAD_BYTES = 200 * 1024 * 1024;
+/**
+ * Proje müziği yüklemesi diske AKITILIR (base64/JSON yok, bellekte tutulmaz): sınır bellekten
+ * değil yalnızca disk makullüğünden. Daha büyüğü doğrudan audio\ klasörüne bırakılır.
+ */
+const MAX_AUDIO_STREAM_BYTES = 500 * 1024 * 1024;
+const MAX_ZIP_STREAM_BYTES = 2 * 1024 * 1024 * 1024;
 
 /**
  * Görsel yüklemesi → resimler/. Dosya kullanıcının verdiği adla yazılır; ad
@@ -1493,26 +1513,67 @@ export async function uploadProjectClip(id, body, { videosDir = DEFAULT_VIDEOS_D
  * Adım 7 müzik yüklemesi → projenin audioDir'i. audioDir proje dışını
  * gösteriyorsa yazılmaz.
  *
- * @param {unknown} body `{ name, data }`
+ * Dosya `source` akışından doğrudan diske yazılır (geçici `.part` dosyası, bitince
+ * yeniden adlandırılır): yüzlerce MB'lık zip bellekte base64/JSON olarak tutulmaz.
+ * Zip klasöre yazıldıktan sonra getProject içinde açılır — klasöre elle bırakılan
+ * zip ile AYNI yol.
+ *
+ * @param {string} id
+ * @param {unknown} name yüklenen dosyanın adı (müzik ya da .zip)
+ * @param {import('node:stream').Readable} source dosyanın baytları
+ * @param {{ videosDir?: string, declaredBytes?: number }} [options] `declaredBytes`:
+ *   istemcinin bildirdiği boyut (Content-Length); sınırı aşıyorsa hiç okumadan reddedilir
  */
-export async function uploadProjectAudio(id, body, { videosDir = DEFAULT_VIDEOS_DIR } = {}) {
+export async function uploadProjectAudio(id, name, source, { videosDir = DEFAULT_VIDEOS_DIR, declaredBytes } = {}) {
   const projectDir = await resolveProjectDir(id, videosDir);
-  const { name, data, ext } = uploadName(body, [...AUDIO_EXTENSIONS, '.zip'], 'audio');
+  if (!isPlainName(name)) throw new ApiError(400, 'Invalid audio file name');
+  const ext = extname(name).toLowerCase();
   const isZip = ext === '.zip';
-  const buffer = decodeUpload(data, isZip ? MAX_ZIP_UPLOAD_BYTES : MAX_AUDIO_UPLOAD_BYTES, isZip ? 'Zip' : 'Audio');
+  if (!isZip && !AUDIO_EXTENSIONS.includes(ext)) {
+    throw new ApiError(400, `Unsupported audio format (${ext}). Supported: ${[...AUDIO_EXTENSIONS, '.zip'].join(', ')}`);
+  }
+  const maxBytes = isZip ? MAX_ZIP_STREAM_BYTES : MAX_AUDIO_STREAM_BYTES;
+  if (declaredBytes !== undefined && declaredBytes > maxBytes) throw tooLarge(isZip ? 'Zip' : 'Audio', maxBytes);
+
   const status = await inspectProject(projectDir);
   const outside = new ApiError(409, 'audioDir is outside the project folder', { audioDir: status.audioDir });
   if (!isInside(resolve(projectDir), resolve(status.audioDir))) throw outside;
   await mkdir(status.audioDir, { recursive: true });
   if (!(await realPathInside(projectDir, status.audioDir))) throw outside;
-  if (isZip) {
-    // Zip klasöre yazılır; parçalar getProject içinde açılır — klasöre elle bırakılan zip ile AYNI yol.
-    await writeFile(join(status.audioDir, await uniqueFileName(status.audioDir, name)), buffer);
-    return getProject(id, { videosDir });
+
+  // Yarım dosya hiçbir zaman müzik/zip listesine girmez: uzantısı .part.
+  const partPath = join(status.audioDir, `.yukleme-${randomUUID()}.part`);
+  try {
+    const written = await writeLimited(source, partPath, maxBytes, isZip ? 'Zip' : 'Audio');
+    if (written === 0) throw new ApiError(400, `${isZip ? 'Zip' : 'Audio'} data is empty`);
+    // Zip hiçbir şeyi ezmez (benzersiz ad); tek müzik dosyası eskisi gibi aynı adı değiştirir.
+    const finalName = isZip ? await uniqueFileName(status.audioDir, name) : name;
+    await rename(partPath, join(status.audioDir, finalName));
+  } catch (error) {
+    await rm(partPath, { force: true });
+    throw error;
   }
-  await writeFile(join(status.audioDir, name), buffer);
-  await recordAudioAdded(status.projectPath, [name]);
+
+  if (!isZip) await recordAudioAdded(status.projectPath, [name]);
   return getProject(id, { videosDir });
+}
+
+function tooLarge(label, maxBytes) {
+  return new ApiError(413, `${label} exceeds ${Math.round(maxBytes / 1024 / 1024)} MB limit`);
+}
+
+/** Akışı `path`'e yazar; `maxBytes` aşılırsa durdurur. Yazılan bayt sayısını döner. */
+async function writeLimited(source, path, maxBytes, label) {
+  let written = 0;
+  const counter = new Transform({
+    transform(chunk, _encoding, callback) {
+      written += chunk.length;
+      if (written > maxBytes) callback(tooLarge(label, maxBytes));
+      else callback(null, chunk);
+    },
+  });
+  await pipeline(source, counter, createWriteStream(path));
+  return written;
 }
 
 /**

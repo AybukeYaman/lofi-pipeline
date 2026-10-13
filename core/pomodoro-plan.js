@@ -21,7 +21,6 @@
  *     "rounds": 4,
  *     "countdownSeconds": 3,
  *     "countdownBeep": true,    // her oturumun (GET READY, WORK, BREAK) son 3 saniyesinde 3 bip
- *     "trimExcess": false,      // fazla müzik kullanıcı onayıyla kırpılır
  *     "breakClip": null,        // mola görüntüsü (resim ya da döngü videosu); boşsa mola da çalışma görüntüsünü kullanır
  *     "cue": { "volumeDb": -10, "beepFile": null }
  *   }
@@ -54,8 +53,6 @@ export const POMODORO_DEFAULTS = {
   rounds: 4,
   countdownSeconds: 3,
   countdownBeep: true,
-  /** Fazla müzik sorulmadan kırpılmaz; kullanıcı onayı bu bayrağı açar. */
-  trimExcess: false,
   /**
    * Mola görüntüsü (resim ya da döngü videosu, proje klasörüne göreli yol).
    * null → mola da çalışma görüntüsünü (`clip`) kullanır. Çalışma görüntüsü
@@ -97,7 +94,6 @@ export const MATCH_TOLERANCE_SECONDS = 1;
  * @property {string|null} preset Eşleşen hazır düzenin kimliği, yoksa null.
  * @property {number} countdownSeconds
  * @property {boolean} countdownBeep
- * @property {boolean} trimExcess
  * @property {string|null} breakClip Mola görüntüsünün yolu, yoksa null (mola = çalışma görüntüsü).
  * @property {{ volumeDb: number, beepFile: string|null }} cue
  */
@@ -155,7 +151,6 @@ export function normalizePomodoroSelection(raw, field = 'pomodoro') {
     preset: presetIdFor(workMinutes, breakMinutes),
     countdownSeconds,
     countdownBeep: readBoolean(raw.countdownBeep, `${field}.countdownBeep`, POMODORO_DEFAULTS.countdownBeep, problems),
-    trimExcess: readBoolean(raw.trimExcess, `${field}.trimExcess`, POMODORO_DEFAULTS.trimExcess, problems),
     breakClip: readBreakClip(raw.breakClip, `${field}.breakClip`, problems),
     cue: readCue(raw.cue, `${field}.cue`, problems),
   };
@@ -361,14 +356,14 @@ export function describeComparison(comparison, plan) {
     return (
       `${head}\nFazla: ${formatClock(comparison.excessSeconds)}\n\n` +
       'Müziklerin toplam süresi Pomodoro süresini aşıyor.\n' +
-      'Montaja devam etmeden önce fazla kısmı kırpmanız gerekiyor.'
+      'Montaj sırasında fazla kısım otomatik kırpılır.'
     );
   }
   if (comparison.status === 'short') {
     return (
       `${head}\nEksik: ${formatClock(comparison.shortSeconds)}\n\n` +
       "Seçilen müzikler Pomodoro timeline'ını doldurmuyor.\n" +
-      'Montaja başlamadan önce parça ekleyin.'
+      'Montaj yine de yapılır: müziğin bittiği yerden sonra yalnızca arka plan sesi (Ambiance) çalar.'
     );
   }
   return `${head}\nMüzik timeline ile eşleşiyor.`;
@@ -398,10 +393,12 @@ export function describeTimeline(timeline) {
  *
  * Denetlenenler (spec bölüm 8): mod açık mı, preset ve tur sayısı geçerli mi,
  * toplam süre ne, müzik toplamı ne, fazla/eksik ne kadar, kaç kırpma gerekiyor,
- * bütün oturumlar doldurulabiliyor mu.
+ * eksik müzikte ses sessizlikle tamamlanacak mı.
  *
- * `ok: false` ise montaj BAŞLATILMAZ. Fazla müzik kullanıcı onayıyla
- * (`plan.trimExcess`) kırpılabilir; eksik müzik üretilemez, her durumda durur.
+ * `ok: false` ise montaj BAŞLATILMAZ — yalnızca ölçülemeyen parça durdurur. Fazla
+ * müzik soru sorulmadan, uyarıyla kırpılır (montajda son parça kısalır, kalanlar
+ * kullanılmaz); eksik müzik de uyarıdır: ses sessizlikle timeline süresine
+ * tamamlanır, kalanı arka plan sesi (Ambiance) doldurur.
  *
  * @param {object} input
  * @param {PomodoroPlan|null} input.plan null → Pomodoro kapalı
@@ -413,14 +410,13 @@ export function describeTimeline(timeline) {
  *   comparison: ReturnType<typeof compareMusic>|null,
  *   trim: ReturnType<typeof planTrim>|null,
  *   cues: ReturnType<typeof buildCueEvents>|null,
- *   needsTrimConfirmation: boolean,
  *   problems: string[], warnings: string[], message: string|null,
  * }}
  */
 export function validatePomodoro({ plan, tracks, tolerance = MATCH_TOLERANCE_SECONDS }) {
   const off = {
     enabled: false, ok: true, plan: null, timeline: null, comparison: null,
-    trim: null, cues: null, needsTrimConfirmation: false,
+    trim: null, cues: null,
     problems: [], warnings: [], message: null,
   };
   if (plan === null || plan === undefined) return off;
@@ -440,32 +436,24 @@ export function validatePomodoro({ plan, tracks, tolerance = MATCH_TOLERANCE_SEC
     problems.push(`${unmeasured.length} parçanın süresi ölçülemedi — toplam süre güvenilir değil.`);
   }
 
+  // Eksik müzik engel DEĞİL: kalan süreyi arka plan sesi (Ambiance) doldurur, yoksa sessiz kalır.
+  // Montajda (02) ses timeline süresine sessizlikle tamamlanır, video yarım kalmaz.
   if (comparison.status === 'short') {
-    problems.push(
-      `Seçilen müzikler Pomodoro timeline'ını doldurmuyor: ${formatClock(comparison.shortSeconds)} eksik.`,
-    );
-  }
-
-  const needsTrimConfirmation = comparison.status === 'excess' && !plan.trimExcess;
-  if (needsTrimConfirmation) {
-    problems.push(
-      `Müzik toplamı Pomodoro süresini ${formatClock(comparison.excessSeconds)} aşıyor — ` +
-      'kırpmayı onaylamadan montaj başlatılmaz.',
-    );
-  } else if (comparison.status === 'excess') {
     warnings.push(
-      `Fazla ${formatClock(comparison.excessSeconds)} kırpılacak: ` +
-      `${trim.trimmedCount} parça kısaltılıyor, ${trim.droppedCount} parça kullanılmıyor. ` +
-      'Orijinal dosyalara dokunulmuyor.',
+      `Müzik ${formatClock(comparison.shortSeconds)} kısa: müzik bittikten sonra kalan süre ` +
+      'yalnızca arka plan sesiyle (Ambiance) devam eder, o da seçili değilse sessiz kalır.',
     );
   }
 
-  // Bütün oturumlar doluyor mu: kırpmadan sonra kullanılan süre timeline'ı karşılamalı.
-  const usedSeconds = trim ? trim.usedSeconds : comparison.musicSeconds;
-  if (problems.length === 0 && usedSeconds + tolerance < timeline.totalSeconds) {
-    problems.push(
-      `Oturumlar doldurulamıyor: ${formatClock(usedSeconds)} ses var, ` +
-      `${formatClock(timeline.totalSeconds)} gerekiyor.`,
+  // Fazla müzik engel değil, UYARI: montaj kendiliğinden kırpar. Hiç kullanılmayacak
+  // parçalar montaj başarıyla bitince Geri Dönüşüm Kutusu'na taşınır (build.js).
+  if (comparison.status === 'excess') {
+    warnings.push(
+      `Fazla ${formatClock(comparison.excessSeconds)} montajda otomatik kırpılacak: ` +
+      `${trim.trimmedCount} parça kısaltılacak, ${trim.droppedCount} parça kullanılmayacak` +
+      (trim.droppedCount > 0
+        ? ' (montaj bitince Geri Dönüşüm Kutusu\'na taşınır).'
+        : '.'),
     );
   }
 
@@ -473,7 +461,6 @@ export function validatePomodoro({ plan, tracks, tolerance = MATCH_TOLERANCE_SEC
     enabled: true,
     ok: problems.length === 0,
     plan, timeline, comparison, trim, cues,
-    needsTrimConfirmation,
     problems, warnings,
     message: describeComparison(comparison, plan),
   };
@@ -508,7 +495,7 @@ export function serializePomodoroPlan(plan) {
   };
 
   const defaults = POMODORO_DEFAULTS;
-  for (const key of ['countdownSeconds', 'countdownBeep', 'trimExcess', 'breakClip']) {
+  for (const key of ['countdownSeconds', 'countdownBeep', 'breakClip']) {
     if (plan[key] !== defaults[key]) out[key] = plan[key];
   }
 

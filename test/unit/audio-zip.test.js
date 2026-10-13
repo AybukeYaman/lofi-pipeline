@@ -6,6 +6,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
 import { after, before, describe, test } from 'node:test';
 
 import { ZIP_ARCHIVE_DIR, audioNameOf, hasAudioZips, unpackAudioZips } from '../../prep/audio-zip.js';
@@ -179,9 +180,7 @@ describe('API: zip müzik yükleme ve klasöre bırakılan zip', () => {
     await makeZip(join(dir, 'tmp.zip'), [{ name: 'x/a.mp3', data: 'a' }, { name: 'x/b.wav', data: 'b' }]);
     const bytes = await readFile(join(dir, 'tmp.zip'));
 
-    const result = await uploadProjectAudio(
-      name, { name: 'müzikler.zip', data: `data:application/zip;base64,${bytes.toString('base64')}` }, options(),
-    );
+    const result = await uploadProjectAudio(name, 'müzikler.zip', Readable.from([bytes]), options());
     assert.equal(result.audioCount, 2);
     assert.deepEqual(result.audioZip.files, ['a.mp3', 'b.wav']);
     assert.deepEqual(
@@ -192,7 +191,7 @@ describe('API: zip müzik yükleme ve klasöre bırakılan zip', () => {
   test('bozuk zip yüklemesi hata DEĞİL: proje döner, audioZip.archives[].error dolu, zip yerinde', async () => {
     const { name, dir } = await project();
     const result = await uploadProjectAudio(
-      name, { name: 'bozuk.zip', data: Buffer.from('zip degil '.repeat(20)).toString('base64') }, options(),
+      name, 'bozuk.zip', Readable.from([Buffer.from('zip degil '.repeat(20))]), options(),
     );
     assert.equal(result.audioCount, 0);
     assert.ok(result.audioZip.archives[0].error);
@@ -202,5 +201,104 @@ describe('API: zip müzik yükleme ve klasöre bırakılan zip', () => {
   test('zip yoksa yanıtta audioZip alanı hiç olmaz', async () => {
     const { name } = await project();
     assert.equal(Object.hasOwn(await getProject(name, options()), 'audioZip'), false);
+  });
+});
+
+describe('HTTP: müzik/zip ham dosya akışı olarak yüklenir (verimli, bellekte tutulmaz)', () => {
+  let videosDir;
+  let server;
+  let url;
+  before(async () => {
+    videosDir = await tempDir('audio-upload-http');
+    await mkdir(join(videosDir.dir, 'p', 'audio'), { recursive: true });
+    await writeFile(join(videosDir.dir, 'p', 'project.json'), JSON.stringify({ clip: '', audioDir: './audio' }));
+    const { createWebServer } = await import('../../server/web-server.js');
+    const { once } = await import('node:events');
+    const options = { videosDir: videosDir.dir };
+    server = createWebServer({
+      projectApi: {
+        getProject: (id) => getProject(id, options),
+        uploadProjectAudio: (id, name, stream, extra) => uploadProjectAudio(id, name, stream, { ...options, ...extra }),
+      },
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    url = `http://127.0.0.1:${server.address().port}`;
+  });
+  after(async () => {
+    server?.close();
+    await videosDir?.cleanup();
+  });
+
+  const post = (query, body, headers = {}) => fetch(`${url}/api/projects/p/audio${query}`, {
+    method: 'POST', headers: { 'content-type': 'application/octet-stream', ...headers }, body,
+  });
+
+  test('ham baytlar diske yazılır, ad sorgudan gelir (Türkçe karakter dahil)', async () => {
+    const response = await post(`?name=${encodeURIComponent('Şarkı 1.mp3')}`, Buffer.from('ses-baytlari'));
+    assert.equal(response.status, 200);
+    assert.equal(await readFile(join(videosDir.dir, 'p', 'audio', 'Şarkı 1.mp3'), 'utf8'), 'ses-baytlari');
+    assert.equal((await readdir(join(videosDir.dir, 'p', 'audio'))).some((f) => f.endsWith('.part')), false);
+  });
+
+  test('JSON içerik türü, yabancı origin ve kötü ad reddedilir', async () => {
+    assert.equal((await post('?name=a.mp3', '{}', { 'content-type': 'application/json' })).status, 415);
+    assert.equal((await post('?name=a.mp3', 'x', { origin: 'https://kotu-site.example' })).status, 403);
+    assert.equal((await post('?name=..%2Fa.mp3', 'x')).status, 400);
+    assert.equal((await post('?name=a.gif', 'x')).status, 400);
+    assert.equal((await post('', 'x')).status, 400);
+    assert.equal((await post('?name=bos.mp3', '')).status, 400);
+  });
+
+  test('bildirilen boyut sınırı aşıyorsa gövde hiç okunmadan 413', async () => {
+    const { request } = await import('node:http');
+    const status = await new Promise((resolve, reject) => {
+      const req = request(`${url}/api/projects/p/audio?name=dev.zip`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/octet-stream', 'content-length': String(3 * 1024 * 1024 * 1024) },
+      }, (res) => { resolve(res.statusCode); res.resume(); req.destroy(); });
+      req.on('error', reject);
+      req.flushHeaders();
+    });
+    assert.equal(status, 413);
+  });
+
+  test('150 MB dosya bellek şişirmeden yüklenir (base64/JSON olsaydı ~1 GB)', async () => {
+    const chunk = Buffer.alloc(1024 * 1024, 7);
+    let sent = 0;
+    const body = new ReadableStream({
+      pull(controller) {
+        if (sent++ >= 150) { controller.close(); return; }
+        controller.enqueue(chunk);
+      },
+    });
+    let peak = process.memoryUsage().rss;
+    const timer = setInterval(() => { peak = Math.max(peak, process.memoryUsage().rss); }, 25);
+    const baseline = process.memoryUsage().rss;
+    const response = await fetch(`${url}/api/projects/p/audio?name=buyuk.mp3`, {
+      method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body, duplex: 'half',
+    });
+    clearInterval(timer);
+
+    assert.equal(response.status, 200);
+    assert.equal((await readFile(join(videosDir.dir, 'p', 'audio', 'buyuk.mp3'))).length, 150 * 1024 * 1024);
+    const grewMb = Math.round((peak - baseline) / 1048576);
+    assert.ok(grewMb < 120, `bellek ${grewMb} MB arttı — dosya akıtılmıyor, bellekte tutuluyor olabilir`);
+  });
+
+  test('yarıda kesilen yükleme geride .part dosyası bırakmaz', async () => {
+    const { request } = await import('node:http');
+    await new Promise((resolve) => {
+      const req = request(`${url}/api/projects/p/audio?name=kesik.mp3`, {
+        method: 'POST', headers: { 'content-type': 'application/octet-stream', 'content-length': '50000000' },
+      });
+      req.on('error', () => resolve());
+      req.write(Buffer.alloc(1024 * 1024));
+      setTimeout(() => { req.destroy(); resolve(); }, 150);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const files = await readdir(join(videosDir.dir, 'p', 'audio'));
+    assert.equal(files.some((f) => f.endsWith('.part')), false, `artık dosya: ${files}`);
+    assert.equal(files.includes('kesik.mp3'), false);
   });
 });

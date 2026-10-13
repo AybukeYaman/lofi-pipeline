@@ -274,8 +274,6 @@ export type PomodoroSettings = {
   countdownSeconds: number;
   /** Her oturumun son 3 saniyesinde 3 bip. */
   countdownBeep: boolean;
-  /** Fazla müziğin kırpılması kullanıcı tarafından onaylandı mı. */
-  trimExcess: boolean;
   /** Mola görüntüsü (proje klasörüne göreli yol); null → mola da çalışma görüntüsünü kullanır. */
   breakClip: string | null;
   cue: {
@@ -310,6 +308,8 @@ export type ProjectLabels = {
   aspect: string;
   /** Önizleme arka planı: sunucunun verdiği adres (klip, görsel ya da Shorts kaynağı). */
   preview: { url: string; kind: 'image' | 'video' } | null;
+  /** Pomodoro mola oturumunda arkada görünen görüntü; null → çalışma görüntüsüyle aynı. */
+  breakPreview?: { url: string; kind: 'image' | 'video' } | null;
   /** Yalnızca OKUNUR — oturum zamanlarını gösterir, Pomodoro ayarı burada değişmez. */
   pomodoro: { enabled: boolean; totalSeconds: number; sessions: PomodoroSession[] };
 };
@@ -377,7 +377,6 @@ export type ProjectPomodoro = {
     message: string | null;
     problems: string[];
     warnings: string[];
-    needsTrimConfirmation: boolean;
     comparison: PomodoroComparison | null;
     trim: PomodoroTrim | null;
     timeline: { sessions: PomodoroSession[]; totalSeconds: number; totalMinutes: number } | null;
@@ -394,7 +393,6 @@ export type UpdatePomodoroPayload = {
   rounds?: number;
   countdownSeconds?: number;
   countdownBeep?: boolean;
-  trimExcess?: boolean;
   /** Proje klasörüne göreli yol; boş metin mola görüntüsünü kaldırır. */
   breakClip?: string;
 };

@@ -43,6 +43,7 @@ describe('rota tablosu — her rota adapter\'da var olan bir metot çağırır',
     const uploads = ROUTES.filter((route) =>
       route.method === 'POST'
       && /upload|audio|image|clip/.test(route.pattern.source)
+      && !route.raw // ham akış: boyut sınırı gövde okuyucuda değil api'de (aşağıdaki test)
       && !/shorts/.test(route.pattern.source));
     assert.ok(uploads.length > 0, 'yükleme rotası bulunamadı');
     for (const route of uploads) {
@@ -58,14 +59,12 @@ describe('rota tablosu — her rota adapter\'da var olan bir metot çağırır',
     }
   });
 
-  test('proje müziği rotası 200 MB zip taşıyabilir (base64 ile ~267 MB gövde)', () => {
+  test('proje müziği rotası ham dosya akışı alır (base64/JSON gövde sınırına takılmaz)', () => {
     const route = ROUTES.find((r) => r.method === 'POST' && r.pattern.test('/api/projects/video1/audio'));
     assert.ok(route, 'POST /api/projects/:id/audio rotası bulunamadı');
-    // Sınır küçük kalırsa sunucu yükleme sürerken bağlantıyı keser: tarayıcıda "Failed to fetch".
-    assert.ok(
-      route.maxBodyBytes >= Math.ceil((200 * 1024 * 1024 * 4) / 3),
-      `gövde sınırı 200 MB zip için yetmiyor: ${route.maxBodyBytes}`,
-    );
+    // Büyük zip base64+JSON olarak bellekte tutulursa sınıra takılır ya da uygulama belleği tüketir.
+    assert.equal(route.raw, true);
+    assert.equal(route.maxBodyBytes, undefined, 'ham rotanın gövde sınırı api\'de uygulanır');
   });
 
   for (const route of ROUTES) {

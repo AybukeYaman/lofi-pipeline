@@ -55,8 +55,8 @@ export async function inspectProject(dir) {
   // Pomodoro mola görüntüsü: çalışma görüntüsünden bağımsız, İKİ klasörden de
   // seçilebilir (resim ya da döngü videosu) — tür uzantıdan türer. Yollar proje
   // klasörüne göreli ("videolar/mola.mp4"), project.json'daki `breakClip` ile aynı biçim.
-  const breakCandidates = [...clipCandidates, ...imageCandidates]
-    .map((path) => relative(dir, path).split(sep).join('/'));
+  const visualFiles = [...clipCandidates, ...imageCandidates];
+  const breakCandidates = visualFiles.map((path) => relative(dir, path).split(sep).join('/'));
   const breakClipValue = typeof data.pomodoro?.breakClip === 'string' ? data.pomodoro.breakClip.trim() : '';
   const breakClipPath = breakClipValue ? at(breakClipValue) : null;
 
@@ -95,6 +95,8 @@ export async function inspectProject(dir) {
     clip: { value: clipValue, path: clipPath, exists: clipExists },
     /** Pomodoro mola görüntüsünün seçilebilecek dosyaları (proje klasörüne göreli). */
     breakCandidates,
+    /** Aynı dosyaların tam yolları — küçük resim/önizleme olarak sunulur (`assets/visual/<ad>`). */
+    visualFiles,
     /** project.json → pomodoro.breakClip; yoksa value boş (mola = çalışma görüntüsü). */
     breakClip: {
       value: breakClipValue,

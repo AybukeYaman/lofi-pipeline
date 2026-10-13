@@ -20,9 +20,9 @@ import type { ProjectMusicInfo } from '../../types';
 import { UploadButton } from './StepWidgets';
 import type { StageProps } from './StagePanel';
 
-/** Tarayıcıdan yükleme sınırları (sunucudaki MAX_AUDIO_UPLOAD_BYTES / MAX_ZIP_UPLOAD_BYTES aynası). */
-const MAX_AUDIO_UPLOAD_MB = 100;
-const MAX_ZIP_UPLOAD_MB = 200;
+/** Tarayıcıdan yükleme sınırları (sunucudaki MAX_AUDIO_STREAM_BYTES / MAX_ZIP_STREAM_BYTES aynası). */
+const MAX_AUDIO_UPLOAD_MB = 500;
+const MAX_ZIP_UPLOAD_MB = 2048;
 
 export function MusicSection({ project, assets, onProjectUpdate }: StageProps) {
   const music = project.projectJson?.data?.music;

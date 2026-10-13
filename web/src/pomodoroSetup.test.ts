@@ -6,7 +6,6 @@ import {
   durationLabel,
   pomodoroSummary,
   roundChoicesFor,
-  roundsFittingMusic,
   roundsKeepingTotal,
   studyMinutes,
   totalMinutes,
@@ -49,22 +48,6 @@ describe('roundsKeepingTotal', () => {
 
   it('24 turu aşmaz', () => {
     expect(roundsKeepingTotal(10_000, 1, 1)).toBe(24);
-  });
-});
-
-describe('roundsFittingMusic', () => {
-  it('GET READY düşüldükten sonra müziğe sığan tam tur sayısı', () => {
-    // 1:45:00 müzik, 50/10: (6300 − 120) / 3600 = 1,7 → 1 tur
-    expect(roundsFittingMusic(6300, 50, 10)).toBe(1);
-    // 2:02:00 müzik tam 2 tur
-    expect(roundsFittingMusic(122 * 60, 50, 10)).toBe(2);
-    // 2:30:00 müzik, 30/10: (9000 − 120) / 2400 = 3,7 → 3 tur
-    expect(roundsFittingMusic(9000, 30, 10)).toBe(3);
-  });
-
-  it('en az 1, en çok 24 tur', () => {
-    expect(roundsFittingMusic(60, 50, 10)).toBe(1);
-    expect(roundsFittingMusic(10_000_000, 50, 10)).toBe(24);
   });
 });
 

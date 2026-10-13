@@ -5,24 +5,18 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 import { fetchProjectMusic, saveTrackOrder } from '../../api';
 import { EmptyState } from '../../components/Feedback';
 import type { ProjectMusicInfo, TrackOrderMode } from '../../types';
-import { ambientFiles, fileName } from './assetState';
 import { StagePanel, type StageProps } from './StagePanel';
 import { errorText } from '../../format';
 
 // ---------------------------------------------------------------- 1. Proje başlat
 
 export function ProjectStartStage({ project, stageStatus }: StageProps) {
-  const ambients = ambientFiles(project);
   return (
     <StagePanel section="project" title="1. Proje başlat" status="ready" statusLabel="Hazır" stageStatus={stageStatus}>
       <dl className="readiness-list">
         <div>
           <dt>Proje adı</dt>
           <dd>{project.name}</dd>
-        </div>
-        <div>
-          <dt>Ambient ses</dt>
-          <dd>{ambients.length > 0 ? ambients.map((path) => fileName(path)).join(', ') : 'Yok'}</dd>
         </div>
       </dl>
     </StagePanel>

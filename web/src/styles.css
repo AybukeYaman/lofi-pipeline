@@ -3591,3 +3591,87 @@ span.project-thumb::after {
 /* Shorts: 9:16 yazı önizlemesi tüm genişliği kaplamasın. */
 #shorts-yazilar .label-editor { max-width: 340px; }
 #shorts-yazilar .label-frame { max-width: 240px; }
+
+/* Pomodoro: "hangi görüntü ne zaman" kartları (Video adımı) — iki kart, küçük resimli, sade. */
+.visual-slots {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.visual-slot {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: inherit;
+  font: inherit;
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.visual-slot.is-active {
+  border-color: var(--border-current);
+  background: var(--primary-subtle);
+}
+
+.visual-slot-frame {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface-subtle);
+}
+
+.visual-slot-frame.is-dim {
+  opacity: 0.55;
+}
+
+.visual-slot-frame img,
+.visual-slot-frame video,
+.visual-tile img,
+.visual-tile video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.visual-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.visual-tile {
+  width: 112px;
+  aspect-ratio: 16 / 9;
+  padding: 0;
+  overflow: hidden;
+  border: 2px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface-subtle);
+  cursor: pointer;
+}
+
+.visual-tile.selected {
+  border-color: var(--border-current);
+}
+
+.visual-tile-text {
+  display: grid;
+  place-items: center;
+  font: inherit;
+  font-size: var(--text-xs);
+  color: inherit;
+}
+
+@media (max-width: 560px) {
+  .visual-slots {
+    grid-template-columns: 1fr;
+  }
+}
