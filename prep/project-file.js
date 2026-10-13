@@ -256,7 +256,7 @@ export async function setProjectLabels(projectPath, rawLabels) {
  * bir artık olurdu; kapalı Pomodoro bugünkü sistemin ta kendisi.
  *
  * @param {string} projectPath
- * @param {object|null} settings `{ enabled, statuses?, intro?, rounds?, countdownSeconds?,
+ * @param {object|null} settings `{ enabled, sets? | statuses?, intro?, rounds?, countdownSeconds?,
  *   countdownBeep?, cue? }` (eski `preset/workMinutes/breakMinutes/breakClip` anahtarlarını API reddeder; yalnızca dosyadan okunurlar) —
  *   null ya da `enabled: false` seçimi kaldırır
  * @returns {Promise<{ pomodoro: object|null, plan: object|null, warnings: string[] }>}
@@ -273,8 +273,10 @@ export async function setProjectPomodoro(projectPath, settings) {
   // `./videolar/x.mp4` biçimine çevrilir (setProjectClip ile aynı) — build göreli yolu
   // proje klasörüne çözüyor.
   if (plan !== null) {
-    for (const status of plan.statuses) {
-      if (status.visual !== null) status.visual = await resolveVisual(projectPath, status.visual);
+    for (const set of plan.sets) {
+      for (const step of set.steps) {
+        if (step.visual !== null) step.visual = await resolveVisual(projectPath, step.visual);
+      }
     }
     if (plan.intro.visual !== null) plan.intro.visual = await resolveVisual(projectPath, plan.intro.visual);
   }

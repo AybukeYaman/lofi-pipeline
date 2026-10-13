@@ -4,11 +4,11 @@
  * Tek sorumluluk: `pomodoro-sets/*.json` dosyalarını okumak, doğrulamak ve
  * yazmak. HTTP ve arayüz bu modülün dışında (server/pomodoro-set-api.js).
  *
- * Bir set YALNIZCA durum listesidir: her durumun adı, süresi ve bip açık/kapalı
- * bilgisi. Görüntüler projeye özeldir, sete GİRMEZ (dosyada `visual` olsa bile
+ * "Set" adı dosyada/rotada tarihsel: arayüzde bunlar KAYITLI PROGRAMLAR. Bir kayıt YALNIZCA
+ * program yapısıdır: setler (ad, tekrar) ve adımları (ad, süre, tür, bip açık/kapalı). Görüntüler projeye özeldir, sete GİRMEZ (dosyada `visual` olsa bile
  * okunurken atılır); tur sayısı ve GET READY görüntüsü de projeye aittir.
- * Durum kuralları `core/pomodoro-plan.js` `normalizeStatusList`'te — burada
- * kopyalanmaz. Hazır düzenler (50/10, 30/10) kodda `POMODORO_PRESETS` olarak
+ * Set/adım kuralları `core/pomodoro-plan.js` `normalizeSetList`'te — burada
+ * kopyalanmaz. Hazır programlar (50/10, 30/10, 50/10/50/20, Klasik 25/5) kodda `POMODORO_PRESETS` olarak
  * durur, klasöre yazılmaz.
  *
  * Biçim `prep/prompt-library.js` ile aynı kalıpta: dosya adı = slug, içerik tek nesne.
@@ -18,7 +18,7 @@ import { mkdir, readdir, rm } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { POMODORO_PRESETS, normalizeStatusList } from '../core/pomodoro-plan.js';
+import { POMODORO_PRESETS, flattenSets, normalizeSetList, serializeSets } from '../core/pomodoro-plan.js';
 import { readJsonFile, writeTextFile } from '../core/workspace.js';
 import { PROMPT_ID_PATTERN, promptIdFrom } from './prompt-library.js';
 
@@ -75,8 +75,8 @@ export async function listPomodoroSetIds({ dir = POMODORO_SET_DIR } = {}) {
  *
  * @param {string} id
  * @param {{ dir?: string }} [options]
- * @returns {Promise<{ id: string, name: string,
- *   statuses: Array<{ name: string, minutes: number, beep: boolean }>, updatedAt: string|null }>}
+ * @returns {Promise<{ id: string, name: string, sets: object[],
+ *   statuses: object[], updatedAt: string|null }>}
  */
 export async function loadPomodoroSet(id, { dir = POMODORO_SET_DIR } = {}) {
   if (typeof id !== 'string' || !POMODORO_SET_ID_PATTERN.test(id)) {
@@ -110,7 +110,7 @@ export async function listPomodoroSets({ dir = POMODORO_SET_DIR } = {}) {
     } catch (error) {
       if (!(error instanceof PomodoroSetError)) throw error;
       // Elle bozulan bir dosya yüzünden bütün setler açılmaz olmasın.
-      sets.push({ id, name: id, statuses: [], updatedAt: null, error: error.message });
+      sets.push({ id, name: id, sets: [], statuses: [], updatedAt: null, error: error.message });
     }
   }
   return sets;
@@ -132,12 +132,8 @@ export async function writePomodoroSet(input, { dir = POMODORO_SET_DIR, now = ()
 
   const record = {
     name: set.name,
-    // Yalnızca ad, dakika ve bip; bip açıksa (varsayılan) yazılmaz.
-    statuses: set.statuses.map((status) => ({
-      name: status.name,
-      minutes: status.minutes,
-      ...(status.beep ? {} : { beep: false }),
-    })),
+    // Yalnızca yapı: görüntü yok (validateSet zaten attı); basit program `statuses`, çoklu set `sets`.
+    ...serializeSets(set.sets),
     updatedAt: set.updatedAt,
   };
   // Klasör ilk setle doğar: önceden kurulmuş olmayabilir.
@@ -186,20 +182,29 @@ function validateSet(json, id) {
     problems.push(`name en fazla ${POMODORO_SET_LIMITS.name} karakter (verilen: ${name.length})`);
   }
 
-  const raw = Array.isArray(json.statuses)
-    ? json.statuses.map((item) => (
-      item !== null && typeof item === 'object' && !Array.isArray(item) ? { ...item, visual: undefined } : item
+  // Görüntü programa girmez: adımlardaki `visual` okunurken atılır. `sets` yoksa `statuses` TEK set olur.
+  const stripVisual = (steps) => (Array.isArray(steps)
+    ? steps.map((item) => (item !== null && typeof item === 'object' && !Array.isArray(item) ? { ...item, visual: undefined } : item))
+    : steps);
+  const rawSets = Array.isArray(json.sets)
+    ? json.sets.map((item) => (
+      item !== null && typeof item === 'object' && !Array.isArray(item)
+        ? { ...item, steps: stripVisual(item.steps ?? item.statuses) }
+        : item
     ))
-    : json.statuses;
-  const listed = normalizeStatusList(raw, 'statuses');
+    : [{ steps: stripVisual(json.statuses) }];
+  const listed = normalizeSetList(rawSets, 'sets');
   problems.push(...listed.problems);
 
   if (problems.length > 0) throw new PomodoroSetError(String(id), problems);
 
+  // Okunan programda da görüntü alanı yok (proje kendi görüntüsünü korur).
+  const sets = listed.sets.map((set) => ({ ...set, steps: set.steps.map(({ visual, ...step }) => step) }));
   return {
     id,
     name,
-    statuses: listed.statuses.map(({ name: statusName, minutes, beep }) => ({ name: statusName, minutes, beep })),
+    sets,
+    statuses: flattenSets(sets),
     updatedAt: typeof json.updatedAt === 'string' ? json.updatedAt : null,
   };
 }

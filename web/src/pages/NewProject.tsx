@@ -1,11 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react';
 
-import { POMODORO_PRESETS } from '../../../core/pomodoro-plan.js';
 import { validateVideoName } from '../../../core/project-name.js';
 import { createProject, fetchProjects, ApiError } from '../api';
 import { PageHeader } from '../components/PageHeader';
-import { StatusEditor } from '../components/StatusEditor';
-import { statusesPayload, type PomodoroChoice } from '../pomodoroSetup';
+import { ProgramEditor } from '../components/ProgramEditor';
+import { choiceFromDraft, defaultSets, setsPayload, type PomodoroChoice } from '../pomodoroSetup';
 import { showError, showSuccess } from '../toast';
 import type { LoadState, ProjectSummary } from '../types';
 
@@ -14,11 +13,8 @@ type FormErrors = Partial<Record<'name' | 'mode' | 'form', string>>;
 /** "Bu video nasıl olacak?" — sihirbazın geri kalanı bu cevaba göre uyarlanır. */
 type VideoMode = 'ambiance' | 'pomodoro';
 
-/** Pomodoro seçilince ilk düğmeler: 50/10 ve 2 saat (2 tur), sesler açık. */
-const DEFAULT_POMODORO: PomodoroChoice = {
-  statuses: POMODORO_PRESETS[0].statuses.map((status: PomodoroChoice['statuses'][number]) => ({ ...status })),
-  rounds: 2,
-};
+/** Pomodoro seçilince ilk program: SET 1 = 50/10, 2 kez (2 saat), bipler açık. */
+const DEFAULT_POMODORO: PomodoroChoice = { sets: defaultSets(), rounds: 2 };
 
 // Görsel kaynağı (tek resim / döngü videosu) burada sorulmaz: tek yeri
 // workspace'in 2. adımı (VideoStage). Proje varsayılan `clip` ile kurulur;
@@ -65,13 +61,9 @@ export function NewProject({
       if (draft.name) setName(draft.name);
       if (draft.concept) setConcept(draft.concept);
       if (draft.mode === 'ambiance' || draft.mode === 'pomodoro') setMode(draft.mode);
-      // Eski taslaklar (çalışma/mola dakikası) durum listesi taşımaz: onlar atılır, varsayılan kalır.
-      if (draft.pomodoro && Array.isArray(draft.pomodoro.statuses) && draft.pomodoro.statuses.length > 0) {
-        setPomodoro({
-          statuses: draft.pomodoro.statuses,
-          rounds: Number.isInteger(draft.pomodoro.rounds) ? draft.pomodoro.rounds : DEFAULT_POMODORO.rounds,
-        });
-      }
+      // Eski taslaktaki düz liste tek set olur; bozuk taslak atılır, varsayılan kalır.
+      const restored = choiceFromDraft(draft.pomodoro);
+      if (restored) setPomodoro(restored);
       if (draft.parentId && !presetParentId) {
         setParentId(draft.parentId);
         setIsEditingParent(true);
@@ -163,7 +155,7 @@ export function NewProject({
         ...(mode === 'pomodoro'
           ? {
             pomodoro: {
-              statuses: statusesPayload(pomodoro.statuses),
+              sets: setsPayload(pomodoro.sets),
               rounds: pomodoro.rounds,
             },
           }
@@ -284,13 +276,13 @@ export function NewProject({
           {errors.mode ? <p className="field-error" role="alert">{errors.mode}</p> : null}
           {mode === 'pomodoro' ? (
             <div style={{ marginTop: 8 }}>
-              <StatusEditor
+              <ProgramEditor
                 value={pomodoro}
                 disabled={isSubmitting}
                 onChange={edit(setPomodoro)}
               />
               <p className="field-hint" style={{ marginTop: 8 }}>
-                Her durum için ayrı görüntü sonraki adımda (Video) seçilir. Bunları sonradan da değiştirebilirsin.
+                Her adım için ayrı görüntü sonraki adımda (Video) seçilir. Bunları sonradan da değiştirebilirsin.
               </p>
             </div>
           ) : null}

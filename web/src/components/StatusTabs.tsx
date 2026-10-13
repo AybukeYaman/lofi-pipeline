@@ -25,7 +25,7 @@ import {
   bareVisual,
   readinessPayload,
   statusTabs,
-  statusesPayload,
+  setsPayload,
   visualOfTab,
   withTabVisual,
 } from '../pomodoroSetup';
@@ -82,9 +82,10 @@ export function StatusTabs({
     setBusy(true);
     setError(null);
     try {
-      const next = withTabVisual(tabKey, visual, statuses, intro);
+      // Aynı adlı adımlar (her sette) aynı görüntüyü paylaşır: hepsi birlikte güncellenir.
+      const next = withTabVisual(tabKey, visual, pomodoro.sets ?? [], intro);
       await updateProjectPomodoro(project.id, readinessPayload(pomodoro, {
-        statuses: statusesPayload(next.statuses),
+        sets: setsPayload(next.sets),
         intro: next.intro.visual ? { visual: next.intro.visual } : {},
       }));
       onProjectUpdate?.(await fetchProject(project.id));

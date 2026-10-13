@@ -12,13 +12,23 @@
  * `core/ambient-plan.js` ile aynı desen: şekil çözümleme karıştırmadan ayrı
  * durur, böylece yeni bir hazır düzen ya da yeni bir alan tek dosyada eklenir.
  *
- * Kabul edilen şekil (yazılan şekil budur):
+ * Model: ADIM → SET → LOOP.
+ *   - Adım: bir çalışma ya da mola (ad, dakika, tür, bip, görüntü).
+ *   - Set: art arda gelen adımlar + kaç kez art arda uygulanacağı (`repeat`).
+ *   - Loop: setlerin TAMAMI sırayla uygulanır, sonra başa döner; `rounds` kez.
+ *
+ * Kabul edilen şekil:
  *   "pomodoro": {
  *     "enabled": true,
- *     "rounds": 4,
- *     "statuses": [                      // bir döngü: sırayla tekrarlanır
- *       { "name": "STUDY", "minutes": 50 },
- *       { "name": "BREAK", "minutes": 10, "visual": "./resimler/mola.png", "beep": true }
+ *     "rounds": 2,                        // LOOP: tüm set sırası kaç kez
+ *     "sets": [
+ *       { "name": "SET 1", "repeat": 1, "steps": [
+ *         { "name": "STUDY", "minutes": 50 },
+ *         { "name": "BREAK", "minutes": 10 } ] },
+ *       { "steps": [                        // ad yoksa "SET 2", tekrar yoksa 1
+ *         { "name": "STUDY", "minutes": 50 },
+ *         { "name": "LONG BREAK", "minutes": 20, "kind": "break", "beep": false,
+ *           "visual": "./resimler/mola.png" } ] }
  *     ],
  *     "intro": { "visual": null },        // GET READY görüntüsü; boşsa ana görüntü (`clip`)
  *     "countdownSeconds": 3,
@@ -26,35 +36,49 @@
  *     "cue": { "volumeDb": -10, "beepFile": null }
  *   }
  *
- * Eski `project.json` şekli OKUNMAYA devam eder (hiçbir proje bozulmaz): `preset`,
- * `workMinutes`, `breakMinutes`, `breakClip` iki durumlu `[STUDY, BREAK]`
- * listesine çevrilir; `statuses` varsa o kazanır. Bu anahtarlar artık YAZILMAZ ve API
- * gövdesinde kabul edilmez (`legacyKeysIn`). Her durumun `visual`ı boşsa
- * projenin ana görüntüsü (`clip`) gösterilir; `beep: false` o durumun
- * bitişindeki bipi kapatır.
+ * Adım: `name` (≤24 karakter, tek satır), `minutes` (1–180), `kind` ('work' | 'break';
+ * yoksa addan tahmin: `inferKind`), `beep` (varsayılan açık; false → o adımın
+ * bitişinde bip yok), `visual` (boşsa ana görüntü). Set: `name` (varsayılan "SET n"),
+ * `repeat` (1–10), `steps` (1–8 adım). En çok 6 set; bir turda (tekrarlar dahil) en çok 24 adım.
+ *
+ * Yazma (`serializePomodoroPlan`/`serializeSets`): tek, adı "SET 1" ve tekrarı 1 olan set
+ * kısayol olarak `"statuses": [...]` yazılır (basit dosyalar basit kalır), aksi hâlde
+ * `"sets": [...]`. `kind` yalnızca tahminden farklıysa yazılır.
+ *
+ * Okuma: `sets` varsa o; yoksa `statuses` TEK set olur; o da yoksa eski şekil
+ * (`preset`, `workMinutes`, `breakMinutes`, `breakClip` → iki adımlı `[STUDY, BREAK]`,
+ * `breakClip` BREAK görüntüsü). Eski anahtarlar artık YAZILMAZ ve API gövdesinde
+ * kabul edilmez (`legacyKeysIn`).
  *
  * Her Pomodoro videosu `INTRO_SECONDS` (2 dk) süren bir GET READY oturumuyla
- * başlar; `rounds` turluk döngü ondan sonra gelir. Bip akışının TAMAMI budur:
+ * başlar; `rounds` turluk loop ondan sonra gelir. Bip akışının TAMAMI budur:
  * her oturumun (hazırlık dahil) bitişinden önce 3 bip. Ayrı başlangıç sesi yok.
  */
 
 /**
- * Hazır düzenler (kayıtlı setlerin yerleşik hâli). `id` kullanıcıya gösterilen ad.
- * Yeni hazır düzen eklemek: buraya bir kayıt — başka hiçbir yer bilmek zorunda değil.
+ * Hazır programlar (kayıtlı programların yerleşik hâli). `id` kullanıcıya gösterilen ad.
+ * Bir program bir ya da birkaç SET'ten oluşur; set = art arda gelen adımlar (+ kaç kez tekrar).
+ * Yeni hazır program eklemek: buraya bir kayıt — başka hiçbir yer bilmek zorunda değil.
+ * `statuses` her programın BİR TURUNUN açılmış (set tekrarları dahil) adım listesi.
  */
 export const POMODORO_PRESETS = [
-  classicPreset('50/10', 50, 10),
-  classicPreset('30/10', 30, 10),
+  makePreset('50/10', [['SET 1', 1, [['STUDY', 50], ['BREAK', 10]]]]),
+  makePreset('30/10', [['SET 1', 1, [['STUDY', 30], ['BREAK', 10]]]]),
+  makePreset('50/10/50/20', [
+    ['SET 1', 1, [['STUDY', 50], ['BREAK', 10]]],
+    ['SET 2', 1, [['STUDY', 50], ['LONG BREAK', 20]]],
+  ]),
+  makePreset('Klasik 25/5', [
+    ['SET 1', 3, [['STUDY', 25], ['BREAK', 5]]],
+    ['SET 2', 1, [['STUDY', 25], ['LONG BREAK', 15]]],
+  ]),
 ];
 
-function classicPreset(id, workMinutes, breakMinutes) {
-  return {
-    id,
-    statuses: [
-      { name: 'STUDY', minutes: workMinutes, beep: true, visual: null },
-      { name: 'BREAK', minutes: breakMinutes, beep: true, visual: null },
-    ],
-  };
+function makePreset(id, definition) {
+  const sets = definition.map(([name, repeat, steps]) => (
+    makeSet(name, repeat, steps.map(([stepName, minutes]) => makeStep(stepName, minutes)))
+  ));
+  return { id, sets, statuses: flattenSets(sets) };
 }
 
 /** Videonun başındaki GET READY oturumu (sn): her Pomodoro videosunda var, ayarı yok. */
@@ -67,7 +91,8 @@ export const INTRO_NAME = 'GET READY';
 export const POMODORO_DEFAULTS = {
   enabled: false,
   rounds: 4,
-  /** Varsayılan döngü: STUDY 50 + BREAK 10. */
+  /** Varsayılan program: SET 1 = STUDY 50 + BREAK 10. */
+  sets: POMODORO_PRESETS[0].sets,
   statuses: POMODORO_PRESETS[0].statuses,
   countdownSeconds: 3,
   countdownBeep: true,
@@ -86,6 +111,10 @@ const RANGES = {
   countdownSeconds: { min: 0, max: 10 },
   volumeDb: { min: -60, max: 12 },
   statusCount: { min: 1, max: 8 },
+  setCount: { min: 1, max: 6 },
+  repeat: { min: 1, max: 10 },
+  /** Bir turdaki toplam adım (set tekrarları dahil). */
+  totalSteps: { min: 1, max: 24 },
 };
 
 /** Ekranda yazan durum adının en uzun hâli (karakter). */
@@ -107,11 +136,20 @@ export const MATCH_TOLERANCE_SECONDS = 1;
  * @property {number} minutes süre, dakika
  * @property {string|null} visual görüntü yolu (resim ya da döngü videosu); null → ana görüntü (`clip`)
  * @property {boolean} beep bitişinde 3 bip çalsın mı
+ * @property {'work'|'break'} kind çalışma mı mola mı (adından tahmin edilir, değiştirilebilir)
+ */
+
+/**
+ * @typedef {object} PomodoroSetDef
+ * @property {string} name set adı (SET 1…)
+ * @property {number} repeat set art arda kaç kez uygulanır
+ * @property {PomodoroStatus[]} steps setin adımları, sırayla
  */
 
 /**
  * @typedef {object} PomodoroPlan
- * @property {PomodoroStatus[]} statuses bir döngü
+ * @property {PomodoroSetDef[]} sets program: setler sırayla uygulanır; hepsi bitince LOOP başa döner (`rounds` kez)
+ * @property {PomodoroStatus[]} statuses BİR TURUN açılmış (set tekrarları dahil) düz adım listesi — `sets`ten türer
  * @property {{ visual: string|null }} intro GET READY görüntüsü (null → ana görüntü)
  * @property {number} rounds
  * @property {string|null} preset döngü hazır bir düzene denk geliyorsa kimliği, yoksa null
@@ -147,9 +185,8 @@ export function normalizePomodoroSelection(raw, field = 'pomodoro') {
   // modu kapatabilsin, kapalı bir blok build'i durdurmasın.
   if (raw.enabled !== true) return { plan: null, problems };
 
-  const statuses = raw.statuses !== undefined && raw.statuses !== null
-    ? readStatuses(raw.statuses, `${field}.statuses`, problems)
-    : readLegacyStatuses(raw, field, problems);
+  const sets = readSets(raw, field, problems);
+  const statuses = flattenSets(sets);
   const rounds = readNumber(
     raw.rounds, `${field}.rounds`, RANGES.rounds, POMODORO_DEFAULTS.rounds, problems,
   );
@@ -159,6 +196,7 @@ export function normalizePomodoroSelection(raw, field = 'pomodoro') {
   );
 
   const plan = {
+    sets,
     statuses,
     intro: readIntro(raw.intro, `${field}.intro`, problems),
     rounds,
@@ -174,20 +212,24 @@ export function normalizePomodoroSelection(raw, field = 'pomodoro') {
 }
 
 /**
- * Plandan oturumları üretir: önce 2 dk GET READY, sonra her turda durum listesi sırayla.
+ * Plandan oturumları üretir: önce 2 dk GET READY, sonra `rounds` kez: her set sırayla,
+ * her set `repeat` kez, her setin adımları sırayla (LOOP = tüm set sırası).
  *
- * Spec örneği: 50/10 × 4 → GET READY, STUDY 01 … BREAK 04, toplam 242 dk.
- * Tur sayısı ya da liste değişince timeline kendiliğinden yeniden kurulur;
- * başka hiçbir yerde süre hesabı yok.
+ * Örnek: 50/10/50/20 (SET 1: STUDY 50 + BREAK 10, SET 2: STUDY 50 + LONG BREAK 20) × 2 tur →
+ * GET READY, STUDY 01, BREAK 01, STUDY 02, LONG BREAK 01, STUDY 03, BREAK 02, STUDY 04,
+ * LONG BREAK 02. Tur sayısı, set ya da adım değişince timeline kendiliğinden yeniden
+ * kurulur; başka hiçbir yerde süre hesabı yok (arayüz önizlemesi de bunu çağırır).
  *
- * Oturum: `kind` 'ready' | 'status'; `name` ekranda yazan ad; `statusIndex` döngüdeki
- * sırası (GET READY için -1); `visual` o oturumun görüntü yolu (null → ana görüntü);
- * `beep` bitişinde bip çalar mı.
+ * Oturum: `kind` 'ready' | 'status'; `name` ekranda yazan ad; `label` adın kaçıncı kez
+ * geçtiği (STUDY 03); `statusIndex` BİR TURUN açılmış adım listesindeki sırası (GET READY
+ * için -1); `stepKind` 'work' | 'break'; `setIndex`/`setName`/`repeat` oturumun hangi set ve
+ * hangi tekrarda olduğu; `visual` görüntü yolu (null → ana görüntü); `beep` bitişinde bip.
  *
  * @param {PomodoroPlan} plan
  * @returns {{
  *   sessions: Array<{ index: number, kind: 'ready'|'status', statusIndex: number, name: string,
- *     round: number, label: string, visual: string|null, beep: boolean,
+ *     stepKind: 'ready'|'work'|'break', round: number, setIndex: number, setName: string|null,
+ *     repeat: number, label: string, visual: string|null, beep: boolean,
  *     startSeconds: number, endSeconds: number, durationSeconds: number }>,
  *   totalSeconds: number,
  *   totalMinutes: number,
@@ -199,7 +241,11 @@ export function buildTimeline(plan) {
     kind: 'ready',
     statusIndex: -1,
     name: INTRO_NAME,
+    stepKind: 'ready',
     round: 0,
+    setIndex: -1,
+    setName: null,
+    repeat: 0,
     label: INTRO_NAME,
     visual: plan.intro?.visual ?? null,
     beep: true,
@@ -208,24 +254,36 @@ export function buildTimeline(plan) {
     durationSeconds: INTRO_SECONDS,
   }];
   let elapsed = INTRO_SECONDS;
+  const occurrences = new Map();
 
   for (let round = 1; round <= plan.rounds; round++) {
-    plan.statuses.forEach((status, statusIndex) => {
-      const durationSeconds = status.minutes * 60;
-      sessions.push({
-        index: sessions.length,
-        kind: 'status',
-        statusIndex,
-        name: status.name,
-        round,
-        label: `${status.name} ${String(round).padStart(2, '0')}`,
-        visual: status.visual,
-        beep: status.beep,
-        startSeconds: elapsed,
-        endSeconds: elapsed + durationSeconds,
-        durationSeconds,
-      });
-      elapsed += durationSeconds;
+    let statusIndex = 0;
+    plan.sets.forEach((set, setIndex) => {
+      for (let repeat = 1; repeat <= set.repeat; repeat++) {
+        for (const step of set.steps) {
+          const durationSeconds = step.minutes * 60;
+          const occurrence = (occurrences.get(step.name) ?? 0) + 1;
+          occurrences.set(step.name, occurrence);
+          sessions.push({
+            index: sessions.length,
+            kind: 'status',
+            statusIndex: statusIndex++,
+            name: step.name,
+            stepKind: step.kind,
+            round,
+            setIndex,
+            setName: set.name,
+            repeat,
+            label: `${step.name} ${String(occurrence).padStart(2, '0')}`,
+            visual: step.visual,
+            beep: step.beep,
+            startSeconds: elapsed,
+            endSeconds: elapsed + durationSeconds,
+            durationSeconds,
+          });
+          elapsed += durationSeconds;
+        }
+      }
     });
   }
 
@@ -506,8 +564,9 @@ export class PomodoroValidationError extends Error {
 }
 
 /**
- * Plandan `project.json`'a yazılacak sade şekil — yazılan şekil YALNIZCA `statuses`
- * (eski `workMinutes/breakMinutes/breakClip/preset` yazılmaz; dosyada varsa okunmaya devam eder).
+ * Plandan `project.json`'a yazılacak sade şekil. Tek, adı varsayılan ("SET 1") ve tekrarı 1
+ * olan set `statuses` olarak yazılır (basit dosyalar basit kalır); aksi hâlde `sets`.
+ * Eski `workMinutes/breakMinutes/breakClip/preset` yazılmaz; dosyada varsa okunmaya devam eder.
  * Varsayılandan sapmayan alan yazılmaz, dosya şişmez (`serializeAmbientPlan` ile aynı kural).
  *
  * @param {PomodoroPlan|null} plan null → anahtar silinir
@@ -516,16 +575,7 @@ export class PomodoroValidationError extends Error {
 export function serializePomodoroPlan(plan) {
   if (plan === null) return undefined;
 
-  const out = {
-    enabled: true,
-    rounds: plan.rounds,
-    statuses: plan.statuses.map((status) => ({
-      name: status.name,
-      minutes: status.minutes,
-      ...(status.visual === null ? {} : { visual: status.visual }),
-      ...(status.beep ? {} : { beep: false }),
-    })),
-  };
+  const out = { enabled: true, rounds: plan.rounds, ...serializeSets(plan.sets) };
   if (plan.intro.visual !== null) out.intro = { visual: plan.intro.visual };
 
   const defaults = POMODORO_DEFAULTS;
@@ -540,6 +590,37 @@ export function serializePomodoroPlan(plan) {
   if (Object.keys(cue).length > 0) out.cue = cue;
 
   return out;
+}
+
+/**
+ * Set listesinin dosya şekli: tek, adı varsayılan ("SET 1") ve tekrarı 1 olan set
+ * `{ statuses }`, aksi hâlde `{ sets }`. Kayıtlı programlar da aynı şekli yazar.
+ *
+ * @param {PomodoroSetDef[]} sets
+ */
+export function serializeSets(sets) {
+  const [only] = sets;
+  if (sets.length === 1 && only.repeat === 1 && only.name === defaultSetName(0)) {
+    return { statuses: only.steps.map(serializeStep) };
+  }
+  return {
+    sets: sets.map((set, i) => ({
+      ...(set.name === defaultSetName(i) ? {} : { name: set.name }),
+      ...(set.repeat === 1 ? {} : { repeat: set.repeat }),
+      steps: set.steps.map(serializeStep),
+    })),
+  };
+}
+
+/** Adımın dosyaya yazılan şekli: ad ve süre hep; görüntü, sessizlik ve (tahminden farklıysa) tür yalnızca gerektiğinde. */
+function serializeStep(step) {
+  return {
+    name: step.name,
+    minutes: step.minutes,
+    ...(step.kind === inferKind(step.name) ? {} : { kind: step.kind }),
+    ...(step.visual === null ? {} : { visual: step.visual }),
+    ...(step.beep ? {} : { beep: false }),
+  };
 }
 
 // ---------------------------------------------------------------- yardımcılar
@@ -563,6 +644,111 @@ export function describeCycle(statuses) {
   return statuses.map((status) => status.minutes).join('/');
 }
 
+/** Adım türleri: çalışma ya da mola. Önizleme, toplamlar ve renkler buna bakar. */
+export const STEP_KINDS = ['work', 'break'];
+
+/**
+ * Adın türünü tahmin eder (kullanıcı satırdan değiştirebilir): mola/dinlenme anlamı
+ * taşıyan adlar `break`, geri kalanı `work`.
+ *
+ * @param {string} name
+ * @returns {'work'|'break'}
+ */
+export function inferKind(name) {
+  return /break|mola|rest|stretch|esne|walk|y[uü]r[uü]|snack|nefes|(^|\s)ara(\s|$)/i.test(String(name)) ? 'break' : 'work';
+}
+
+/** Varsayılan set adı: SET 1, SET 2… */
+export function defaultSetName(index) {
+  return `SET ${index + 1}`;
+}
+
+/** Adım nesnesi (görüntü yok, bip açık, tür adından tahmin) — `extra` ile ezilir. */
+export function makeStep(name, minutes, extra = {}) {
+  return { name, minutes, visual: null, beep: true, kind: inferKind(name), ...extra };
+}
+
+/** Set nesnesi: ad, tekrar sayısı ve adımlar. */
+export function makeSet(name, repeat, steps) {
+  return { name, repeat, steps };
+}
+
+/**
+ * Setleri BİR TURUN düz adım listesine açar: her set sırayla, her set `repeat` kez, adımlar
+ * kopyalanır. Timeline, görüntü hazırlığı, etiketler ve özetler aynı listeyi kullanır.
+ *
+ * @param {Array<{ repeat: number, steps: PomodoroStatus[] }>} sets
+ * @returns {PomodoroStatus[]}
+ */
+export function flattenSets(sets) {
+  const flat = [];
+  for (const set of sets) {
+    for (let repeat = 0; repeat < set.repeat; repeat++) {
+      for (const step of set.steps) flat.push({ ...step });
+    }
+  }
+  return flat;
+}
+
+/**
+ * Set listesini tek başına doğrular (kayıtlı programlar da aynı kuralı kullanır).
+ *
+ * @param {unknown} value
+ * @param {string} [key] hata mesajlarındaki alan adı
+ * @returns {{ sets: PomodoroSetDef[], problems: string[] }}
+ */
+export function normalizeSetList(value, key = 'sets') {
+  const problems = [];
+  const sets = readSetList(value, key, problems);
+  return { sets, problems };
+}
+
+function readSetList(value, key, problems) {
+  const fallback = () => POMODORO_DEFAULTS.sets.map((set) => ({ ...set, steps: set.steps.map((s) => ({ ...s })) }));
+  const { min, max } = RANGES.setCount;
+  if (!Array.isArray(value) || value.length < min || value.length > max) {
+    problems.push(`${key}: ${min} ile ${max} arasında set içeren bir liste olmalı`);
+    return fallback();
+  }
+
+  const sets = value.map((item, i) => {
+    const at = `${key}[${i}]`;
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+      problems.push(`${at}: nesne olmalı ({ "steps": [{ "name": "STUDY", "minutes": 50 }] })`);
+      return makeSet(defaultSetName(i), 1, [makeStep('STUDY', 50)]);
+    }
+    return makeSet(
+      readSetName(item.name, `${at}.name`, i, problems),
+      readNumber(item.repeat, `${at}.repeat`, RANGES.repeat, 1, problems),
+      readStatuses(item.steps ?? item.statuses, `${at}.steps`, problems),
+    );
+  });
+
+  const total = flattenSets(sets).length;
+  if (total > RANGES.totalSteps.max) {
+    problems.push(`${key}: bir turda en fazla ${RANGES.totalSteps.max} adım olabilir (tekrarlar dahil, şu an ${total})`);
+  }
+  return sets;
+}
+
+function readSetName(value, key, index, problems) {
+  if (value === undefined || value === null || value === '') return defaultSetName(index);
+  if (typeof value !== 'string' || value.trim() === '' || /[\r\n]/.test(value) || value.trim().length > STATUS_NAME_MAX) {
+    problems.push(`${key}: en fazla ${STATUS_NAME_MAX} karakterlik tek satırlık bir ad olmalı (boş bırakırsan "${defaultSetName(index)}" olur)`);
+    return defaultSetName(index);
+  }
+  return value.trim();
+}
+
+function readKind(value, key, name, problems) {
+  if (value === undefined || value === null) return inferKind(name);
+  if (!STEP_KINDS.includes(value)) {
+    problems.push(`${key}: "work" (çalışma) ya da "break" (mola) olmalı (verilen: ${JSON.stringify(value)})`);
+    return inferKind(name);
+  }
+  return value;
+}
+
 /** Eski `project.json` anahtarları: yalnızca OKUNUR; yeni yazımda ve API gövdesinde kullanılmaz. */
 const LEGACY_KEYS = ['preset', 'workMinutes', 'breakMinutes', 'breakClip'];
 
@@ -577,6 +763,15 @@ export function legacyKeysIn(raw) {
   return LEGACY_KEYS.filter((key) => raw[key] !== undefined);
 }
 
+/** `sets` varsa o; yoksa `statuses` TEK set olur; o da yoksa eski şekil (iki adımlı tek set). */
+function readSets(raw, field, problems) {
+  if (raw.sets !== undefined && raw.sets !== null) return readSetList(raw.sets, `${field}.sets`, problems);
+  const steps = raw.statuses !== undefined && raw.statuses !== null
+    ? readStatuses(raw.statuses, `${field}.statuses`, problems)
+    : readLegacyStatuses(raw, field, problems);
+  return [makeSet(defaultSetName(0), 1, steps)];
+}
+
 /** Eski şekil (`preset`/`workMinutes`/`breakMinutes`/`breakClip`) → `[STUDY, BREAK]` listesi. */
 function readLegacyStatuses(raw, field, problems) {
   const preset = readPreset(raw.preset, `${field}.preset`, problems);
@@ -588,34 +783,16 @@ function readLegacyStatuses(raw, field, problems) {
     raw.breakMinutes, `${field}.breakMinutes`, { min: 1, max: 60 }, defaultBreak.minutes, problems,
   );
   return [
-    { name: 'STUDY', minutes: work, visual: null, beep: true },
-    {
-      name: 'BREAK',
-      minutes: rest,
-      visual: readVisual(raw.breakClip, `${field}.breakClip`, problems),
-      beep: true,
-    },
+    makeStep('STUDY', work),
+    makeStep('BREAK', rest, { visual: readVisual(raw.breakClip, `${field}.breakClip`, problems) }),
   ];
-}
-
-/**
- * Durum listesini tek başına doğrular (kayıtlı setler de aynı kuralı kullanır).
- *
- * @param {unknown} value
- * @param {string} [key] hata mesajlarındaki alan adı
- * @returns {{ statuses: PomodoroStatus[], problems: string[] }}
- */
-export function normalizeStatusList(value, key = 'statuses') {
-  const problems = [];
-  const statuses = readStatuses(value, key, problems);
-  return { statuses, problems };
 }
 
 function readStatuses(value, key, problems) {
   const fallback = POMODORO_DEFAULTS.statuses.map((status) => ({ ...status }));
   const { min, max } = RANGES.statusCount;
   if (!Array.isArray(value) || value.length < min || value.length > max) {
-    problems.push(`${key}: ${min} ile ${max} arasında durum içeren bir liste olmalı`);
+    problems.push(`${key}: ${min} ile ${max} arasında adım içeren bir liste olmalı`);
     return fallback;
   }
 
@@ -623,13 +800,15 @@ function readStatuses(value, key, problems) {
     const at = `${key}[${i}]`;
     if (item === null || typeof item !== 'object' || Array.isArray(item)) {
       problems.push(`${at}: nesne olmalı ({ "name": "STUDY", "minutes": 50 })`);
-      return { name: `DURUM ${i + 1}`, minutes: 10, visual: null, beep: true };
+      return makeStep(`DURUM ${i + 1}`, 10);
     }
+    const name = readStatusName(item.name, `${at}.name`, i, problems);
     return {
-      name: readStatusName(item.name, `${at}.name`, i, problems),
+      name,
       minutes: readNumber(item.minutes, `${at}.minutes`, RANGES.minutes, 10, problems),
       visual: readVisual(item.visual, `${at}.visual`, problems),
       beep: readBoolean(item.beep, `${at}.beep`, true, problems),
+      kind: readKind(item.kind, `${at}.kind`, name, problems),
     };
   });
 }
@@ -663,10 +842,10 @@ function readIntro(raw, key, problems) {
 
 function readPreset(value, key, problems) {
   if (value === undefined || value === null) return null;
-  const found = POMODORO_PRESETS.find((p) => p.id === value);
+  const found = POMODORO_PRESETS.find((p) => p.id === value && p.sets.length === 1 && p.statuses.length === 2);
   if (!found) {
     problems.push(
-      `${key}: şunlardan biri olmalı: ${POMODORO_PRESETS.map((p) => `"${p.id}"`).join(', ')} ` +
+      `${key}: şunlardan biri olmalı: ${POMODORO_PRESETS.filter((p) => p.sets.length === 1 && p.statuses.length === 2).map((p) => `"${p.id}"`).join(', ')} ` +
       `(verilen: ${JSON.stringify(value)})`,
     );
     return null;

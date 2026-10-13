@@ -740,7 +740,7 @@ export async function getPomodoro(id, { videosDir = DEFAULT_VIDEOS_DIR, probeFn 
  * isi (setProjectPomodoro → serializePomodoroPlan). `enabled: false` ayari
  * kaldirir ve sistem bugunku gibi calisir.
  *
- * @param {unknown} body `{ enabled, statuses?, intro?, rounds?, countdownSeconds?, countdownBeep? }`
+ * @param {unknown} body `{ enabled, sets? | statuses?, intro?, rounds?, countdownSeconds?, countdownBeep? }`
  *   (eski `preset/workMinutes/breakMinutes/breakClip` anahtarları 400 ile reddedilir).
  *   Durumların içeriğini `normalizePomodoroSelection` doğrular — kural tek yerde, hata 422.
  */
@@ -754,6 +754,8 @@ export async function updatePomodoro(id, body, { videosDir = DEFAULT_VIDEOS_DIR,
     countdownBeep: 'boolean',
     // Durum listesi ve GET READY görüntüsü; görüntü yolları proje klasörüne göreli.
     statuses: 'array',
+    // Çoklu set: [{ name?, repeat?, steps: [...] }]; `statuses` tek setin kısayolu.
+    sets: 'array',
     intro: 'object',
   }, ['enabled']);
 
@@ -1182,6 +1184,7 @@ export function describeReadiness(status) {
       : {
         enabled: true,
         preset: pomodoroPlan.preset,
+        sets: pomodoroPlan.sets,
         statuses: pomodoroPlan.statuses,
         intro: pomodoroPlan.intro,
         rounds: pomodoroPlan.rounds,
@@ -1299,12 +1302,12 @@ async function exists(path) {
 
 /**
  * Eski Pomodoro anahtarları (`preset`, `workMinutes`, `breakMinutes`, `breakClip`) yalnızca
- * dosyadan OKUNUR; API'ye yazılırken `statuses` kullanılmalı.
+ * dosyadan OKUNUR; API'ye yazılırken `sets` (ya da tek set için `statuses`) kullanılmalı.
  */
 function rejectLegacyPomodoroKeys(body) {
   const found = legacyKeysIn(body);
   if (found.length > 0) {
-    throw new ApiError(400, `Use "statuses" (and "intro") instead of: ${found.join(', ')}`, { legacyKeys: found });
+    throw new ApiError(400, `Use "sets" or "statuses" (and "intro") instead of: ${found.join(', ')}`, { legacyKeys: found });
   }
 }
 
@@ -1321,9 +1324,14 @@ function parseCreateBody(body) {
   // Görüntü dosyaları proje kurulunca yüklenir; kurulum sırasında seçilemez.
   const visualGiven = input.pomodoro?.intro?.visual != null
     || (Array.isArray(input.pomodoro?.statuses)
-      && input.pomodoro.statuses.some((status) => status?.visual != null));
+      && input.pomodoro.statuses.some((status) => status?.visual != null))
+    || (Array.isArray(input.pomodoro?.sets)
+      && input.pomodoro.sets.some((set) => {
+        const steps = set?.steps ?? set?.statuses;
+        return Array.isArray(steps) && steps.some((step) => step?.visual != null);
+      }));
   if (visualGiven) {
-    throw new ApiError(400, 'Pomodoro visuals (intro.visual, statuses[].visual) cannot be set while creating a project');
+    throw new ApiError(400, 'Pomodoro visuals (intro.visual, steps[].visual) cannot be set while creating a project');
   }
 
   const ambient = input.ambient ?? [];

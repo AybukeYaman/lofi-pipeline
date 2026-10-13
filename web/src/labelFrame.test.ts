@@ -20,8 +20,8 @@ import {
 import type { PomodoroSession, VideoLabel } from './types';
 
 const SESSIONS: PomodoroSession[] = [
-  { index: 0, kind: 'status', statusIndex: 0, name: 'STUDY', round: 1, label: 'STUDY 01', startSeconds: 0, endSeconds: 3000, durationSeconds: 3000 },
-  { index: 1, kind: 'status', statusIndex: 1, name: 'BREAK', round: 1, label: 'BREAK 01', startSeconds: 3000, endSeconds: 3600, durationSeconds: 600 },
+  { index: 0, kind: 'status', statusIndex: 0, name: 'STUDY', stepKind: 'work', round: 1, setIndex: 0, setName: 'SET 1', repeat: 1, label: 'STUDY 01', startSeconds: 0, endSeconds: 3000, durationSeconds: 3000 },
+  { index: 1, kind: 'status', statusIndex: 1, name: 'BREAK', stepKind: 'break', round: 1, setIndex: 0, setName: 'SET 1', repeat: 1, label: 'BREAK 01', startSeconds: 3000, endSeconds: 3600, durationSeconds: 600 },
 ];
 
 const label = (patch: Partial<VideoLabel>): VideoLabel => ({

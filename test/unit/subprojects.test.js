@@ -180,6 +180,15 @@ describe('alt proje ve müzik aktarımı (subprojects)', () => {
         (error) => error.status === 422 && error.details.problems.some((p) => p.includes('statuses[0].name')),
       );
       await assert.rejects(readFile(join(tempDir, 'bad-statuses', 'project.json')), { code: 'ENOENT' });
+
+      // Çoklu set de kurulumda yazılır.
+      const sets = [
+        { steps: [{ name: 'STUDY', minutes: 50 }, { name: 'BREAK', minutes: 10 }] },
+        { steps: [{ name: 'STUDY', minutes: 50 }, { name: 'LONG BREAK', minutes: 20 }] },
+      ];
+      const multi = await createProject({ name: 'multi-set', pomodoro: { sets, rounds: 2 } }, { videosDir: tempDir });
+      assert.deepEqual(multi.project.projectJson.data.pomodoro, { enabled: true, rounds: 2, sets });
+      assert.equal(multi.project.readiness.pomodoro.totalMinutes, 2 + 2 * 130);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }
@@ -206,6 +215,8 @@ describe('alt proje ve müzik aktarımı (subprojects)', () => {
       for (const pomodoro of [
         { statuses: [{ name: 'A', minutes: 5, visual: 'resimler/x.png' }] },
         { intro: { visual: 'resimler/x.png' } },
+        { sets: [{ steps: [{ name: 'A', minutes: 5, visual: 'resimler/x.png' }] }] },
+        { sets: [{ statuses: [{ name: 'A', minutes: 5, visual: 'resimler/x.png' }] }] },
       ]) {
         await assert.rejects(
           createProject({ name: 'bad-pomo3', pomodoro }, { videosDir: tempDir }),

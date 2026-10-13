@@ -15,7 +15,7 @@ import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import { normalizeAmbientSelection } from './ambient-plan.js';
 import { AspectError, parseAspect } from './aspect.js';
 import { normalizeLabelPlan } from './label-plan.js';
-import { normalizePomodoroSelection } from './pomodoro-plan.js';
+import { flattenSets, normalizePomodoroSelection } from './pomodoro-plan.js';
 import { IMAGE_EXTENSIONS, isImagePath } from './files.js';
 import { readJsonFile } from './workspace.js';
 
@@ -157,12 +157,26 @@ async function resolveProject(json, { projectPath, overrides = {} }) {
       await expectKind(visual, 'file', key, problems);
       return { visual, visualSource: isImagePath(visual) ? 'image' : 'clip' };
     };
-    const statuses = [];
-    for (const [i, status] of pomodoroPlan.statuses.entries()) {
-      statuses.push({ ...status, ...await resolveVisual(status.visual, `pomodoro.statuses[${i}].visual`) });
+    // Hata mesajındaki alan adı dosyada yazan şekle göre: `sets`, tek setin `statuses`
+    // kısayolu ya da eski `breakClip`.
+    const fileShape = json.pomodoro.sets != null ? 'sets' : (json.pomodoro.statuses != null ? 'statuses' : 'legacy');
+    const visualKey = (setIndex, stepIndex) => {
+      if (fileShape === 'sets') return `pomodoro.sets[${setIndex}].steps[${stepIndex}].visual`;
+      if (fileShape === 'statuses') return `pomodoro.statuses[${stepIndex}].visual`;
+      return 'pomodoro.breakClip';
+    };
+    const sets = [];
+    for (const [setIndex, set] of pomodoroPlan.sets.entries()) {
+      const steps = [];
+      for (const [stepIndex, step] of set.steps.entries()) {
+        const key = visualKey(setIndex, stepIndex);
+        steps.push({ ...step, ...await resolveVisual(step.visual, key) });
+      }
+      sets.push({ ...set, steps });
     }
     const intro = await resolveVisual(pomodoroPlan.intro.visual, 'pomodoro.intro.visual');
-    pomodoro = { ...pomodoroPlan, statuses, intro, cue };
+    // `statuses` (bir turun açılmış listesi) çözülmüş yollarla yeniden türetilir.
+    pomodoro = { ...pomodoroPlan, sets, statuses: flattenSets(sets), intro, cue };
   }
 
   // Etiketler: şekil çözümlemesi core/label-plan.js'te. Bozuk kayıt sessizce

@@ -3843,3 +3843,240 @@ input.status-set-name,
 /* Araç çubukları dar ekranda alt satıra sarar; dosya sayısı hep sağda ve tek satır. */
 .toolbar { flex-wrap: wrap; }
 .mimi-count { margin-left: auto; white-space: nowrap; }
+
+/* Durum düzenleyicisi: bölüm başlığı, satır numarası ve "videoda böyle ilerler" şeridi. */
+.status-section-title {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-sm, 13px);
+  font-weight: 600;
+}
+
+.status-section-title .field-hint { font-weight: 400; }
+
+.status-index {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--bg-surface-subtle);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* Pomodoro program düzenleyicisi (ProgramEditor): SET kartları. */
+.program-sets {
+  display: grid;
+  gap: var(--space-3);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.program-set {
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface-subtle);
+}
+
+.program-set.is-over {
+  border-color: var(--border-current);
+  background: var(--primary-subtle);
+}
+
+.program-set-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+input.program-set-name,
+.field input.program-set-name {
+  width: auto;
+  flex: 1 1 120px;
+  min-width: 100px;
+  max-width: 200px;
+  min-height: 28px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-surface-elevated);
+  color: var(--text-main);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.program-set-name[aria-invalid='true'] { border-color: var(--danger, #c0392b); }
+
+.program-repeat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.program-repeat select {
+  min-height: 28px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-surface-elevated);
+  color: var(--text-main);
+  font: inherit;
+  font-size: 13px;
+}
+
+.program-kind { white-space: nowrap; }
+
+/* Önizleme (ProgramPreview). */
+.program-preview {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+
+.program-preview-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm, 13px);
+  font-weight: 600;
+}
+
+.program-flow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.program-flow-set {
+  position: relative;
+  min-width: 140px;
+  padding: var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface-subtle);
+}
+
+.program-flow-set + .program-flow-set::before {
+  content: '→';
+  position: absolute;
+  left: -14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.program-flow-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+  font-size: 12px;
+}
+
+.program-badge {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--primary-subtle);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.program-flow-steps {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+}
+
+.program-flow-steps li,
+.program-legend li,
+.program-details li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.program-flow-name { font-weight: 600; }
+
+.program-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.program-loop {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm, 13px);
+  font-weight: 600;
+}
+
+.program-bar {
+  display: flex;
+  gap: 2px;
+  height: 22px;
+  margin-top: var(--space-3);
+}
+
+.program-seg {
+  flex-basis: 0;
+  min-width: 2px;
+  border-radius: 3px;
+}
+
+.program-seg.is-round-start { margin-left: 5px; }
+
+.program-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-muted);
+  font-size: var(--text-xs, 12px);
+}
+
+.program-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+}
+
+.program-stats div {
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--bg-surface-subtle);
+}
+
+.program-stats dt { color: var(--text-muted); font-size: 11.5px; }
+.program-stats dd { margin: 0; font-size: 13px; font-weight: 600; }
+.program-stats .is-total { background: var(--primary-subtle); }
+
+.program-story {
+  margin: var(--space-3) 0 0;
+  padding-left: 18px;
+  font-size: var(--text-sm, 13px);
+}
+
+.program-warning { margin: 4px 0 0; }
+
+.program-details { margin-top: var(--space-2); font-size: 12.5px; }
+.program-details summary { cursor: pointer; color: var(--text-muted); }
+.program-details ol { display: grid; gap: 2px; margin: 6px 0 0; padding: 0; list-style: none; }

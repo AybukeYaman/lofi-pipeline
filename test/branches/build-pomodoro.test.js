@@ -170,3 +170,75 @@ describe('build — Pomodoro: kırpma, oturumlar ve işaret sesleri', () => {
     assert.equal(report.pomodoroPlan.cueEvents, 9);
   });
 });
+
+describe('build — Pomodoro: iki setli program, bipler set sırasını izler', () => {
+  let dir;
+  let report;
+  let config;
+
+  before(async () => {
+    dir = await tempDir('build-pomodoro-sets');
+    await mkdir(dir.path('audio'));
+    await makeDriftingClip(dir.path('clip.mp4'), { width: 320, height: 180 });
+    // 480 sn müzik = 480 sn timeline: kırpma yok.
+    await makeQuietTone(dir.path('audio/01-a.m4a'), { seconds: 240, frequency: 220 });
+    await makeQuietTone(dir.path('audio/02-b.m4a'), { seconds: 240, frequency: 330 });
+
+    await writeFile(dir.path('project.json'), JSON.stringify({
+      clip: './clip.mp4',
+      audioDir: './audio',
+      order: ['01-a.m4a', '02-b.m4a'],
+      pomodoro: {
+        enabled: true,
+        rounds: 1,
+        // SET 1 × 2: STUDY (bip yok) + BREAK; SET 2: STUDY (bip var) + LONG BREAK (bip yok).
+        sets: [
+          { repeat: 2, steps: [{ name: 'STUDY', minutes: 1, beep: false }, { name: 'BREAK', minutes: 1 }] },
+          { steps: [{ name: 'STUDY', minutes: 1 }, { name: 'LONG BREAK', minutes: 1, beep: false }] },
+        ],
+        cue: { volumeDb: 12 },
+      },
+      video: { cropBottom: 0, aspect: '16:9', preset: 'ultrafast', fadeOut: 2 },
+      output: { dir: './out' },
+      stream: { dir: null },
+    }));
+
+    config = await loadProject(dir.path('project.json'));
+    report = await runBuild(config, { render: true });
+  });
+  after(() => dir?.cleanup());
+
+  test('timeline dökümü set sırasını ve ad sayaçlarını verir', async () => {
+    const text = await readFile(config.output.pomodoroTimeline, 'utf8');
+    assert.equal(text.trim(), [
+      'GET READY', '00:00 - 02:00', '',
+      'STUDY 01', '02:00 - 03:00', '',
+      'BREAK 01', '03:00 - 04:00', '',
+      'STUDY 02', '04:00 - 05:00', '',
+      'BREAK 02', '05:00 - 06:00', '',
+      'STUDY 03', '06:00 - 07:00', '',
+      'LONG BREAK 01', '07:00 - 08:00',
+    ].join('\n'));
+    const out = await probe(config.output.video);
+    assert.ok(Math.abs(out.duration - 480) < 0.2, `süre ${out.duration}`);
+  });
+
+  test('bipler videodan okunur: yalnızca bipi açık adımların son 3 saniyesinde', async () => {
+    const { onsets } = await findOnsets(config.output.video, {
+      dir,
+      threshold: 10 ** ((report.details['06'].musicPeakDb + 6) / 20),
+      minGapSeconds: 0.5,
+    });
+    const expected = [
+      117, 118, 119, // GET READY
+      237, 238, 239, // BREAK 01
+      357, 358, 359, // BREAK 02
+      417, 418, 419, // STUDY 03 (SET 2'de bip açık)
+    ];
+    assert.equal(onsets.length, expected.length, `bulunan işaretler: ${onsets.map((o) => o.toFixed(2))}`);
+    for (const [i, at] of expected.entries()) {
+      assert.ok(Math.abs(onsets[i] - at) < 0.2, `bip ${i}: ${onsets[i].toFixed(2)} sn, beklenen ${at} sn`);
+    }
+    assert.equal(report.pomodoroPlan.cueEvents, 12);
+  });
+});

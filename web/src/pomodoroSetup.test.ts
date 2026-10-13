@@ -1,273 +1,345 @@
 import { describe, expect, it } from 'vitest';
 
+import { POMODORO_PRESETS, buildTimeline, flattenSets, makeSet, makeStep } from '../../core/pomodoro-plan.js';
 import {
   INTRO_MINUTES,
   INTRO_TAB,
   MAX_MINUTES,
-  MAX_STATUSES,
-  ROUND_CHOICES,
   STATUS_NAME_MAX,
-  addStatus,
+  addSet,
+  addStep,
   bareVisual,
+  canAddSet,
+  canAddStep,
+  canRepeat,
+  choiceFromDraft,
   cycleMinutes,
+  defaultSets,
+  describeProgram,
   durationLabel,
   hasEmptyName,
-  matchingSet,
-  moveStatus,
+  matchingProgram,
+  moveSet,
+  moveStep,
   pomodoroPayload,
   pomodoroSummary,
+  programSessions,
+  programStats,
+  programWarnings,
   readinessPayload,
-  removeStatus,
+  removeSet,
+  removeStep,
   roundChoicesFor,
   roundsKeepingTotal,
+  sameProgram,
+  setsFromProgram,
+  setsPayload,
   statusTabs,
-  statusesFromSet,
-  statusesPayload,
   studyMinutes,
   totalMinutes,
-  updateStatus,
+  totalSteps,
+  updateSet,
+  updateStep,
   visualOfTab,
   withTabVisual,
-  type EditableStatus,
+  type EditableSet,
 } from './pomodoroSetup';
-import type { PomodoroSet, ProjectPomodoro } from './types';
+import type { PomodoroProgram, ProjectDetail, ProjectPomodoro } from './types';
 
-const status = (name: string, minutes: number, extra: Partial<EditableStatus> = {}): EditableStatus => (
-  { name, minutes, beep: true, visual: null, ...extra }
-);
-const CLASSIC = [status('STUDY', 50), status('BREAK', 10)];
-const STRETCH = [status('STUDY', 25), status('STRETCH', 5), status('BREAK', 10)];
+const step = makeStep;
+/** İki çalışmadan sonra uzun mola: SET 1 = 50+10, SET 2 = 50+20. */
+const longBreak = (): EditableSet[] => [
+  makeSet('SET 1', 1, [step('STUDY', 50), step('BREAK', 10)]),
+  makeSet('SET 2', 1, [step('STUDY', 50), step('LONG BREAK', 20)]),
+];
+const PROGRAMS: PomodoroProgram[] = POMODORO_PRESETS.map((preset) => ({
+  id: preset.id.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+  name: preset.id,
+  builtin: true,
+  sets: preset.sets.map((set) => ({ ...set, steps: set.steps.map(({ visual: _visual, ...rest }) => rest) })),
+  updatedAt: null,
+}));
 
-describe('durationLabel', () => {
-  it('dakikayı günlük dille yazar', () => {
+describe('süre yardımcıları', () => {
+  it('durationLabel dakikayı günlük dille yazar', () => {
     expect(durationLabel(40)).toBe('40 dk');
     expect(durationLabel(60)).toBe('1 saat');
     expect(durationLabel(80)).toBe('1 saat 20 dk');
-    expect(durationLabel(120)).toBe('2 saat');
-    expect(durationLabel(240)).toBe('4 saat');
   });
-});
 
-describe('cycleMinutes / studyMinutes / totalMinutes / pomodoroSummary', () => {
-  it('50/10 × 2 tur = 2 saat çalışma + 2 dk GET READY', () => {
+  it('50/10/50/20 × 2 tur: döngü, çalışma ve toplam süre; özet cümlesi', () => {
+    const flat = flattenSets(longBreak());
     expect(INTRO_MINUTES).toBe(2);
-    expect(cycleMinutes(CLASSIC)).toBe(60);
-    expect(studyMinutes(CLASSIC, 2)).toBe(120);
-    expect(totalMinutes(CLASSIC, 2)).toBe(122);
-    expect(pomodoroSummary(CLASSIC, 2)).toBe('50/10 · 2 saat 2 dk · 2 tur');
+    expect(cycleMinutes(flat)).toBe(130);
+    expect(studyMinutes(flat, 2)).toBe(260);
+    expect(totalMinutes(flat, 2)).toBe(262);
+    expect(pomodoroSummary(flat, 2)).toBe('50/10/50/20 · 4 saat 22 dk · 2 tur');
   });
 
-  it('üç durumlu döngü de aynı hesapla: 25/5/10 × 3 tur', () => {
-    expect(cycleMinutes(STRETCH)).toBe(40);
-    expect(totalMinutes(STRETCH, 3)).toBe(122);
-    expect(pomodoroSummary(STRETCH, 3)).toBe('25/5/10 · 2 saat 2 dk · 3 tur');
-  });
-});
-
-describe('roundsKeepingTotal', () => {
-  it('liste değişince çalışma süresini korur (2 saat: 50/10 → 30/10 = 3 tur)', () => {
-    expect(roundsKeepingTotal(120, [status('A', 30), status('B', 10)])).toBe(3);
-    expect(roundsKeepingTotal(120, CLASSIC)).toBe(2);
-  });
-
-  it('tam bölünmüyorsa en yakın tura yuvarlar, en az 1 tur', () => {
-    expect(roundsKeepingTotal(60, [status('A', 30), status('B', 10)])).toBe(2);
-    expect(roundsKeepingTotal(10, CLASSIC)).toBe(1);
-  });
-
-  it('24 turu aşmaz', () => {
-    expect(roundsKeepingTotal(10_000, [status('A', 1)])).toBe(24);
-  });
-});
-
-describe('roundChoicesFor', () => {
-  it('sabit liste; elle yazılmış eski değer de görünür ve sıralı kalır', () => {
-    expect(roundChoicesFor(2)).toEqual(ROUND_CHOICES);
-    expect(roundChoicesFor(8)).toEqual([1, 2, 3, 4, 6, 8]);
+  it('roundsKeepingTotal süreyi korur; roundChoicesFor elle yazılmış değeri gösterir', () => {
+    expect(roundsKeepingTotal(120, flattenSets(defaultSets()))).toBe(2);
+    expect(roundsKeepingTotal(120, flattenSets(longBreak()))).toBe(1);
     expect(roundChoicesFor(5)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(roundChoicesFor(2)).toEqual([1, 2, 3, 4, 6]);
   });
 });
 
-describe('liste düzenleme', () => {
-  it('addStatus kullanılmamış ilk öneri adıyla, 10 dk, bip açık ekler; sınırı aşmaz', () => {
-    const one = addStatus(CLASSIC);
-    expect(one).toHaveLength(3);
-    expect(one[2]).toEqual({ name: 'STRETCH', minutes: 10, beep: true, visual: null });
-    expect(addStatus(one)[3].name).toBe('LONG BREAK');
-
-    let full = CLASSIC;
-    for (let i = 0; i < MAX_STATUSES + 3; i++) full = addStatus(full);
-    expect(full).toHaveLength(MAX_STATUSES);
-  });
-
-  it('addStatus ad karşılaştırmasında büyük/küçük harfe bakmaz', () => {
-    const list = [status('stretch', 5), status('STUDY', 25)];
-    expect(addStatus(list)[2].name).toBe('LONG BREAK');
-  });
-
-  it('removeStatus en az bir durum bırakır', () => {
-    expect(removeStatus(STRETCH, 1).map((s) => s.name)).toEqual(['STUDY', 'BREAK']);
-    expect(removeStatus([status('A', 5)], 0)).toHaveLength(1);
-  });
-
-  it('moveStatus satırı taşır; geçersiz sırada listeyi değiştirmez', () => {
-    expect(moveStatus(STRETCH, 2, 0).map((s) => s.name)).toEqual(['BREAK', 'STUDY', 'STRETCH']);
-    expect(moveStatus(STRETCH, 0, 1).map((s) => s.name)).toEqual(['STRETCH', 'STUDY', 'BREAK']);
-    expect(moveStatus(STRETCH, 1, 1)).toBe(STRETCH);
-    expect(moveStatus(STRETCH, 0, 3)).toBe(STRETCH);
-    expect(moveStatus(STRETCH, -1, 1)).toBe(STRETCH);
-  });
-
-  it('updateStatus süreyi sınırlara kıstırır, adı kısaltır ve tek satıra çevirir', () => {
-    expect(updateStatus(CLASSIC, 0, { minutes: 0 })[0].minutes).toBe(1);
-    expect(updateStatus(CLASSIC, 0, { minutes: 9999 })[0].minutes).toBe(MAX_MINUTES);
-    expect(updateStatus(CLASSIC, 0, { minutes: 12.6 })[0].minutes).toBe(13);
-    expect(updateStatus(CLASSIC, 0, { minutes: Number.NaN })[0].minutes).toBe(50);
-    expect(updateStatus(CLASSIC, 1, { name: 'x'.repeat(40) })[1].name).toHaveLength(STATUS_NAME_MAX);
-    expect(updateStatus(CLASSIC, 0, { name: 'A\nB' })[0].name).toBe('A B');
-    expect(updateStatus(CLASSIC, 0, { beep: false })[0].beep).toBe(false);
-    // Diğer satırlar aynı nesne kalır
-    expect(updateStatus(CLASSIC, 0, { beep: false })[1]).toBe(CLASSIC[1]);
-  });
-
-  it('hasEmptyName boş ya da yalnızca boşluk olan adı yakalar', () => {
-    expect(hasEmptyName(CLASSIC)).toBe(false);
-    expect(hasEmptyName([status('  ', 5)])).toBe(true);
-  });
-});
-
-describe('kayıtlı setler', () => {
-  const set = (id: string, statuses: PomodoroSet['statuses'], extra: Partial<PomodoroSet> = {}): PomodoroSet => (
-    { id, name: id, builtin: false, statuses, updatedAt: null, ...extra }
-  );
-  const classic = set('50-10', [
-    { name: 'STUDY', minutes: 50, beep: true }, { name: 'BREAK', minutes: 10, beep: true },
-  ], { builtin: true });
-
-  it('matchingSet ad, süre ve bip birebir uyunca bulur; görüntü karşılaştırılmaz', () => {
-    expect(matchingSet(CLASSIC, [classic])?.id).toBe('50-10');
-    expect(matchingSet([status('STUDY', 50, { visual: 'resimler/a.png' }), status('BREAK', 10)], [classic])?.id).toBe('50-10');
-    expect(matchingSet([status('STUDY', 50), status('BREAK', 10, { beep: false })], [classic])).toBeNull();
-    expect(matchingSet([status('STUDY', 50), status('REST', 10)], [classic])).toBeNull();
-    expect(matchingSet(STRETCH, [classic])).toBeNull();
-  });
-
-  it('bozuk set eşleşmez', () => {
-    expect(matchingSet(CLASSIC, [{ ...classic, error: 'bozuk' }])).toBeNull();
-  });
-
-  it('statusesFromSet görüntüleri korur: aynı adlı durumun görüntüsü yeni listede de kalır', () => {
-    const current = [status('STUDY', 50, { visual: './resimler/calis.png' }), status('BREAK', 10, { visual: './resimler/mola.png' })];
-    const next = statusesFromSet(
-      set('x', [
-        { name: 'BREAK', minutes: 5, beep: false },
-        { name: 'STUDY', minutes: 25, beep: true },
-        { name: 'WALK', minutes: 5, beep: true },
-      ]),
-      current,
-    );
-    expect(next.map((s) => [s.name, s.visual])).toEqual([
-      ['BREAK', './resimler/mola.png'],
-      ['STUDY', './resimler/calis.png'],
-      ['WALK', null],
+describe('set düzenleme', () => {
+  it('varsayılan program SET 1 = STUDY 50 + BREAK 10; türler addan', () => {
+    expect(defaultSets()).toEqual([
+      { name: 'SET 1', repeat: 1, steps: [step('STUDY', 50), step('BREAK', 10)] },
     ]);
-    expect(next[0]).toMatchObject({ minutes: 5, beep: false });
+    expect(defaultSets()[0].steps.map((s) => s.kind)).toEqual(['work', 'break']);
+  });
+
+  it('addSet sonraki adla, son çalışmanın süresiyle tek adımlı set ekler', () => {
+    const sets = addSet(defaultSets());
+    expect(sets.map((s) => s.name)).toEqual(['SET 1', 'SET 2']);
+    expect(sets[1].steps).toEqual([step('STUDY', 50)]);
+  });
+
+  it('removeSet varsayılan adları yeniden numaralar, elle yazılanı korur; son set silinmez', () => {
+    const sets = [makeSet('SET 1', 1, [step('A', 5)]), makeSet('Sabah', 1, [step('B', 5)]), makeSet('SET 3', 1, [step('C', 5)])];
+    expect(removeSet(sets, 0).map((s) => s.name)).toEqual(['Sabah', 'SET 2']);
+    const one = defaultSets();
+    expect(removeSet(one, 0)).toBe(one);
+  });
+
+  it('moveSet sırayı değiştirir, varsayılan adlar yeni sıraya göre', () => {
+    const moved = moveSet(longBreak(), 0, 1);
+    expect(moved.map((s) => s.name)).toEqual(['SET 1', 'SET 2']);
+    expect(moved[0].steps[1].name).toBe('LONG BREAK');
+    expect(moveSet(longBreak(), 0, 5).map((s) => s.steps[1].name)).toEqual(['BREAK', 'LONG BREAK']);
+  });
+
+  it('updateSet adı kısaltır ve tek satıra indirir; sınırı aşan tekrar yok sayılır', () => {
+    let sets = updateSet(defaultSets(), 0, { name: 'Çok\nuzun bir set adı burada yazıyor' });
+    expect(sets[0].name.length).toBe(STATUS_NAME_MAX);
+    expect(sets[0].name).not.toMatch(/\n/);
+    sets = updateSet(sets, 0, { repeat: 3 });
+    expect(sets[0].repeat).toBe(3);
+    expect(updateSet(sets, 0, { repeat: 11 })[0].repeat).toBe(3);
+    expect(updateSet(sets, 0, { repeat: 0 })[0].repeat).toBe(3);
+  });
+
+  it('sınırlar: set başına 8 adım, turda 24 adım (tekrarlar dahil), en çok 6 set', () => {
+    const eight = [makeSet('SET 1', 1, Array.from({ length: 8 }, () => step('A', 5)))];
+    expect(canAddStep(eight, 0)).toBe(false);
+    expect(addStep(eight, 0)).toBe(eight);
+
+    const full = [makeSet('SET 1', 10, [step('STUDY', 25), step('BREAK', 5)]), makeSet('SET 2', 1, [step('A', 5), step('B', 5), step('C', 5), step('D', 5)])];
+    expect(totalSteps(full)).toBe(24);
+    expect(canAddStep(full, 1)).toBe(false);
+    expect(canAddSet(full)).toBe(false);
+    expect(canRepeat(full, 0, 9)).toBe(true);
+    expect(canRepeat(defaultSets(), 0, 10)).toBe(true);
+    expect(canRepeat(defaultSets(), 0, 11)).toBe(false);
+
+    const six = Array.from({ length: 6 }, (_, i) => makeSet(`SET ${i + 1}`, 1, [step('A', 5)]));
+    expect(canAddSet(six)).toBe(false);
+  });
+});
+
+describe('adım düzenleme', () => {
+  it('addStep kullanılmamış ilk öneriyi 10 dk ekler', () => {
+    const sets = addStep(defaultSets(), 0);
+    expect(sets[0].steps[2]).toEqual(step('LONG BREAK', 10));
+    expect(sets[0].steps[2].kind).toBe('break');
+  });
+
+  it('removeStep siler; setin son adımı silinmez', () => {
+    expect(removeStep(defaultSets(), 0, 0)[0].steps.map((s) => s.name)).toEqual(['BREAK']);
+    const single = [makeSet('SET 1', 1, [step('A', 5)])];
+    expect(removeStep(single, 0, 0)).toBe(single);
+  });
+
+  it('moveStep aynı set içinde ve setler arasında taşır', () => {
+    expect(moveStep(defaultSets(), { set: 0, step: 0 }, { set: 0, step: 1 })[0].steps.map((s) => s.name)).toEqual(['BREAK', 'STUDY']);
+
+    const across = moveStep(longBreak(), { set: 0, step: 1 }, { set: 1, step: 0 });
+    expect(across.map((s) => s.steps.map((x) => x.name))).toEqual([['STUDY'], ['BREAK', 'STUDY', 'LONG BREAK']]);
+
+    const lonely = [makeSet('SET 1', 1, [step('A', 5)]), makeSet('SET 2', 1, [step('B', 5)])];
+    expect(moveStep(lonely, { set: 0, step: 0 }, { set: 1, step: 0 })).toBe(lonely);
+  });
+
+  it('moveStep tur sınırını aşacaksa taşımaz (hedef set çok tekrarlıysa)', () => {
+    const sets = [makeSet('SET 1', 1, [step('A', 5), step('B', 5)]), makeSet('SET 2', 10, [step('C', 5), step('D', 5)])];
+    expect(totalSteps(sets)).toBe(22);
+    expect(moveStep(sets, { set: 0, step: 0 }, { set: 1, step: 0 })).toBe(sets);
+  });
+
+  it('updateStep: süre sınıra kıstırılır; ad değişince tahmin edilen tür yeniden tahmin edilir, elle seçilen korunur', () => {
+    let sets = updateStep(defaultSets(), 0, 0, { minutes: 999 });
+    expect(sets[0].steps[0].minutes).toBe(MAX_MINUTES);
+    expect(updateStep(sets, 0, 0, { minutes: 0 })[0].steps[0].minutes).toBe(1);
+
+    sets = updateStep(defaultSets(), 0, 0, { name: 'MOLA' });
+    expect(sets[0].steps[0].kind).toBe('break');
+
+    sets = updateStep(defaultSets(), 0, 1, { kind: 'work' });
+    sets = updateStep(sets, 0, 1, { name: 'Okuma molası' });
+    expect(sets[0].steps[1].kind).toBe('work');
+  });
+
+  it('hasEmptyName boş adım ya da set adını bulur', () => {
+    expect(hasEmptyName(defaultSets())).toBe(false);
+    expect(hasEmptyName(updateStep(defaultSets(), 0, 0, { name: '  ' }))).toBe(true);
+    expect(hasEmptyName(updateSet(defaultSets(), 0, { name: '' }))).toBe(true);
+  });
+});
+
+describe('hazır ve kayıtlı programlar', () => {
+  it('sameProgram yapı aynıysa doğru (görüntü karşılaştırılmaz)', () => {
+    const withVisual = withTabVisual('STUDY', 'a.png', longBreak(), { visual: null }).sets;
+    expect(sameProgram(withVisual, PROGRAMS[2].sets)).toBe(true);
+    expect(sameProgram(updateSet(longBreak(), 1, { repeat: 2 }), PROGRAMS[2].sets)).toBe(false);
+    expect(sameProgram(updateStep(longBreak(), 0, 1, { beep: false }), PROGRAMS[2].sets)).toBe(false);
+  });
+
+  it('matchingProgram uyan hazır programı bulur; bozuk kayıt atlanır', () => {
+    expect(matchingProgram(defaultSets(), PROGRAMS)?.name).toBe('50/10');
+    expect(matchingProgram(longBreak(), PROGRAMS)?.name).toBe('50/10/50/20');
+    expect(matchingProgram(updateStep(longBreak(), 0, 0, { minutes: 45 }), PROGRAMS)).toBeNull();
+    const broken = { ...PROGRAMS[0], id: 'bozuk', builtin: false, error: 'JSON' };
+    expect(matchingProgram(defaultSets(), [broken])).toBeNull();
+  });
+
+  it('setsFromProgram aynı adlı adımın görüntüsünü korur', () => {
+    const current = withTabVisual('BREAK', 'mola.png', defaultSets(), { visual: null }).sets;
+    const next = setsFromProgram(PROGRAMS[3], current);
+    expect(next.map((s) => [s.name, s.repeat])).toEqual([['SET 1', 3], ['SET 2', 1]]);
+    expect(next[0].steps.map((s) => s.visual)).toEqual([null, 'mola.png']);
+    expect(next[1].steps.map((s) => s.visual)).toEqual([null, null]);
+  });
+});
+
+describe('önizleme: gerçek zaman çizelgesiyle aynı kaynak', () => {
+  it('programSessions core buildTimeline ile birebir aynı', () => {
+    const sets = updateSet(longBreak(), 0, { repeat: 2 });
+    expect(programSessions(sets, 3)).toEqual(buildTimeline({ sets, rounds: 3, intro: { visual: null } }).sessions);
+  });
+
+  it('50/10/50/20 × 2: sıra, sayaçlar ve set bilgisi', () => {
+    const sessions = programSessions(longBreak(), 2);
+    expect(sessions.map((s) => s.label)).toEqual([
+      'GET READY', 'STUDY 01', 'BREAK 01', 'STUDY 02', 'LONG BREAK 01',
+      'STUDY 03', 'BREAK 02', 'STUDY 04', 'LONG BREAK 02',
+    ]);
+    expect(sessions.slice(1).map((s) => s.setIndex)).toEqual([0, 0, 1, 1, 0, 0, 1, 1]);
+  });
+
+  it('programStats: çalışma sayısı ve süreler doğru', () => {
+    expect(programStats(longBreak(), 2)).toEqual({
+      workCount: 4, breakCount: 4, workMinutes: 200, breakMinutes: 60,
+      introMinutes: 2, totalMinutes: 262, stepsPerRound: 4,
+    });
+  });
+
+  it('bir adım değişince set, loop ve toplam birlikte güncellenir', () => {
+    const changed = updateStep(longBreak(), 1, 1, { minutes: 30 });
+    expect(programStats(changed, 2).totalMinutes).toBe(282);
+    expect(programStats(updateSet(changed, 0, { repeat: 2 }), 2).workCount).toBe(6);
+  });
+
+  it('describeProgram düz Türkçe anlatır', () => {
+    expect(describeProgram(longBreak(), 2)).toEqual([
+      '1. çalışma (50 dk) bitince 10 dk BREAK verilir.',
+      '2. çalışma (50 dk) bitince 20 dk LONG BREAK verilir.',
+      'Bu set sırası toplam 2 kez uygulanacak.',
+      'Program 4 çalışma adımından sonra sona erecek.',
+    ]);
+    expect(describeProgram([makeSet('SET 1', 1, [step('STUDY', 25), step('READ', 25)])], 1)).toEqual([
+      '1. çalışma (25 dk) bitince doğrudan sonraki adıma geçilir.',
+      '2. çalışma (25 dk) bitince doğrudan sonraki adıma geçilir.',
+      'Bu set sırası bir kez uygulanacak.',
+      'Program 2 çalışma adımından sonra sona erecek.',
+    ]);
+  });
+
+  it('programWarnings: moladan başlama, arka arkaya mola, hiç çalışma yok', () => {
+    expect(programWarnings(longBreak())).toEqual([]);
+    expect(programWarnings([makeSet('SET 1', 1, [step('BREAK', 5)])])).toHaveLength(2);
+    const twice = programWarnings([makeSet('SET 1', 1, [step('STUDY', 5), step('BREAK', 5), step('WALK', 5)])]);
+    expect(twice).toHaveLength(1);
+    expect(twice[0]).toMatch(/arka arkaya/);
   });
 });
 
 describe('Video adımı sekmeleri', () => {
-  it('GET READY + her farklı durum adı; aynı adlılar tek sekme', () => {
-    const list = [status('STUDY', 25), status('BREAK', 5), status('STUDY', 25), status('BREAK', 5)];
-    expect(statusTabs(list)).toEqual([
-      { key: INTRO_TAB, label: 'GET READY' },
-      { key: 'STUDY', label: 'STUDY' },
-      { key: 'BREAK', label: 'BREAK' },
+  it('statusTabs aynı adlı adımları tek sekmede toplar', () => {
+    expect(statusTabs(flattenSets(longBreak())).map((t) => t.label)).toEqual(['GET READY', 'STUDY', 'BREAK', 'LONG BREAK']);
+  });
+
+  it('withTabVisual aynı adlı bütün adımları her sette günceller; visualOfTab okur', () => {
+    const { sets, intro } = withTabVisual('STUDY', 'calisma.png', longBreak(), { visual: null });
+    expect(flattenSets(sets).map((s) => s.visual)).toEqual(['calisma.png', null, 'calisma.png', null]);
+    expect(visualOfTab('STUDY', flattenSets(sets), intro)).toBe('calisma.png');
+    const ready = withTabVisual(INTRO_TAB, 'hazir.png', sets, intro);
+    expect(ready.intro.visual).toBe('hazir.png');
+    expect(ready.sets).toBe(sets);
+  });
+});
+
+describe('sunucu gövdesi', () => {
+  it('setsPayload adları kırpar, türü gönderir, bip/görüntüyü yalnızca gerekirse', () => {
+    let sets = updateStep(longBreak(), 0, 0, { name: ' STUDY ' });
+    sets = updateStep(sets, 1, 1, { beep: false });
+    sets = withTabVisual('BREAK', 'm.png', sets, { visual: null }).sets;
+    expect(setsPayload(sets)).toEqual([
+      { name: 'SET 1', repeat: 1, steps: [{ name: 'STUDY', minutes: 50, kind: 'work' }, { name: 'BREAK', minutes: 10, kind: 'break', visual: 'm.png' }] },
+      { name: 'SET 2', repeat: 1, steps: [{ name: 'STUDY', minutes: 50, kind: 'work' }, { name: 'LONG BREAK', minutes: 20, kind: 'break', beep: false }] },
     ]);
   });
 
-  it('visualOfTab sekmenin kayıtlı görüntüsünü verir, yoksa null', () => {
-    const list = [status('STUDY', 25), status('BREAK', 5, { visual: './resimler/mola.png' })];
-    expect(visualOfTab('BREAK', list, { visual: null })).toBe('./resimler/mola.png');
-    expect(visualOfTab('STUDY', list, { visual: null })).toBeNull();
-    expect(visualOfTab(INTRO_TAB, list, { visual: './resimler/hazir.png' })).toBe('./resimler/hazir.png');
-    expect(visualOfTab('YOK', list, { visual: null })).toBeNull();
+  it('readinessPayload proje durumundan tam gövde kurar', () => {
+    const readiness = {
+      enabled: true, rounds: 2, sets: longBreak(), statuses: flattenSets(longBreak()),
+      intro: { visual: './hazir.png' }, countdownBeep: true,
+    } as NonNullable<ProjectDetail['readiness']['pomodoro']>;
+    const body = readinessPayload(readiness, { rounds: 3 });
+    expect(body.rounds).toBe(3);
+    expect(body.intro).toEqual({ visual: './hazir.png' });
+    expect(body.sets?.map((s) => s.steps.length)).toEqual([2, 2]);
   });
 
-  it('withTabVisual aynı adlı BÜTÜN durumları günceller, GET READY ayrı alana yazar', () => {
-    const list = [status('STUDY', 25), status('BREAK', 5), status('STUDY', 25), status('BREAK', 5)];
-    const study = withTabVisual('STUDY', 'resimler/a.png', list, { visual: null });
-    expect(study.statuses.map((s) => s.visual)).toEqual(['resimler/a.png', null, 'resimler/a.png', null]);
-    expect(study.intro.visual).toBeNull();
-
-    const intro = withTabVisual(INTRO_TAB, 'resimler/h.png', list, { visual: null });
-    expect(intro.intro.visual).toBe('resimler/h.png');
-    expect(intro.statuses).toBe(list);
-
-    expect(withTabVisual('STUDY', null, study.statuses, study.intro).statuses.every((s) => s.visual === null)).toBe(true);
+  it('pomodoroPayload ayar yoksa varsayılanları gönderir', () => {
+    const data = {
+      settings: null,
+      defaults: { enabled: false, rounds: 4, sets: defaultSets(), statuses: flattenSets(defaultSets()), countdownSeconds: 3, countdownBeep: true },
+    } as unknown as ProjectPomodoro;
+    expect(pomodoroPayload(data)).toEqual({
+      enabled: true,
+      rounds: 4,
+      sets: [{ name: 'SET 1', repeat: 1, steps: [{ name: 'STUDY', minutes: 50, kind: 'work' }, { name: 'BREAK', minutes: 10, kind: 'break' }] }],
+      countdownBeep: true,
+    });
   });
 
-  it('bareVisual ./ önekini atar', () => {
+  it('bareVisual baştaki ./ işaretini atar', () => {
     expect(bareVisual('./resimler/a.png')).toBe('resimler/a.png');
     expect(bareVisual('resimler/a.png')).toBe('resimler/a.png');
   });
 });
 
-describe('sunucuya giden gövde', () => {
-  it('statusesPayload: bip açıksa ve görüntü yoksa o alanlar gönderilmez, ad kırpılır', () => {
-    expect(statusesPayload([
-      status(' STUDY ', 50),
-      status('BREAK', 10, { beep: false, visual: './resimler/mola.png' }),
-    ])).toEqual([
-      { name: 'STUDY', minutes: 50 },
-      { name: 'BREAK', minutes: 10, beep: false, visual: './resimler/mola.png' },
-    ]);
+describe('choiceFromDraft', () => {
+  it('yeni taslak setleriyle geri gelir', () => {
+    const restored = choiceFromDraft({ sets: longBreak(), rounds: 3 });
+    expect(restored?.rounds).toBe(3);
+    expect(restored?.sets.map((s) => s.steps.map((x) => x.name))).toEqual([['STUDY', 'BREAK'], ['STUDY', 'LONG BREAK']]);
   });
 
-  const data = {
-    defaults: { enabled: false, rounds: 4, statuses: CLASSIC, countdownSeconds: 3, countdownBeep: true },
-    settings: {
-      statuses: [status('STUDY', 25), status('STRETCH', 5, { visual: './resimler/e.png' })],
-      intro: { visual: './resimler/h.png' },
-      rounds: 2,
-      preset: null,
-      countdownSeconds: 3,
-      countdownBeep: false,
-      cue: { volumeDb: -10, beepFile: null },
-    },
-  } as unknown as ProjectPomodoro;
-
-  it('pomodoroPayload ayardaki her şeyi taşır; değişiklik üstüne biner', () => {
-    expect(pomodoroPayload(data)).toEqual({
-      enabled: true,
-      rounds: 2,
-      statuses: [{ name: 'STUDY', minutes: 25 }, { name: 'STRETCH', minutes: 5, visual: './resimler/e.png' }],
-      intro: { visual: './resimler/h.png' },
-      countdownBeep: false,
-    });
-    expect(pomodoroPayload(data, { rounds: 3 }).rounds).toBe(3);
+  it('eski taslağın düz listesi tek set olur; tür addan, bip korunur', () => {
+    const restored = choiceFromDraft({ statuses: [{ name: 'STUDY', minutes: 25 }, { name: 'MOLA', minutes: 5, beep: false }], rounds: 4 });
+    expect(restored?.sets).toHaveLength(1);
+    expect(restored?.sets[0].name).toBe('SET 1');
+    expect(restored?.sets[0].steps.map((s) => [s.kind, s.beep])).toEqual([['work', true], ['break', false]]);
   });
 
-  it('ayar yoksa varsayılanlardan kurulur', () => {
-    const payload = pomodoroPayload({ ...data, settings: null });
-    expect(payload.rounds).toBe(4);
-    expect(payload.statuses).toEqual([{ name: 'STUDY', minutes: 50 }, { name: 'BREAK', minutes: 10 }]);
-    expect('intro' in payload).toBe(false);
-  });
-
-  it('readinessPayload proje durumundan aynı gövdeyi kurar (ağır ölçüm ucunu çağırmadan)', () => {
-    const payload = readinessPayload({
-      enabled: true,
-      statuses: [status('STUDY', 25), status('BREAK', 5, { beep: false })],
-      intro: { visual: null },
-      rounds: 3,
-      countdownBeep: true,
-    });
-    expect(payload).toEqual({
-      enabled: true,
-      rounds: 3,
-      statuses: [{ name: 'STUDY', minutes: 25 }, { name: 'BREAK', minutes: 5, beep: false }],
-      countdownBeep: true,
-    });
-    expect(readinessPayload({ enabled: true, statuses: [status('A', 5)], rounds: 1 }, { intro: {} }).intro).toEqual({});
+  it('bozuk taslak atılır', () => {
+    expect(choiceFromDraft(null)).toBeNull();
+    expect(choiceFromDraft({ workMinutes: 50 })).toBeNull();
+    expect(choiceFromDraft({ sets: [{ steps: [{ name: 'A' }] }] })).toBeNull();
+    expect(choiceFromDraft({ statuses: [] })).toBeNull();
   });
 });

@@ -17,12 +17,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 
+import { formatClock } from '../../../core/pomodoro-plan.js';
 import { fetchProjectPomodoro, updateProjectPomodoro } from '../api';
 import {
-  pomodoroPayload, pomodoroSummary, statusesPayload, type PomodoroChoice,
+  pomodoroPayload, pomodoroSummary, setsPayload, type PomodoroChoice,
 } from '../pomodoroSetup';
 import { PickerPanel } from './PickerPanel';
-import { StatusEditor } from './StatusEditor';
+import { ProgramEditor } from './ProgramEditor';
 import type { ProjectPomodoro, UpdatePomodoroPayload } from '../types';
 
 type PomodoroPickerProps = {
@@ -32,23 +33,15 @@ type PomodoroPickerProps = {
   onSaved?: () => void | Promise<void>;
 };
 
-/** `mm:ss` — core/pomodoro-plan.js formatClock aynası (dakika saate çevrilmez). */
-function formatClock(seconds: number | null | undefined): string {
-  if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return '--:--';
-  const total = Math.round(Math.abs(seconds));
-  const sign = seconds < 0 ? '-' : '';
-  return `${sign}${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
-}
-
 /** Ekrandaki düğmelerin değeri: ayar yoksa (Pomodoro kapalı) varsayılanlar. */
 function choiceOf(data: ProjectPomodoro): PomodoroChoice {
   const current = data.settings ?? data.defaults;
   return {
-    // Eski dosyalardaki genel "bip kapalı" ayarı satırlara yansır (hepsi sessiz görünür);
-    // sonraki kayıtta satır başına yazılır, genel anahtar açık kalır.
-    statuses: current.countdownBeep
-      ? current.statuses
-      : current.statuses.map((status) => ({ ...status, beep: false })),
+    // Eski dosyalardaki genel "bip kapalı" ayarı adımlara yansır (hepsi sessiz görünür);
+    // sonraki kayıtta adım başına yazılır, genel anahtar açık kalır.
+    sets: current.countdownBeep
+      ? current.sets
+      : current.sets.map((set) => ({ ...set, steps: set.steps.map((step) => ({ ...step, beep: false })) })),
     rounds: current.rounds,
   };
 }
@@ -165,14 +158,14 @@ export function PomodoroPicker({
 
           {data ? (
             <>
-              {/* --- durum listesi ve süre: proje formuyla AYNI bileşen */}
-              <StatusEditor
+              {/* --- program ve süre: proje formuyla AYNI bileşen (önizleme içinde) */}
+              <ProgramEditor
                 isOff={!data.enabled}
                 disabled={saving}
                 onTurnOff={() => void save(null)}
                 value={choiceOf(data)}
                 onChange={(next) => void save({
-                  statuses: statusesPayload(next.statuses),
+                  sets: setsPayload(next.sets),
                   rounds: next.rounds,
                   countdownBeep: true,
                 })}
@@ -193,12 +186,12 @@ export function PomodoroPicker({
                     <dl className="readiness-list" style={{ margin: 0 }}>
                       <div>
                         <dt>Pomodoro timeline</dt>
-                        <dd>{formatClock(comparison?.timelineSeconds)}</dd>
+                        <dd>{comparison ? formatClock(comparison.timelineSeconds) : '--:--'}</dd>
                       </div>
                       <div>
                         <dt>Müzik toplamı</dt>
                         <dd>
-                          {formatClock(comparison?.musicSeconds)}
+                          {comparison ? formatClock(comparison.musicSeconds) : '--:--'}
                           <span className="field-hint"> ({data.music.trackCount} parça)</span>
                         </dd>
                       </div>
@@ -216,21 +209,7 @@ export function PomodoroPicker({
                     ))}
                   </div>
 
-                  {validation?.timeline ? (
-                    <details style={{ marginTop: 10 }}>
-                      <summary className="field-hint" style={{ cursor: 'pointer' }}>
-                        Oturum listesi ({validation.timeline.sessions.length} oturum)
-                      </summary>
-                      <ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 12.5 }}>
-                        {validation.timeline.sessions.map((session) => (
-                          <li key={session.index}>
-                            <strong>{session.label}</strong>{' '}
-                            {formatClock(session.startSeconds)} - {formatClock(session.endSeconds)}
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
-                  ) : null}
+
                 </>
               ) : null}
             </>

@@ -17,8 +17,9 @@ import type {
   UpdateAmbientPayload,
   UpdatePomodoroPayload,
   ProjectSummary,
-  PomodoroSet,
-  PomodoroSetsResponse,
+  PomodoroProgram,
+  PomodoroProgramsResponse,
+  StepSetPayload,
   PromptLibraryResponse,
   PromptPayload,
   VideoSource,
@@ -203,34 +204,35 @@ export async function updateProjectCrop(
   return handleResponse<ProjectDetail>(response, 'Crop settings could not be updated.');
 }
 
-// ------------------------------------------------- kayıtlı Pomodoro setleri (projeden bağımsız)
+// ------------------------------------------------- hazır/kayıtlı Pomodoro programları (projeden bağımsız)
 
-const setUrl = (id: string) => `/api/pomodoro-sets/${encodeURIComponent(id)}`;
+// Rota adı tarihsel: /api/pomodoro-sets — içindekiler PROGRAM (setler + adımlar).
+const programUrl = (id: string) => `/api/pomodoro-sets/${encodeURIComponent(id)}`;
 
-/** Hazır düzenler (50/10, 30/10) + kullanıcının kaydettiği setler. */
-export async function fetchPomodoroSets(): Promise<PomodoroSetsResponse> {
+/** Hazır programlar + kullanıcının kaydettikleri. */
+export async function fetchPomodoroPrograms(): Promise<PomodoroProgramsResponse> {
   const response = await fetch('/api/pomodoro-sets');
-  return handleResponse<PomodoroSetsResponse>(response, 'Pomodoro sets could not be loaded.');
+  return handleResponse<PomodoroProgramsResponse>(response, 'Pomodoro programs could not be loaded.');
 }
 
-/** Yeni set ekler; kimlik addan türetilir. Yalnızca ad, dakika ve bip kaydedilir (görüntü girmez). */
-export async function createPomodoroSet(
-  payload: { name: string; statuses: PomodoroSet['statuses'] },
-): Promise<{ set: PomodoroSet }> {
-  return sendJson('POST', '/api/pomodoro-sets', payload, 'Pomodoro set could not be saved.');
+/** Yeni program kaydeder; kimlik addan türetilir. Görüntü kaydedilmez. */
+export async function createPomodoroProgram(
+  payload: { name: string; sets: StepSetPayload[] },
+): Promise<{ set: PomodoroProgram }> {
+  return sendJson('POST', '/api/pomodoro-sets', payload, 'Pomodoro program could not be saved.');
 }
 
-/** Kayıtlı seti günceller; ad değişse de kimlik sabit kalır. */
-export async function updatePomodoroSet(
+/** Kayıtlı programı günceller; ad değişse de kimlik sabit kalır. */
+export async function updatePomodoroProgram(
   id: string,
-  payload: { name?: string; statuses?: PomodoroSet['statuses'] },
-): Promise<{ set: PomodoroSet }> {
-  return sendJson('PUT', setUrl(id), payload, 'Pomodoro set could not be updated.');
+  payload: { name?: string; sets?: StepSetPayload[] },
+): Promise<{ set: PomodoroProgram }> {
+  return sendJson('PUT', programUrl(id), payload, 'Pomodoro program could not be updated.');
 }
 
-export async function deletePomodoroSet(id: string): Promise<{ ok: boolean; deleted: string }> {
-  const response = await fetch(setUrl(id), { method: 'DELETE' });
-  return handleResponse(response, 'Pomodoro set could not be deleted.');
+export async function deletePomodoroProgram(id: string): Promise<{ ok: boolean; deleted: string }> {
+  const response = await fetch(programUrl(id), { method: 'DELETE' });
+  return handleResponse(response, 'Pomodoro program could not be deleted.');
 }
 
 // ------------------------------------------------- prompt kütüphanesi (projeden bağımsız)

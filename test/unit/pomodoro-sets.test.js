@@ -1,5 +1,5 @@
 /**
- * prep/pomodoro-sets.js + server/pomodoro-set-api.js — kayıtlı durum listeleri.
+ * prep/pomodoro-sets.js + server/pomodoro-set-api.js — kayıtlı programlar (setler + adımlar).
  *
  * Depo geçici klasörde: gerçek pomodoro-sets/ klasörüne dokunulmaz.
  */
@@ -75,6 +75,30 @@ describe('set deposu — yaz, oku, sil', () => {
     }));
     const loaded = await loadPomodoroSet('elle', { dir });
     assert.equal('visual' in loaded.statuses[0], false);
+    assert.equal('visual' in loaded.sets[0].steps[0], false);
+  });
+
+  test('çoklu set programı sets olarak yazılır, tekrar ve tür korunur', async () => {
+    const dir = await library();
+    await writePomodoroSet({
+      id: 'uzun-mola',
+      name: 'Uzun mola',
+      sets: [
+        { name: 'SET 1', repeat: 3, steps: [{ name: 'STUDY', minutes: 25 }, { name: 'BREAK', minutes: 5 }] },
+        { name: 'Son', steps: [{ name: 'STUDY', minutes: 25 }, { name: 'UZUN', minutes: 15, kind: 'break', visual: './x.png' }] },
+      ],
+    }, { dir });
+    const onDisk = JSON.parse(await readFile(join(dir, 'uzun-mola.json'), 'utf8'));
+    assert.equal(onDisk.statuses, undefined);
+    assert.deepEqual(onDisk.sets, [
+      { repeat: 3, steps: [{ name: 'STUDY', minutes: 25 }, { name: 'BREAK', minutes: 5 }] },
+      { name: 'Son', steps: [{ name: 'STUDY', minutes: 25 }, { name: 'UZUN', minutes: 15, kind: 'break' }] },
+    ]);
+
+    const loaded = await loadPomodoroSet('uzun-mola', { dir });
+    assert.deepEqual(loaded.sets.map((set) => [set.name, set.repeat, set.steps.length]), [['SET 1', 3, 2], ['Son', 1, 2]]);
+    assert.equal(loaded.statuses.length, 8);
+    assert.equal(loaded.sets[1].steps[1].kind, 'break');
   });
 
   test('geçersiz içerik diske hiç gitmez ve bütün sorunlar birlikte bildirilir', async () => {
@@ -83,15 +107,15 @@ describe('set deposu — yaz, oku, sil', () => {
       writePomodoroSet({ id: 'kotu', name: '', statuses: [{ name: '', minutes: 0 }] }, { dir }),
       (error) => error instanceof PomodoroSetError
         && error.problems.some((p) => p.includes('name boş'))
-        && error.problems.some((p) => p.includes('statuses[0].name'))
-        && error.problems.some((p) => p.includes('statuses[0].minutes')),
+        && error.problems.some((p) => p.includes('steps[0].name'))
+        && error.problems.some((p) => p.includes('steps[0].minutes')),
     );
     assert.deepEqual(await listPomodoroSetIds({ dir }), []);
   });
 
   test('hazır düzen adıyla kayıt yapılamaz', async () => {
     const dir = await library();
-    assert.deepEqual(BUILTIN_SET_IDS, ['50-10', '30-10']);
+    assert.deepEqual(BUILTIN_SET_IDS, ['50-10', '30-10', '50-10-50-20', 'klasik-25-5']);
     await assert.rejects(
       writePomodoroSet({ id: '50-10', name: '50/10', statuses: CYCLE }, { dir }),
       (error) => error instanceof PomodoroSetError && error.problems[0].includes('hazır bir düzene ait'),
@@ -122,18 +146,23 @@ describe('set deposu — yaz, oku, sil', () => {
 });
 
 describe('set API — liste, ekle, güncelle, sil', () => {
-  test('liste hazır düzenleri (50/10, 30/10) önde, kayıtlıları arkada verir', async () => {
+  test('liste hazır programları önde, kayıtlıları arkada verir', async () => {
     const dir = await library();
     await createPomodoroSet({ name: 'Odak 25', statuses: CYCLE }, { dir });
     const { sets, limits } = await getPomodoroSets({ dir });
 
-    assert.deepEqual(sets.map((s) => [s.id, s.builtin]), [['50-10', true], ['30-10', true], ['odak-25', false]]);
-    assert.deepEqual(sets[0].statuses, [
-      { name: 'STUDY', minutes: 50, beep: true },
-      { name: 'BREAK', minutes: 10, beep: true },
+    assert.deepEqual(sets.map((s) => [s.id, s.builtin]), [
+      ['50-10', true], ['30-10', true], ['50-10-50-20', true], ['klasik-25-5', true], ['odak-25', false],
     ]);
+    assert.deepEqual(sets[0].sets.map((set) => set.steps.map((step) => [step.name, step.minutes, step.kind])), [
+      [['STUDY', 50, 'work'], ['BREAK', 10, 'break']],
+    ]);
+    assert.deepEqual(sets[3].sets.map((set) => set.repeat), [3, 1]);
+    assert.equal('statuses' in sets[0], false);
+    assert.equal('visual' in sets[0].sets[0].steps[0], false);
     assert.equal(limits.name, 60);
-    assert.equal('path' in sets[2], false);
+    assert.equal('path' in sets[4], false);
+    assert.equal(sets[4].sets[0].steps.length, 3);
   });
 
   test('ekleme: kimlik addan türer; aynı ad 409, hazır düzen adı 409, harfsiz ad 400', async () => {
@@ -160,7 +189,11 @@ describe('set API — liste, ekle, güncelle, sil', () => {
     );
     await assert.rejects(
       createPomodoroSet({ name: 'Bos Liste', statuses: [] }, { dir }),
-      (error) => error.status === 422 && error.details.problems.some((p) => p.includes('statuses')),
+      (error) => error.status === 422 && error.details.problems.some((p) => p.includes('steps')),
+    );
+    await assert.rejects(
+      createPomodoroSet({ name: 'Cok Tekrar', sets: [{ repeat: 11, steps: CYCLE }] }, { dir }),
+      (error) => error.status === 422 && error.details.problems.some((p) => p.includes('repeat')),
     );
   });
 
@@ -171,11 +204,18 @@ describe('set API — liste, ekle, güncelle, sil', () => {
     const renamed = await updatePomodoroSet('odak', { name: 'Odak Yeni' }, { dir });
     assert.equal(renamed.set.id, 'odak');
     assert.equal(renamed.set.name, 'Odak Yeni');
-    assert.equal(renamed.set.statuses.length, 3);
+    assert.equal(renamed.set.sets[0].steps.length, 3);
 
     const shorter = await updatePomodoroSet('odak', { statuses: [{ name: 'STUDY', minutes: 90 }] }, { dir });
     assert.equal(shorter.set.name, 'Odak Yeni');
-    assert.deepEqual(shorter.set.statuses.map((s) => s.minutes), [90]);
+    assert.deepEqual(shorter.set.sets[0].steps.map((s) => s.minutes), [90]);
+
+    const twoSets = await updatePomodoroSet('odak', {
+      sets: [{ steps: [{ name: 'STUDY', minutes: 50 }] }, { repeat: 2, steps: [{ name: 'BREAK', minutes: 10 }] }],
+    }, { dir });
+    assert.deepEqual(twoSets.set.sets.map((set) => [set.name, set.repeat]), [['SET 1', 1], ['SET 2', 2]]);
+    const renamedAgain = await updatePomodoroSet('odak', { name: 'Odak 3' }, { dir });
+    assert.equal(renamedAgain.set.sets.length, 2);
 
     await assert.rejects(updatePomodoroSet('yok', { name: 'X' }, { dir }), (error) => error.status === 404);
     await assert.rejects(
@@ -240,7 +280,7 @@ describe('set rotaları (HTTP)', () => {
 
     const listed = await call('GET', '/api/pomodoro-sets');
     assert.equal(listed.status, 200);
-    assert.deepEqual(listed.json.sets.map((s) => s.id), ['50-10', '30-10', 'rota-seti']);
+    assert.deepEqual(listed.json.sets.map((s) => s.id), ['50-10', '30-10', '50-10-50-20', 'klasik-25-5', 'rota-seti']);
 
     const updated = await call('PUT', '/api/pomodoro-sets/rota-seti', { name: 'Rota Seti 2' });
     assert.equal(updated.json.set.name, 'Rota Seti 2');

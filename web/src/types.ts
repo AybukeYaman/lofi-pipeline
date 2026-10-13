@@ -137,6 +137,9 @@ export type ProjectReadiness = {
   pomodoro?: {
     enabled: boolean;
     preset?: string | null;
+    /** Program: setler sırayla, her set `repeat` kez. */
+    sets?: StepSet[];
+    /** Bir turun açılmış (set tekrarları dahil) adım listesi — `sets`ten türer. */
     statuses?: PomodoroStatus[];
     intro?: { visual: string | null };
     rounds?: number;
@@ -261,33 +264,58 @@ export type ProjectAmbient = {
 
 // ------------------------------------------------------------------ Pomodoro
 
-/** Döngüdeki bir durum (STUDY, BREAK, STRETCH…) — core/pomodoro-plan.js `PomodoroStatus` aynası. */
+/** Programdaki bir adım (STUDY, BREAK, STRETCH…) — core/pomodoro-plan.js `PomodoroStatus` aynası. */
 export type PomodoroStatus = {
   /** Ekranda yazan ad. */
   name: string;
   minutes: number;
+  /** Çalışma mı mola mı (addan tahmin edilir, değiştirilebilir). */
+  kind: StepKind;
   /** Bitişinde 3 bip çalsın mı. */
   beep: boolean;
   /** Görüntü yolu (proje klasörüne göreli); null → ana görüntüyle aynı. */
   visual: string | null;
 };
 
-/** Kayıtlı set (yalnızca ad, dakika, bip) — GET /api/pomodoro-sets. Hazır düzenler `builtin: true`. */
-export type PomodoroSet = {
+export type StepKind = 'work' | 'break';
+
+/** Set: art arda gelen adımlar + kaç kez art arda uygulanacağı. */
+export type StepSet = {
+  name: string;
+  repeat: number;
+  steps: PomodoroStatus[];
+};
+
+/**
+ * Hazır/kayıtlı PROGRAM (setler + adımlar; görüntü girmez) — GET /api/pomodoro-sets.
+ * Rota ve yanıt alanı adı tarihsel olarak "sets"; arayüzde bunlara "program" denir.
+ * Hazır programlar `builtin: true`.
+ */
+export type PomodoroProgram = {
   id: string;
   name: string;
   builtin: boolean;
-  statuses: Array<Pick<PomodoroStatus, 'name' | 'minutes' | 'beep'>>;
+  sets: Array<{ name: string; repeat: number; steps: Array<Omit<PomodoroStatus, 'visual'>> }>;
   updatedAt: string | null;
-  /** Dosya bozuksa sebebi; bozuk set seçilemez. */
+  /** Dosya bozuksa sebebi; bozuk program seçilemez. */
   error?: string;
 };
 
-export type PomodoroSetsResponse = { sets: PomodoroSet[]; limits: { name: number } };
+/** `sets` = programların listesi (sunucunun alan adı). */
+export type PomodoroProgramsResponse = { sets: PomodoroProgram[]; limits: { name: number } };
+
+/** Sunucuya giden set şekli (PUT .../pomodoro, POST /api/projects, kayıtlı program). */
+export type StepSetPayload = {
+  name?: string;
+  repeat?: number;
+  steps: Array<{ name: string; minutes: number; kind?: StepKind; beep?: boolean; visual?: string }>;
+};
 
 /** project.json'daki normalize edilmiş Pomodoro ayarı. */
 export type PomodoroSettings = {
-  /** Bir turun durumları, sırayla tekrarlanır. */
+  /** Program: setler sırayla, her set `repeat` kez; hepsi bitince `rounds` kez başa döner. */
+  sets: StepSet[];
+  /** Bir turun açılmış (set tekrarları dahil) adım listesi. */
   statuses: PomodoroStatus[];
   /** GET READY görüntüsü; null → ana görüntü. */
   intro: { visual: string | null };
@@ -348,7 +376,12 @@ export type PomodoroSession = {
   statusIndex: number;
   /** Ekranda yazan ad: "GET READY", "STUDY", "BREAK"… */
   name: string;
+  stepKind: 'ready' | StepKind;
   round: number;
+  /** Hangi set (GET READY için -1) ve o setin kaçıncı tekrarı. */
+  setIndex: number;
+  setName: string | null;
+  repeat: number;
   /** "GET READY" / "STUDY 01" / "BREAK 03". */
   label: string;
   startSeconds: number;
@@ -386,7 +419,7 @@ export type PomodoroTrim = {
 /** GET/PUT /api/projects/:id/pomodoro yanıtı. */
 export type ProjectPomodoro = {
   enabled: boolean;
-  defaults: Pick<PomodoroSettings, 'statuses' | 'rounds' | 'countdownSeconds' | 'countdownBeep'> & { enabled: boolean };
+  defaults: Pick<PomodoroSettings, 'sets' | 'statuses' | 'rounds' | 'countdownSeconds' | 'countdownBeep'> & { enabled: boolean };
   /** Kapalıyken null. */
   settings: PomodoroSettings | null;
   /** project.json'daki pomodoro bloğu bozuksa açıklamalar. */
@@ -414,8 +447,8 @@ export type ProjectPomodoro = {
 export type UpdatePomodoroPayload = {
   enabled: boolean;
   rounds?: number;
-  /** Durum listesi; `visual` yoksa o durum ana görüntüyü kullanır. */
-  statuses?: Array<{ name: string; minutes: number; beep?: boolean; visual?: string }>;
+  /** Program; adımda `visual` yoksa ana görüntü kullanılır. */
+  sets?: StepSetPayload[];
   intro?: { visual?: string };
   countdownSeconds?: number;
   countdownBeep?: boolean;
@@ -454,7 +487,8 @@ export type CreateProjectPayload = {
   aspect?: string;
   /** Yalnızca "Pomodoro" seçildiyse; Ambiance'ta hiç gönderilmez. */
   pomodoro?: {
-    statuses: Array<{ name: string; minutes: number; beep?: boolean }>;
+    /** Görüntü kurulumda verilemez (sunucu 400). */
+    sets: StepSetPayload[];
     rounds: number;
     countdownBeep?: boolean;
   };

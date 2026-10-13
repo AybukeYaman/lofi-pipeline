@@ -18,8 +18,8 @@ import { ApiError, parseBody } from './project-api.js';
 /** Aynı seti iki istek birlikte yazmasın. */
 const exclusive = createExclusive('Set is being updated');
 
-/** Set gövdesi: ad ve durumlar (içeriği prep/pomodoro-sets.js doğrular). */
-const SET_BODY = { name: 'string', statuses: 'array' };
+/** Program gövdesi: ad ve setler (ya da tek setin `statuses` kısayolu); içeriği prep/pomodoro-sets.js doğrular. */
+const SET_BODY = { name: 'string', sets: 'array', statuses: 'array' };
 
 /**
  * Hazır düzenler + kayıtlı setler (hazırlar önde). Bozuk dosya listeyi düşürmez.
@@ -44,10 +44,11 @@ export async function getPomodoroSet(id, { dir = POMODORO_SET_DIR } = {}) {
 /**
  * Set ekler. Kimlik addan türetilir; aynı kimlik (ya da hazır düzen adı) varsa 409.
  *
- * @param {unknown} body `{ name, statuses }`
+ * @param {unknown} body `{ name, sets }` (ya da tek set için `{ name, statuses }`)
  */
 export async function createPomodoroSet(body, { dir = POMODORO_SET_DIR } = {}) {
-  const input = parseBody(body, SET_BODY, ['name', 'statuses']);
+  const input = parseBody(body, SET_BODY, ['name']);
+  if (input.sets === undefined && input.statuses === undefined) throw new ApiError(400, 'Missing field: sets');
   const id = setIdFrom(input.name);
   if (!POMODORO_SET_ID_PATTERN.test(id)) {
     throw new ApiError(400, 'Name must contain at least one letter or digit', { name: input.name });
@@ -68,7 +69,7 @@ export async function createPomodoroSet(body, { dir = POMODORO_SET_DIR } = {}) {
  * Seti günceller. Verilmeyen alan korunur; ad değişse de kimlik SABİT kalır
  * (dosya adı ve arayüzdeki bağlantı değişmesin).
  *
- * @param {unknown} body `{ name?, statuses? }`
+ * @param {unknown} body `{ name?, sets? | statuses? }`
  */
 export async function updatePomodoroSet(id, body, { dir = POMODORO_SET_DIR } = {}) {
   const input = parseBody(body ?? {}, SET_BODY);
@@ -76,10 +77,12 @@ export async function updatePomodoroSet(id, body, { dir = POMODORO_SET_DIR } = {
 
   return exclusive(id, async () => {
     const existing = await load(id, dir);
+    const changesProgram = input.sets !== undefined || input.statuses !== undefined;
     const next = {
       id: existing.id,
       name: input.name ?? existing.name,
-      statuses: input.statuses ?? existing.statuses,
+      // Yapı verilmediyse kayıtlı setler olduğu gibi kalır; verildiyse eskisinin yerine geçer.
+      ...(changesProgram ? { sets: input.sets, statuses: input.statuses } : { sets: existing.sets }),
     };
     return { set: describe(await write(next, dir)) };
   });
@@ -109,7 +112,7 @@ function describe(set) {
     id: set.id,
     name: set.name,
     builtin: false,
-    statuses: set.statuses,
+    sets: set.sets,
     updatedAt: set.updatedAt ?? null,
     ...(set.error ? { error: set.error } : {}),
   };
@@ -120,7 +123,8 @@ function describeBuiltin(preset) {
     id: setIdFrom(preset.id),
     name: preset.id,
     builtin: true,
-    statuses: preset.statuses.map(({ name, minutes, beep }) => ({ name, minutes, beep })),
+    // Görüntü programa girmez (kayıtlılarla aynı şekil).
+    sets: preset.sets.map((set) => ({ ...set, steps: set.steps.map(({ visual, ...step }) => step) })),
     updatedAt: null,
   };
 }

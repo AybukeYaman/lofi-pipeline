@@ -494,6 +494,11 @@ export async function runBuild(config, options = {}) {
       labels: labelOverlay.labelCount,
       pomodoroPlan: pomodoro
         ? {
+          sets: config.pomodoro.sets.map(({ name, repeat, steps }) => ({
+            name,
+            repeat,
+            steps: steps.map(({ name: stepName, minutes, beep, kind }) => ({ name: stepName, minutes, beep, kind })),
+          })),
           statuses: config.pomodoro.statuses.map(({ name, minutes, beep }) => ({ name, minutes, beep })),
           rounds: config.pomodoro.rounds,
           preset: config.pomodoro.preset,

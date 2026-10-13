@@ -291,6 +291,64 @@ describe('build — Pomodoro: her durum için ayrı görüntü', () => {
     });
   });
 
+  describe('iki setli program (set tekrarı + uzun mola)', () => {
+    let config;
+    let report;
+
+    // SET 1 × 2 = (STUDY sarı + BREAK mavi) iki kez, SET 2 = STUDY sarı + LONG BREAK yeşil; 1 tur.
+    // GET READY 0-120 (ana: kırmızı), STUDY 120-180, BREAK 180-240, STUDY 240-300, BREAK 300-360,
+    // STUDY 360-420, LONG BREAK 420-480.
+    before(async () => {
+      await makeSolidImage(dir.path('study.png'), 'yellow');
+      const json = projectJson('./out-sets');
+      json.pomodoro = {
+        enabled: true,
+        rounds: 1,
+        sets: [
+          { repeat: 2, steps: [{ name: 'STUDY', minutes: 1, visual: './study.png' }, { name: 'BREAK', minutes: 1, visual: './break.png' }] },
+          { steps: [{ name: 'STUDY', minutes: 1, visual: './study.png' }, { name: 'LONG BREAK', minutes: 1, visual: './stretch.png' }] },
+        ],
+        countdownBeep: false,
+      };
+      await writeFile(dir.path('sets.json'), JSON.stringify(json));
+      config = await loadProject(dir.path('sets.json'));
+      report = await runBuild(config, { render: true });
+    });
+
+    test('config setleri ve açılmış adım listesini taşır', () => {
+      assert.deepEqual(config.pomodoro.sets.map((set) => [set.name, set.repeat]), [['SET 1', 2], ['SET 2', 1]]);
+      assert.deepEqual(config.pomodoro.statuses.map((x) => x.name), ['STUDY', 'BREAK', 'STUDY', 'BREAK', 'STUDY', 'LONG BREAK']);
+      assert.deepEqual(report.pomodoroPlan.sets.map((set) => set.steps.map((s) => s.kind)), [['work', 'break'], ['work', 'break']]);
+    });
+
+    test('aynı görüntüyü kullanan adımlar tek base paylaşır (3 farklı görüntü)', () => {
+      assert.equal(report.details['01b'].items.length, 3);
+      const visuals = report.details['04'].sessions.map((x) => x.visual);
+      assert.equal(visuals.length, 7);
+      assert.equal(visuals[0], 'main');
+      assert.equal(new Set([visuals[1], visuals[3], visuals[5]]).size, 1, 'üç STUDY aynı görüntü');
+      assert.equal(visuals[2], visuals[4], 'iki BREAK aynı görüntü');
+    });
+
+    test('oturum sırası ve renkler videodan okunur; sınırlar kare doğrulukta', async () => {
+      const expect = [
+        [60, isRed, 'GET READY (ana görüntü)'], [119.8, isRed, 'GET READY sonu'],
+        [120.2, isYellow, 'STUDY 01 başı'], [179.8, isYellow, 'STUDY 01 sonu'],
+        [180.2, isBlue, 'BREAK 01 başı'], [239.8, isBlue, 'BREAK 01 sonu'],
+        [240.2, isYellow, 'STUDY 02 başı (SET 1 ikinci tekrar)'], [299.8, isYellow, 'STUDY 02 sonu'],
+        [300.2, isBlue, 'BREAK 02 başı'], [359.8, isBlue, 'BREAK 02 sonu'],
+        [360.2, isYellow, 'STUDY 03 başı (SET 2)'], [419.8, isYellow, 'STUDY 03 sonu'],
+        [420.2, isGreen, 'LONG BREAK 01 başı'], [450, isGreen, 'LONG BREAK 01 ortası'], [477.5, isGreen, 'LONG BREAK 01 sonu (kararmadan önce)'],
+      ];
+      for (const [at, check, name] of expect) {
+        const color = colorAt(config.output.video, at);
+        assert.ok(check(color), `${name} (${at} sn) yanlış renk: ${color}`);
+      }
+      assert.ok(Math.abs(await countFrames(config.output.video) - 480 * 24) <= 1);
+      assert.deepEqual(report.details['04'].junctions.filter((j) => !j.clean), []);
+    });
+  });
+
   describe('görüntülerin akış parametreleri uyuşmazsa', () => {
     test('her oturum yeniden encode edilip birleştirilir, yine doğru görüntü ve kare sayısı', async () => {
       const workspace = await createWorkspace();

@@ -388,6 +388,59 @@ describe('PUT /api/projects/:id/pomodoro — özel durumlar (statuses)', () => {
     assert.equal(Object.hasOwn(await readProjectJson('st-bad'), 'pomodoro'), false);
   });
 
+  test('çoklu set: sets yazılır, adım görüntüsü göreli yol olur, readiness setleri taşır', async () => {
+    await projectWithFiles('sets-write');
+    const sets = [
+      { name: 'SET 1', steps: [{ name: 'STUDY', minutes: 25 }, { name: 'BREAK', minutes: 5 }] },
+      { repeat: 2, steps: [{ name: 'STUDY', minutes: 25 }, { name: 'UZUN', minutes: 15, kind: 'break', visual: 'resimler/esneme.png' }] },
+    ];
+    const res = await updatePomodoro('sets-write', { enabled: true, rounds: 1, sets }, options());
+
+    assert.equal(res.validation.timeline.totalMinutes, 2 + 30 + 2 * 40);
+    assert.deepEqual(res.settings.sets.map((set) => [set.name, set.repeat, set.steps.length]), [['SET 1', 1, 2], ['SET 2', 2, 2]]);
+    assert.equal(res.settings.statuses.length, 6);
+    assert.equal(res.settings.sets[1].steps[1].visual, './resimler/esneme.png');
+    assert.deepEqual(res.defaults.sets[0].steps.map((s) => s.name), ['STUDY', 'BREAK']);
+
+    const written = (await readProjectJson('sets-write')).pomodoro;
+    assert.equal(written.statuses, undefined);
+    assert.deepEqual(written.sets, [
+      { steps: [{ name: 'STUDY', minutes: 25 }, { name: 'BREAK', minutes: 5 }] },
+      { repeat: 2, steps: [{ name: 'STUDY', minutes: 25 }, { name: 'UZUN', minutes: 15, kind: 'break', visual: './resimler/esneme.png' }] },
+    ]);
+
+    const project = await getProject('sets-write', options());
+    assert.deepEqual(project.readiness.pomodoro.sets.map((set) => set.repeat), [1, 2]);
+    assert.equal(project.readiness.pomodoro.statuses.length, 6);
+
+    // Tek sete dönünce `sets` kalmaz, kısayol yazılır (ayar her seferinde tümüyle yazılır).
+    await updatePomodoro('sets-write', { enabled: true, rounds: 1, statuses: CLASSIC }, options());
+    const back = (await readProjectJson('sets-write')).pomodoro;
+    assert.equal(back.sets, undefined);
+    assert.deepEqual(back.statuses, CLASSIC);
+  });
+
+  test('geçersiz setler 422 ve dosya değişmez; yanlış türde sets 400', async () => {
+    await projectWithFiles('sets-bad');
+    const cases = [
+      [[{ repeat: 0, steps: CLASSIC }], /sets\[0\]\.repeat/],
+      [[{ steps: [{ name: 'A', minutes: 5, kind: 'uyku' }] }], /sets\[0\]\.steps\[0\]\.kind/],
+      [[{ steps: [{ name: 'A', minutes: 5, visual: 'resimler/yok.png' }] }], /bulunamadı/],
+    ];
+    for (const [sets, pattern] of cases) {
+      await assert.rejects(
+        updatePomodoro('sets-bad', { enabled: true, rounds: 1, sets }, options()),
+        (error) => error instanceof ApiError && error.status === 422 && pattern.test(error.message),
+        JSON.stringify(sets),
+      );
+    }
+    await assert.rejects(
+      updatePomodoro('sets-bad', { enabled: true, sets: 'x' }, options()),
+      (error) => error instanceof ApiError && error.status === 400,
+    );
+    assert.equal(Object.hasOwn(await readProjectJson('sets-bad'), 'pomodoro'), false);
+  });
+
   test('yanlış türde alan 400', async () => {
     await projectWithFiles('st-type');
     for (const body of [{ statuses: 'x' }, { intro: 'x' }]) {

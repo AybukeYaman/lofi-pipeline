@@ -24,6 +24,8 @@ import {
   normalizePomodoroSelection,
   PomodoroValidationError,
   planTrim,
+  flattenSets,
+  inferKind,
   presetIdFor,
   serializePomodoroPlan,
   validatePomodoro,
@@ -183,10 +185,11 @@ describe('özel durumlar (statuses)', () => {
   it('eski şekil iki durumlu listeye çevrilir; breakClip BREAK görüntüsü olur', () => {
     const plan = planOf({ preset: '50/10', breakClip: 'videolar/mola.mp4' });
     assert.deepEqual(plan.statuses, [
-      { name: 'STUDY', minutes: 50, visual: null, beep: true },
-      { name: 'BREAK', minutes: 10, visual: 'videolar/mola.mp4', beep: true },
+      { name: 'STUDY', minutes: 50, visual: null, beep: true, kind: 'work' },
+      { name: 'BREAK', minutes: 10, visual: 'videolar/mola.mp4', beep: true, kind: 'break' },
     ]);
     assert.equal(plan.preset, '50/10');
+    assert.deepEqual(plan.sets.map((set) => [set.name, set.repeat, set.steps.length]), [['SET 1', 1, 2]]);
   });
 
   it('statuses varsa eski alanlar yok sayılır', () => {
@@ -543,5 +546,165 @@ describe('presetIdFor', () => {
     }
     assert.equal(presetIdFor([{ minutes: 45 }, { minutes: 15 }]), null);
     assert.equal(presetIdFor([{ minutes: 50 }, { minutes: 10 }, { minutes: 5 }]), null);
+  });
+});
+
+describe('adım → set → loop', () => {
+  const longBreak = [
+    { name: 'SET 1', steps: [{ name: 'STUDY', minutes: 50 }, { name: 'BREAK', minutes: 10 }] },
+    { name: 'SET 2', steps: [{ name: 'STUDY', minutes: 50 }, { name: 'LONG BREAK', minutes: 20 }] },
+  ];
+
+  it('iki çalışmadan sonra uzun mola: 50/10/50/20 x 2 tur sırası, sayaçlar ve toplam', () => {
+    const plan = planOf({ sets: longBreak, rounds: 2 });
+    const { sessions, totalSeconds } = buildTimeline(plan);
+    const steps = sessions.slice(1);
+
+    assert.deepEqual(sessions.map((s) => s.label), [
+      'GET READY', 'STUDY 01', 'BREAK 01', 'STUDY 02', 'LONG BREAK 01',
+      'STUDY 03', 'BREAK 02', 'STUDY 04', 'LONG BREAK 02',
+    ]);
+    assert.deepEqual(steps.map((s) => s.durationSeconds / 60), [50, 10, 50, 20, 50, 10, 50, 20]);
+    assert.deepEqual(steps.map((s) => s.round), [1, 1, 1, 1, 2, 2, 2, 2]);
+    assert.deepEqual(steps.map((s) => s.setIndex), [0, 0, 1, 1, 0, 0, 1, 1]);
+    assert.deepEqual(steps.map((s) => s.statusIndex), [0, 1, 2, 3, 0, 1, 2, 3]);
+    assert.deepEqual(steps.map((s) => s.stepKind), ['work', 'break', 'work', 'break', 'work', 'break', 'work', 'break']);
+    assert.equal(sessions[0].stepKind, 'ready');
+    assert.equal(totalSeconds, 120 + 2 * 130 * 60);
+    for (let i = 1; i < sessions.length; i++) assert.equal(sessions[i].startSeconds, sessions[i - 1].endSeconds);
+    assert.equal(plan.preset, '50/10/50/20');
+  });
+
+  it('set tekrarı (repeat) set içinde art arda açılır, sonra sıradaki sete geçilir', () => {
+    const plan = planOf({
+      sets: [
+        { repeat: 3, steps: [{ name: 'STUDY', minutes: 25 }, { name: 'BREAK', minutes: 5 }] },
+        { steps: [{ name: 'STUDY', minutes: 25 }, { name: 'LONG BREAK', minutes: 15 }] },
+      ],
+      rounds: 1,
+    });
+    const { sessions, totalSeconds } = buildTimeline(plan);
+    const steps = sessions.slice(1);
+
+    assert.deepEqual(steps.map((s) => [s.name, s.setName, s.repeat]), [
+      ['STUDY', 'SET 1', 1], ['BREAK', 'SET 1', 1], ['STUDY', 'SET 1', 2], ['BREAK', 'SET 1', 2],
+      ['STUDY', 'SET 1', 3], ['BREAK', 'SET 1', 3], ['STUDY', 'SET 2', 1], ['LONG BREAK', 'SET 2', 1],
+    ]);
+    assert.equal(steps.at(-2).label, 'STUDY 04');
+    assert.equal(steps.at(-1).label, 'LONG BREAK 01');
+    assert.equal(totalSeconds, 120 + (3 * 30 + 40) * 60);
+    assert.equal(plan.statuses.length, 8, 'statuses = bir turun açılmış listesi');
+    assert.equal(plan.preset, 'Klasik 25/5');
+  });
+
+  it('flattenSets görüntüyü ve bipi kopyalar; kopyalar birbirinden bağımsız', () => {
+    const flat = flattenSets([{ repeat: 2, steps: [{ name: 'A', minutes: 5, visual: 'x.png', beep: false, kind: 'work' }] }]);
+    assert.deepEqual(flat.map((s) => [s.visual, s.beep]), [['x.png', false], ['x.png', false]]);
+    flat[0].name = 'B';
+    assert.equal(flat[1].name, 'A');
+  });
+
+  it('adım bipi ve görüntüsü her tekrarda geçerli', () => {
+    const plan = planOf({
+      sets: [{ repeat: 2, steps: [{ name: 'STUDY', minutes: 5 }, { name: 'REST', minutes: 1, beep: false, visual: 'r.png' }] }],
+      rounds: 1,
+    });
+    const timeline = buildTimeline(plan);
+    assert.deepEqual(timeline.sessions.map((s) => s.visual), [null, null, 'r.png', null, 'r.png']);
+    const { events } = buildCueEvents(plan, timeline);
+    assert.deepEqual([...new Set(events.map((e) => e.session))], [0, 1, 3]);
+  });
+
+  it('sınırlar: set sayısı, set başına adım, tur başına toplam adım, tekrar, tür, ad', () => {
+    const step = { name: 'A', minutes: 5 };
+    const many = (count, item) => Array.from({ length: count }, () => item);
+    const cases = [
+      [[], /pomodoro\.sets: 1 ile 6/],
+      [many(7, { steps: [step] }), /pomodoro\.sets: 1 ile 6/],
+      [[{ steps: many(9, step) }], /sets\[0\]\.steps: 1 ile 8 arasında adım/],
+      [[{ steps: [] }], /sets\[0\]\.steps/],
+      [[{ repeat: 5, steps: many(5, step) }], /en fazla 24 adım.*25/],
+      [[{ repeat: 0, steps: [step] }], /sets\[0\]\.repeat: 1 ile 10/],
+      [[{ repeat: 11, steps: [step] }], /sets\[0\]\.repeat/],
+      [[{ steps: [{ ...step, kind: 'nap' }] }], /sets\[0\]\.steps\[0\]\.kind/],
+      [[{ name: 'S'.repeat(25), steps: [step] }], /sets\[0\]\.name/],
+      [[{ name: 'A\nB', steps: [step] }], /sets\[0\]\.name/],
+      [[5], /sets\[0\]: nesne/],
+    ];
+    for (const [sets, pattern] of cases) {
+      const { problems } = normalizePomodoroSelection({ enabled: true, sets });
+      assert.ok(problems.some((p) => pattern.test(p)), JSON.stringify(sets).slice(0, 80) + ' → ' + problems.join(' | '));
+    }
+    // Sınırın tam kendisi geçerli: 6 set; 3 set x 8 adım = 24.
+    assert.deepEqual(normalizePomodoroSelection({ enabled: true, sets: many(6, { steps: [step] }) }).problems, []);
+    assert.deepEqual(normalizePomodoroSelection({ enabled: true, sets: many(3, { steps: many(8, step) }) }).problems, []);
+  });
+
+  it('okuma önceliği: sets > statuses > eski şekil; son ikisi tek set olur', () => {
+    assert.equal(planOf({ sets: longBreak, statuses: [{ name: 'X', minutes: 3 }] }).sets.length, 2);
+    const flat = planOf({ statuses: [{ name: 'X', minutes: 3 }] });
+    assert.deepEqual(flat.sets.map((set) => [set.name, set.repeat, set.steps.map((s) => s.name)]), [['SET 1', 1, ['X']]]);
+    const legacy = planOf({ workMinutes: 40, breakMinutes: 8 });
+    assert.deepEqual(legacy.sets[0].steps.map((s) => [s.name, s.minutes, s.kind]), [['STUDY', 40, 'work'], ['BREAK', 8, 'break']]);
+  });
+
+  it('set içinde steps yerine statuses yazılmışsa da okunur', () => {
+    assert.equal(planOf({ sets: [{ statuses: [{ name: 'A', minutes: 4 }] }] }).sets[0].steps[0].minutes, 4);
+  });
+
+  it('tür addan tahmin edilir; açık tür tahmini ezer', () => {
+    for (const name of ['BREAK', 'Long Break', 'MOLA', 'Uzun Ara', 'STRETCH', 'Yürüyüş', 'rest', 'Nefes']) {
+      assert.equal(inferKind(name), 'break', name);
+    }
+    for (const name of ['STUDY', 'Araştırma', 'READ', 'Odak', 'Kodlama']) {
+      assert.equal(inferKind(name), 'work', name);
+    }
+    assert.equal(planOf({ statuses: [{ name: 'STUDY', minutes: 5, kind: 'break' }] }).statuses[0].kind, 'break');
+  });
+});
+
+describe('serializePomodoroPlan — setler', () => {
+  const roundTrip = (raw) => {
+    const plan = planOf(raw);
+    const written = serializePomodoroPlan(plan);
+    return { plan, written, again: planOf(written) };
+  };
+
+  it('tek, varsayılan adlı, tekrarı 1 olan set statuses kısayoluyla yazılır', () => {
+    const { written } = roundTrip({ sets: [{ name: 'SET 1', repeat: 1, steps: [{ name: 'STUDY', minutes: 50 }, { name: 'BREAK', minutes: 10 }] }] });
+    assert.deepEqual(written.statuses, [{ name: 'STUDY', minutes: 50 }, { name: 'BREAK', minutes: 10 }]);
+    assert.equal(written.sets, undefined);
+  });
+
+  it('çoklu set, tekrarlı ya da adlı tek set sets olarak yazılır; varsayılan ad ve tekrar yazılmaz', () => {
+    assert.deepEqual(roundTrip({ sets: [{ repeat: 2, steps: [{ name: 'A', minutes: 5 }] }] }).written.sets, [
+      { repeat: 2, steps: [{ name: 'A', minutes: 5 }] },
+    ]);
+    assert.deepEqual(roundTrip({ sets: [{ name: 'Sabah', steps: [{ name: 'A', minutes: 5 }] }] }).written.sets, [
+      { name: 'Sabah', steps: [{ name: 'A', minutes: 5 }] },
+    ]);
+    const { written } = roundTrip({
+      sets: [
+        { steps: [{ name: 'STUDY', minutes: 50 }] },
+        { name: 'Son', repeat: 3, steps: [{ name: 'STUDY', minutes: 50, kind: 'break', beep: false, visual: 'v.png' }] },
+      ],
+    });
+    assert.equal(written.statuses, undefined);
+    assert.deepEqual(written.sets, [
+      { steps: [{ name: 'STUDY', minutes: 50 }] },
+      { name: 'Son', repeat: 3, steps: [{ name: 'STUDY', minutes: 50, kind: 'break', visual: 'v.png', beep: false }] },
+    ]);
+  });
+
+  it('gidiş-dönüş: yazılan şekil aynı planı ve aynı zaman çizelgesini verir', () => {
+    const { plan, again } = roundTrip({
+      rounds: 3,
+      sets: [
+        { name: 'Isınma', repeat: 2, steps: [{ name: 'STUDY', minutes: 25 }, { name: 'MOLA', minutes: 5, beep: false }] },
+        { steps: [{ name: 'DEEP WORK', minutes: 90, visual: 'a.mp4' }, { name: 'Yürü', minutes: 20, kind: 'work' }] },
+      ],
+    });
+    assert.deepEqual(again.sets, plan.sets);
+    assert.deepEqual(buildTimeline(again), buildTimeline(plan));
   });
 });
