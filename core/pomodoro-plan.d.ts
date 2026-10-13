@@ -47,6 +47,8 @@ export function buildTimeline(plan: TimelinePlanInput): {
   sessions: TimelineSession[];
   totalSeconds: number;
   totalMinutes: number;
+  /** Videoya girmeyen sondaki molalar: video hiçbir zaman molayla bitmez. */
+  droppedTail: Array<{ name: string; minutes: number }>;
 };
 
 export function flattenSets(sets: ReadonlyArray<{ repeat: number; steps: ReadonlyArray<PlanStep> }>): PlanStep[];

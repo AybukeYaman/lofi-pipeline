@@ -16,6 +16,7 @@ import {
   cycleMinutes,
   defaultSets,
   describeProgram,
+  droppedTail,
   durationLabel,
   hasEmptyName,
   matchingProgram,
@@ -67,13 +68,18 @@ describe('süre yardımcıları', () => {
     expect(durationLabel(80)).toBe('1 saat 20 dk');
   });
 
-  it('50/10/50/20 × 2 tur: döngü, çalışma ve toplam süre; özet cümlesi', () => {
+  it('50/10/50/20 × 2 tur: döngü, çalışma ve toplam süre (son LONG BREAK videoya girmez); özet cümlesi', () => {
     const flat = flattenSets(longBreak());
     expect(INTRO_MINUTES).toBe(2);
     expect(cycleMinutes(flat)).toBe(130);
-    expect(studyMinutes(flat, 2)).toBe(260);
-    expect(totalMinutes(flat, 2)).toBe(262);
-    expect(pomodoroSummary(flat, 2)).toBe('50/10/50/20 · 4 saat 22 dk · 2 tur');
+    expect(studyMinutes(flat, 2)).toBe(240);
+    expect(totalMinutes(flat, 2)).toBe(242);
+    expect(pomodoroSummary(flat, 2)).toBe('50/10/50/20 · 4 saat 2 dk · 2 tur');
+  });
+
+  it('toplam süre program çalışmayla bitiyorsa hiçbir şey düşürmez', () => {
+    const flat = [step('BREAK', 10), step('STUDY', 50)];
+    expect(totalMinutes(flat, 2)).toBe(122);
   });
 
   it('roundsKeepingTotal süreyi korur; roundChoicesFor elle yazılmış değeri gösterir', () => {
@@ -220,25 +226,27 @@ describe('önizleme: gerçek zaman çizelgesiyle aynı kaynak', () => {
     expect(programSessions(sets, 3)).toEqual(buildTimeline({ sets, rounds: 3, intro: { visual: null } }).sessions);
   });
 
-  it('50/10/50/20 × 2: sıra, sayaçlar ve set bilgisi', () => {
+  it('50/10/50/20 × 2: sıra, sayaçlar ve set bilgisi; video molayla bitmez', () => {
     const sessions = programSessions(longBreak(), 2);
     expect(sessions.map((s) => s.label)).toEqual([
       'GET READY', 'STUDY 01', 'BREAK 01', 'STUDY 02', 'LONG BREAK 01',
-      'STUDY 03', 'BREAK 02', 'STUDY 04', 'LONG BREAK 02',
+      'STUDY 03', 'BREAK 02', 'STUDY 04',
     ]);
-    expect(sessions.slice(1).map((s) => s.setIndex)).toEqual([0, 0, 1, 1, 0, 0, 1, 1]);
+    expect(sessions.slice(1).map((s) => s.setIndex)).toEqual([0, 0, 1, 1, 0, 0, 1]);
+    expect(droppedTail(longBreak(), 2)).toEqual([{ name: 'LONG BREAK', minutes: 20 }]);
   });
 
-  it('programStats: çalışma sayısı ve süreler doğru', () => {
+  it('programStats: çalışma sayısı ve süreler doğru (son mola sayılmaz)', () => {
     expect(programStats(longBreak(), 2)).toEqual({
-      workCount: 4, breakCount: 4, workMinutes: 200, breakMinutes: 60,
-      introMinutes: 2, totalMinutes: 262, stepsPerRound: 4,
+      workCount: 4, breakCount: 3, workMinutes: 200, breakMinutes: 40,
+      introMinutes: 2, totalMinutes: 242, stepsPerRound: 4,
     });
   });
 
   it('bir adım değişince set, loop ve toplam birlikte güncellenir', () => {
+    // İlk turdaki LONG BREAK 30 dk olur; son turdaki videoya girmez.
     const changed = updateStep(longBreak(), 1, 1, { minutes: 30 });
-    expect(programStats(changed, 2).totalMinutes).toBe(282);
+    expect(programStats(changed, 2).totalMinutes).toBe(2 + 2 * 140 - 30);
     expect(programStats(updateSet(changed, 0, { repeat: 2 }), 2).workCount).toBe(6);
   });
 
@@ -248,6 +256,7 @@ describe('önizleme: gerçek zaman çizelgesiyle aynı kaynak', () => {
       '2. çalışma (50 dk) bitince 20 dk LONG BREAK verilir.',
       'Bu set sırası toplam 2 kez uygulanacak.',
       'Program 4 çalışma adımından sonra sona erecek.',
+      'Video çalışmayla biter: en sondaki 20 dk LONG BREAK videoya girmez.',
     ]);
     expect(describeProgram([makeSet('SET 1', 1, [step('STUDY', 25), step('READ', 25)])], 1)).toEqual([
       '1. çalışma (25 dk) bitince doğrudan sonraki adıma geçilir.',

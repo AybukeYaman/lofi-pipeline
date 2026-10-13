@@ -216,9 +216,11 @@ export function normalizePomodoroSelection(raw, field = 'pomodoro') {
  * her set `repeat` kez, her setin adımları sırayla (LOOP = tüm set sırası).
  *
  * Örnek: 50/10/50/20 (SET 1: STUDY 50 + BREAK 10, SET 2: STUDY 50 + LONG BREAK 20) × 2 tur →
- * GET READY, STUDY 01, BREAK 01, STUDY 02, LONG BREAK 01, STUDY 03, BREAK 02, STUDY 04,
- * LONG BREAK 02. Tur sayısı, set ya da adım değişince timeline kendiliğinden yeniden
- * kurulur; başka hiçbir yerde süre hesabı yok (arayüz önizlemesi de bunu çağırır).
+ * GET READY, STUDY 01, BREAK 01, STUDY 02, LONG BREAK 01, STUDY 03, BREAK 02, STUDY 04.
+ * Video hiçbir zaman MOLAYLA BİTMEZ: son turun sonundaki molalar (burada LONG BREAK 02)
+ * videoya girmez, `droppedTail`'de listelenir. Tur sayısı, set ya da adım değişince timeline
+ * kendiliğinden yeniden kurulur; başka hiçbir yerde süre hesabı yok (arayüz önizlemesi de
+ * bunu çağırır).
  *
  * Oturum: `kind` 'ready' | 'status'; `name` ekranda yazan ad; `label` adın kaçıncı kez
  * geçtiği (STUDY 03); `statusIndex` BİR TURUN açılmış adım listesindeki sırası (GET READY
@@ -233,6 +235,7 @@ export function normalizePomodoroSelection(raw, field = 'pomodoro') {
  *     startSeconds: number, endSeconds: number, durationSeconds: number }>,
  *   totalSeconds: number,
  *   totalMinutes: number,
+ *   droppedTail: Array<{ name: string, minutes: number }>,
  * }}
  */
 export function buildTimeline(plan) {
@@ -287,7 +290,18 @@ export function buildTimeline(plan) {
     });
   }
 
-  return { sessions, totalSeconds: elapsed, totalMinutes: elapsed / 60 };
+  // Video hiçbir zaman molayla bitmez: son turun sonundaki molalar videoya girmez
+  // (programda hiç çalışma yoksa kural uygulanmaz).
+  const droppedTail = [];
+  if (sessions.some((session) => session.stepKind === 'work')) {
+    while (sessions.at(-1).stepKind === 'break') {
+      const dropped = sessions.pop();
+      droppedTail.unshift({ name: dropped.name, minutes: dropped.durationSeconds / 60 });
+      elapsed -= dropped.durationSeconds;
+    }
+  }
+
+  return { sessions, totalSeconds: elapsed, totalMinutes: elapsed / 60, droppedTail };
 }
 
 /**
@@ -436,7 +450,8 @@ export function formatClock(seconds) {
 export function describeComparison(comparison, plan) {
   const head =
     `Pomodoro timeline: ${formatClock(comparison.timelineSeconds)} ` +
-    `(${describeCycle(plan.statuses)} × ${plan.rounds} tur + ${INTRO_SECONDS / 60} dk hazırlık)\n` +
+    `(${describeCycle(plan.statuses)} × ${plan.rounds} tur + ${INTRO_SECONDS / 60} dk hazırlık` +
+    `${describeDroppedTail(buildTimeline(plan).droppedTail)})\n` +
     `Müzik toplamı: ${formatClock(comparison.musicSeconds)}`;
 
   if (comparison.status === 'excess') {
@@ -637,6 +652,17 @@ export function presetIdFor(statuses) {
     preset.statuses.length === statuses.length
     && preset.statuses.every((status, i) => status.minutes === statuses[i].minutes)
   ))?.id ?? null;
+}
+
+/**
+ * Videoya girmeyen sondaki molaların notu — sunucu metinleri ve arayüz aynı cümleyi kullanır:
+ * " − sondaki BREAK 10 dk" (düşen yoksa boş).
+ *
+ * @param {Array<{ name: string, minutes: number }>} droppedTail
+ */
+export function describeDroppedTail(droppedTail) {
+  if (droppedTail.length === 0) return '';
+  return ` − sondaki ${droppedTail.map((step) => `${step.name} ${step.minutes} dk`).join(' + ')}`;
 }
 
 /** Döngünün kısa özeti: süreler `/` ile (`50/10`, `25/5/15`). Tek yerde: ekran ve hata metinleri. */

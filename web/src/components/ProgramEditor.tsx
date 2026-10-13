@@ -35,7 +35,6 @@ import {
   canAddSet,
   canAddStep,
   canRepeat,
-  cycleMinutes,
   durationLabel,
   hasEmptyName,
   matchingProgram,
@@ -217,7 +216,6 @@ export function ProgramEditor({ value, onChange, disabled, onTurnOff, isOff = fa
   const flat = useMemo(() => flattenSets(sets), [sets]);
   const matched = useMemo(() => matchingProgram(sets, programs), [sets, programs]);
   const activeProgram = programs.find((program) => program.id === activeProgramId && !program.builtin) ?? null;
-  const cycle = cycleMinutes(flat);
   const emptyName = hasEmptyName(sets);
 
   /** Setler değişti: tur sayısı aynı kalır, toplam süre yeni programa göre yeniden hesaplanır. */
@@ -547,10 +545,10 @@ export function ProgramEditor({ value, onChange, disabled, onTurnOff, isOff = fa
                   aria-pressed={active}
                   style={chip}
                   disabled={disabled}
-                  title={`${choice} kez: hazırlık dahil ${durationLabel(choice * cycle + INTRO_MINUTES)} video`}
+                  title={`${choice} kez: hazırlık dahil ${durationLabel(studyMinutes(flat, choice) + INTRO_MINUTES)} video (video molayla bitmez)`}
                   onClick={() => onChange({ ...value, rounds: choice })}
                 >
-                  {choice} kez · {durationLabel(choice * cycle)}
+                  {choice} kez · {durationLabel(studyMinutes(flat, choice))}
                 </button>
               );
             })}

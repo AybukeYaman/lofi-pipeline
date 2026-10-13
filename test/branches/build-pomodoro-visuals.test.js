@@ -1,9 +1,9 @@
 /**
  * Uçtan uca build, Pomodoro + HER DURUM İÇİN AYRI görüntü. Gerçek encode.
  *
- * Döngü: STUDY (görüntüsü yok → ana görüntü, kırmızı döngü videosu), STRETCH
- * (yeşil resim), BREAK (mavi resim); GET READY'nin kendi görüntüsü var (sarı
- * resim). Resimler ana görüntüden FARKLI boyutta: hem "oturum başına doğru
+ * Döngü: STRETCH (yeşil resim), BREAK (mavi resim), STUDY (görüntüsü yok → ana
+ * görüntü, kırmızı döngü videosu); GET READY'nin kendi görüntüsü var (sarı resim).
+ * Döngü çalışmayla bittiği için hiçbir oturum düşmez (video molayla bitmez kuralı). Resimler ana görüntüden FARKLI boyutta: hem "oturum başına doğru
  * görüntü", hem "ayrı kaynakların aynı akış parametresine getirilmesi", hem de
  * oturum sınırlarının kare doğruluğu çıktı videosundan geri okunarak doğrulanıyor.
  *
@@ -68,18 +68,18 @@ const isGreen = ([r, g, b]) => g > 180 && r < 90 && b < 90;
 const isYellow = ([r, g, b]) => r > 180 && g > 180 && b < 90;
 
 /**
- * Oturum sırası: GET READY 0-120 (sarı), STUDY 120-180 (kırmızı), STRETCH 180-240 (yeşil),
- * BREAK 240-300 (mavi), sonra aynı döngü ikinci kez: 300-360, 360-420, 420-480.
+ * Oturum sırası: GET READY 0-120 (sarı), STRETCH 120-180 (yeşil), BREAK 180-240 (mavi),
+ * STUDY 240-300 (kırmızı), sonra aynı döngü ikinci kez: 300-360, 360-420, 420-480.
  */
 function assertSessionColors(video) {
   const expect = [
     [30, isYellow, 'GET READY ortası (kendi görüntüsü)'], [119.8, isYellow, 'GET READY sonu'],
-    [120.2, isRed, 'STUDY 01 başı (ana görüntü)'], [150, isRed, 'STUDY 01 ortası'], [179.8, isRed, 'STUDY 01 sonu'],
-    [180.2, isGreen, 'STRETCH 01 başı'], [210, isGreen, 'STRETCH 01 ortası'], [239.8, isGreen, 'STRETCH 01 sonu'],
-    [240.2, isBlue, 'BREAK 01 başı'], [270, isBlue, 'BREAK 01 ortası'], [299.8, isBlue, 'BREAK 01 sonu'],
-    [300.2, isRed, 'STUDY 02 başı'], [330, isRed, 'STUDY 02 ortası'], [359.8, isRed, 'STUDY 02 sonu'],
-    [360.2, isGreen, 'STRETCH 02 başı'], [390, isGreen, 'STRETCH 02 ortası'], [419.8, isGreen, 'STRETCH 02 sonu'],
-    [420.2, isBlue, 'BREAK 02 başı'], [450, isBlue, 'BREAK 02 ortası'], [477.5, isBlue, 'BREAK 02 sonu (kararmadan önce)'],
+    [120.2, isGreen, 'STRETCH 01 başı'], [150, isGreen, 'STRETCH 01 ortası'], [179.8, isGreen, 'STRETCH 01 sonu'],
+    [180.2, isBlue, 'BREAK 01 başı'], [210, isBlue, 'BREAK 01 ortası'], [239.8, isBlue, 'BREAK 01 sonu'],
+    [240.2, isRed, 'STUDY 01 başı (ana görüntü)'], [270, isRed, 'STUDY 01 ortası'], [299.8, isRed, 'STUDY 01 sonu'],
+    [300.2, isGreen, 'STRETCH 02 başı'], [330, isGreen, 'STRETCH 02 ortası'], [359.8, isGreen, 'STRETCH 02 sonu'],
+    [360.2, isBlue, 'BREAK 02 başı'], [390, isBlue, 'BREAK 02 ortası'], [419.8, isBlue, 'BREAK 02 sonu'],
+    [420.2, isRed, 'STUDY 02 başı'], [450, isRed, 'STUDY 02 ortası'], [477.5, isRed, 'STUDY 02 sonu (kararmadan önce)'],
   ];
   for (const [at, check, name] of expect) {
     const color = colorAt(video, at);
@@ -98,9 +98,9 @@ describe('build — Pomodoro: her durum için ayrı görüntü', () => {
       enabled: true,
       rounds: 2,
       statuses: [
-        { name: 'STUDY', minutes: 1 },
         { name: 'STRETCH', minutes: 1, visual: './stretch.png' },
         { name: 'BREAK', minutes: 1, visual: './break.png' },
+        { name: 'STUDY', minutes: 1 },
       ],
       intro: { visual: './ready.png' },
       // Bipler görüntüyü etkilemez; testi hızlandırmak için kapalı.
@@ -137,10 +137,10 @@ describe('build — Pomodoro: her durum için ayrı görüntü', () => {
 
     test('config her görüntünün yolunu çözer ve türünü uzantıdan türetir', () => {
       const { statuses, intro } = config.pomodoro;
-      assert.deepEqual(statuses.map((x) => x.visualSource), [null, 'image', 'image']);
-      assert.equal(statuses[0].visual, null);
-      assert.match(statuses[1].visual, /stretch\.png$/);
-      assert.match(statuses[2].visual, /break\.png$/);
+      assert.deepEqual(statuses.map((x) => x.visualSource), ['image', 'image', null]);
+      assert.match(statuses[0].visual, /stretch\.png$/);
+      assert.match(statuses[1].visual, /break\.png$/);
+      assert.equal(statuses[2].visual, null);
       assert.equal(intro.visualSource, 'image');
       assert.match(intro.visual, /ready\.png$/);
     });
@@ -171,9 +171,9 @@ describe('build — Pomodoro: her durum için ayrı görüntü', () => {
       );
       const visuals = assemble.sessions.map((x) => x.visual);
       assert.match(visuals[0], /ready\.png$/);
-      assert.equal(visuals[1], 'main');
-      assert.match(visuals[2], /stretch\.png$/);
-      assert.match(visuals[3], /break\.png$/);
+      assert.match(visuals[1], /stretch\.png$/);
+      assert.match(visuals[2], /break\.png$/);
+      assert.equal(visuals[3], 'main');
       assert.deepEqual(visuals.slice(4), [visuals[1], visuals[2], visuals[3]]);
       assert.ok(assemble.junctions.length >= 3, 'oturum geçişleri denetlenmedi');
       assert.deepEqual(assemble.junctions.filter((j) => !j.clean), []);
@@ -228,8 +228,9 @@ describe('build — Pomodoro: her durum için ayrı görüntü', () => {
       const report = await runBuild(config, { render: true });
       assert.deepEqual(report.steps.map((x) => x.tag), ['01', '02', '07', '04', '05']);
       assert.equal(report.details['04'].sessions, null);
-      // Tek görüntü: baştan sona kırmızı.
-      for (const at of [30, 150, 210, 270, 330]) assert.ok(isRed(colorAt(config.output.video, at)), `${at} sn`);
+      // Tek görüntü: baştan sona kırmızı. Son BREAK videoya girmez: 300 sn.
+      assert.ok(Math.abs((await probe(config.output.video)).duration - 300) < 0.2);
+      for (const at of [30, 150, 210, 270, 290]) assert.ok(isRed(colorAt(config.output.video, at)), `${at} sn`);
     });
 
     test('olmayan durum görüntüsü build öncesi anlaşılır hatayla durur', async () => {
@@ -258,8 +259,8 @@ describe('build — Pomodoro: her durum için ayrı görüntü', () => {
         enabled: true,
         rounds: 1,
         statuses: [
-          { name: 'STUDY', minutes: 1, visual: './work.mp4' },
           { name: 'BREAK', minutes: 1, visual: './break.png' },
+          { name: 'STUDY', minutes: 1, visual: './work.mp4' },
         ],
         countdownBeep: false,
       };
@@ -272,7 +273,7 @@ describe('build — Pomodoro: her durum için ayrı görüntü', () => {
       assert.match(report.details['01b'].items[0].visual, /break.png$/);
       assert.equal(report.details['04'].sessions.length, 3);
       for (const [at, check, name] of [
-        [60, isRed, 'GET READY (ana görüntü)'], [150, isRed, 'STUDY (ana klibin kendisi)'], [210, isBlue, 'BREAK'],
+        [60, isRed, 'GET READY (ana görüntü)'], [150, isBlue, 'BREAK'], [210, isRed, 'STUDY (ana klibin kendisi)'],
       ]) assert.ok(check(colorAt(config.output.video, at)), name);
     });
   });
@@ -295,9 +296,9 @@ describe('build — Pomodoro: her durum için ayrı görüntü', () => {
     let config;
     let report;
 
-    // SET 1 × 2 = (STUDY sarı + BREAK mavi) iki kez, SET 2 = STUDY sarı + LONG BREAK yeşil; 1 tur.
+    // SET 1 × 2 = (STUDY sarı + BREAK mavi) iki kez, SET 2 = LONG BREAK yeşil + STUDY sarı; 1 tur.
     // GET READY 0-120 (ana: kırmızı), STUDY 120-180, BREAK 180-240, STUDY 240-300, BREAK 300-360,
-    // STUDY 360-420, LONG BREAK 420-480.
+    // LONG BREAK 360-420, STUDY 420-480 (çalışmayla bittiği için hiçbir oturum düşmez).
     before(async () => {
       await makeSolidImage(dir.path('study.png'), 'yellow');
       const json = projectJson('./out-sets');
@@ -306,7 +307,7 @@ describe('build — Pomodoro: her durum için ayrı görüntü', () => {
         rounds: 1,
         sets: [
           { repeat: 2, steps: [{ name: 'STUDY', minutes: 1, visual: './study.png' }, { name: 'BREAK', minutes: 1, visual: './break.png' }] },
-          { steps: [{ name: 'STUDY', minutes: 1, visual: './study.png' }, { name: 'LONG BREAK', minutes: 1, visual: './stretch.png' }] },
+          { steps: [{ name: 'LONG BREAK', minutes: 1, visual: './stretch.png' }, { name: 'STUDY', minutes: 1, visual: './study.png' }] },
         ],
         countdownBeep: false,
       };
@@ -317,8 +318,8 @@ describe('build — Pomodoro: her durum için ayrı görüntü', () => {
 
     test('config setleri ve açılmış adım listesini taşır', () => {
       assert.deepEqual(config.pomodoro.sets.map((set) => [set.name, set.repeat]), [['SET 1', 2], ['SET 2', 1]]);
-      assert.deepEqual(config.pomodoro.statuses.map((x) => x.name), ['STUDY', 'BREAK', 'STUDY', 'BREAK', 'STUDY', 'LONG BREAK']);
-      assert.deepEqual(report.pomodoroPlan.sets.map((set) => set.steps.map((s) => s.kind)), [['work', 'break'], ['work', 'break']]);
+      assert.deepEqual(config.pomodoro.statuses.map((x) => x.name), ['STUDY', 'BREAK', 'STUDY', 'BREAK', 'LONG BREAK', 'STUDY']);
+      assert.deepEqual(report.pomodoroPlan.sets.map((set) => set.steps.map((s) => s.kind)), [['work', 'break'], ['break', 'work']]);
     });
 
     test('aynı görüntüyü kullanan adımlar tek base paylaşır (3 farklı görüntü)', () => {
@@ -326,7 +327,7 @@ describe('build — Pomodoro: her durum için ayrı görüntü', () => {
       const visuals = report.details['04'].sessions.map((x) => x.visual);
       assert.equal(visuals.length, 7);
       assert.equal(visuals[0], 'main');
-      assert.equal(new Set([visuals[1], visuals[3], visuals[5]]).size, 1, 'üç STUDY aynı görüntü');
+      assert.equal(new Set([visuals[1], visuals[3], visuals[6]]).size, 1, 'üç STUDY aynı görüntü');
       assert.equal(visuals[2], visuals[4], 'iki BREAK aynı görüntü');
     });
 
@@ -337,8 +338,8 @@ describe('build — Pomodoro: her durum için ayrı görüntü', () => {
         [180.2, isBlue, 'BREAK 01 başı'], [239.8, isBlue, 'BREAK 01 sonu'],
         [240.2, isYellow, 'STUDY 02 başı (SET 1 ikinci tekrar)'], [299.8, isYellow, 'STUDY 02 sonu'],
         [300.2, isBlue, 'BREAK 02 başı'], [359.8, isBlue, 'BREAK 02 sonu'],
-        [360.2, isYellow, 'STUDY 03 başı (SET 2)'], [419.8, isYellow, 'STUDY 03 sonu'],
-        [420.2, isGreen, 'LONG BREAK 01 başı'], [450, isGreen, 'LONG BREAK 01 ortası'], [477.5, isGreen, 'LONG BREAK 01 sonu (kararmadan önce)'],
+        [360.2, isGreen, 'LONG BREAK 01 başı (SET 2)'], [390, isGreen, 'LONG BREAK 01 ortası'], [419.8, isGreen, 'LONG BREAK 01 sonu'],
+        [420.2, isYellow, 'STUDY 03 başı'], [450, isYellow, 'STUDY 03 ortası'], [477.5, isYellow, 'STUDY 03 sonu (kararmadan önce)'],
       ];
       for (const [at, check, name] of expect) {
         const color = colorAt(config.output.video, at);

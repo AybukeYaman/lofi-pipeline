@@ -3,8 +3,8 @@
  * montaj BAŞARIYLA bitince Geri Dönüşüm Kutusu'na taşınır ve project.json'dan çıkar.
  * Gerçek encode; Geri Dönüşüm işlevi sahte (testler kullanıcının çöp kutusunu doldurmasın).
  *
- * 2 dk GET READY + 1/1 × 2 tur = 360 sn. 6 × 100 sn = 600 sn müzik:
- * parça 1-3 tam, parça 4 → 60 sn, parça 5 ve 6 HİÇ kullanılmaz.
+ * 2 dk GET READY + 1/1 × 2 tur − son BREAK (video molayla bitmez) = 300 sn. 6 × 110 sn müzik:
+ * parça 1-2 tam, parça 3 → 80 sn, parça 4, 5 ve 6 HİÇ kullanılmaz.
  */
 
 import assert from 'node:assert/strict';
@@ -30,7 +30,7 @@ describe('build — Pomodoro: fazla müzik otomatik kırpılır, kullanılmayanl
     await mkdir(dir.path('audio'));
     await makeDriftingClip(dir.path('clip.mp4'), { width: 320, height: 180 });
     for (const [i, name] of NAMES.entries()) {
-      await makeTone(dir.path(`audio/${name}`), { seconds: 100, frequency: 220 + i * 55 });
+      await makeTone(dir.path(`audio/${name}`), { seconds: 110, frequency: 220 + i * 55 });
     }
     await writeFile(dir.path('project.json'), JSON.stringify({
       clip: './clip.mp4',
@@ -52,26 +52,26 @@ describe('build — Pomodoro: fazla müzik otomatik kırpılır, kullanılmayanl
   });
   after(() => dir?.cleanup());
 
-  test('soru sorulmadan montaj tamamlandı ve süre timeline kadar (360 sn)', async () => {
+  test('soru sorulmadan montaj tamamlandı ve süre timeline kadar (300 sn)', async () => {
     const out = await probe(config.output.video);
-    assert.ok(Math.abs(out.duration - 360) < 0.2, `süre ${out.duration}`);
+    assert.ok(Math.abs(out.duration - 300) < 0.2, `süre ${out.duration}`);
     assert.equal(report.pomodoroPlan.comparison.status, 'excess');
-    assert.deepEqual(report.pomodoroPlan.trim.tracks.map((t) => Math.round(t.usedDuration)), [100, 100, 100, 60, 0, 0]);
+    assert.deepEqual(report.pomodoroPlan.trim.tracks.map((t) => Math.round(t.usedDuration)), [110, 110, 80, 0, 0, 0]);
   });
 
-  test('yalnızca hiç kullanılmayan 2 parça Geri Dönüşüm\'e taşındı; kısalan parça yerinde', () => {
-    assert.deepEqual(trashed.map((p) => basename(p)), ['05-e.m4a', '06-f.m4a']);
-    assert.deepEqual(report.unusedMusic, { moved: ['05-e.m4a', '06-f.m4a'], failed: [] });
+  test('yalnızca hiç kullanılmayan 3 parça Geri Dönüşüm\'e taşındı; kısalan parça yerinde', () => {
+    assert.deepEqual(trashed.map((p) => basename(p)), ['04-d.m4a', '05-e.m4a', '06-f.m4a']);
+    assert.deepEqual(report.unusedMusic, { moved: ['04-d.m4a', '05-e.m4a', '06-f.m4a'], failed: [] });
   });
 
   test('project.json sıradan ve eklenme kaydından çıkarıldı (sonraki montaj olmayan dosyayı aramaz)', async () => {
     const json = JSON.parse(await readFile(dir.path('project.json'), 'utf8'));
-    assert.deepEqual(json.order, NAMES.slice(0, 4));
-    assert.deepEqual(json.workflow.audioAdded, NAMES.slice(0, 4));
+    assert.deepEqual(json.order, NAMES.slice(0, 3));
+    assert.deepEqual(json.workflow.audioAdded, NAMES.slice(0, 3));
   });
 
   test('tracklist yalnızca kullanılan parçaları damgalar', async () => {
     const text = await readFile(config.output.tracklist, 'utf8');
-    assert.equal(text.trim().split('\n').length, 4);
+    assert.equal(text.trim().split('\n').length, 3);
   });
 });

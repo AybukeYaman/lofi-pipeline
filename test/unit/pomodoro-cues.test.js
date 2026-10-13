@@ -80,7 +80,7 @@ describe('buildCueFilter', () => {
       cues.events.length,
       'her bip tam bir kez gecikmeli kopya almalı',
     );
-    // GET READY + 8 oturum, her birinde 3 bip.
-    assert.equal(cues.events.length, 27);
+    // GET READY + 7 oturum (son BREAK videoya girmez), her birinde 3 bip.
+    assert.equal(cues.events.length, 24);
   });
 });

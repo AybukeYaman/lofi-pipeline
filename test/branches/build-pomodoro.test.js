@@ -8,7 +8,8 @@
  * metnine bakılarak değil.
  *
  * Süreler dakika cinsinden olmak zorunda (Pomodoro'nun birimi bu), o yüzden
- * en küçük anlamlı kurulum seçildi: 2 dk GET READY + 1/1 × 2 tur = 6 dakika.
+ * en küçük anlamlı kurulum seçildi: 2 dk GET READY + 1/1 × 2 tur − son BREAK = 5 dakika
+ * (video hiçbir zaman molayla bitmez).
  */
 
 import assert from 'node:assert/strict';
@@ -60,11 +61,11 @@ describe('build — Pomodoro: kırpma, oturumlar ve işaret sesleri', () => {
     await mkdir(dir.path('audio'));
     await makeDriftingClip(dir.path('clip.mp4'), { width: 320, height: 180 });
 
-    // 4 × 100 sn = 400 sn müzik, 360 sn timeline (2 dk GET READY + 4 dk) → 40 sn fazla.
-    await makeQuietTone(dir.path('audio/01-a.m4a'), { seconds: 100, frequency: 220 });
-    await makeQuietTone(dir.path('audio/02-b.m4a'), { seconds: 100, frequency: 330 });
-    await makeQuietTone(dir.path('audio/03-c.m4a'), { seconds: 100, frequency: 440 });
-    await makeQuietTone(dir.path('audio/04-d.m4a'), { seconds: 100, frequency: 550 });
+    // 4 × 85 sn = 340 sn müzik, 300 sn timeline (2 dk GET READY + 3 dk; son BREAK yok) → 40 sn fazla.
+    await makeQuietTone(dir.path('audio/01-a.m4a'), { seconds: 85, frequency: 220 });
+    await makeQuietTone(dir.path('audio/02-b.m4a'), { seconds: 85, frequency: 330 });
+    await makeQuietTone(dir.path('audio/03-c.m4a'), { seconds: 85, frequency: 440 });
+    await makeQuietTone(dir.path('audio/04-d.m4a'), { seconds: 85, frequency: 550 });
 
     await writeFile(dir.path('project.json'), JSON.stringify({
       clip: './clip.mp4',
@@ -72,8 +73,8 @@ describe('build — Pomodoro: kırpma, oturumlar ve işaret sesleri', () => {
       order: ['01-a.m4a', '02-b.m4a', '03-c.m4a', '04-d.m4a'],
       pomodoro: {
         enabled: true,
-        // STUDY'nin bitişinde bip YOK (beep: false); GET READY ve BREAK'in (videonun sonu dahil) var.
-        statuses: [{ name: 'STUDY', minutes: 1, beep: false }, { name: 'BREAK', minutes: 1 }],
+        // BREAK'in bitişinde bip YOK (beep: false); GET READY ve STUDY'nin (videonun sonu dahil) var.
+        statuses: [{ name: 'STUDY', minutes: 1 }, { name: 'BREAK', minutes: 1, beep: false }],
         rounds: 2,
         // Fazla 40 sn soru sorulmadan, otomatik kesilir.
         // İşaretleri müziğin üstünde net duyulur yap: ölçüm eşiği ayırabilsin.
@@ -90,9 +91,9 @@ describe('build — Pomodoro: kırpma, oturumlar ve işaret sesleri', () => {
   });
   after(() => dir?.cleanup());
 
-  test('çıktı Pomodoro timeline süresinde (360 sn), müzik süresinde değil', async () => {
+  test('çıktı Pomodoro timeline süresinde (300 sn, son BREAK yok), müzik süresinde değil', async () => {
     const out = await probe(config.output.video);
-    assert.ok(Math.abs(out.duration - 360) < 0.2, `süre ${out.duration}`);
+    assert.ok(Math.abs(out.duration - 300) < 0.2, `süre ${out.duration}`);
   });
 
   test('adım sırası: ses → işaretler → montaj (Ambiance yok, 03 atlandı)', () => {
@@ -105,16 +106,16 @@ describe('build — Pomodoro: kırpma, oturumlar ve işaret sesleri', () => {
     assert.equal(Math.round(comparison.excessSeconds), 40);
     assert.equal(trim.trimmedCount, 1);
     assert.equal(trim.droppedCount, 0);
-    assert.deepEqual(trim.tracks.map((t) => Math.round(t.usedDuration)), [100, 100, 100, 60]);
+    assert.deepEqual(trim.tracks.map((t) => Math.round(t.usedDuration)), [85, 85, 85, 45]);
 
-    // Kırpma yalnızca render'da: kaynak dosya hâlâ 100 saniye.
+    // Kırpma yalnızca render'da: kaynak dosya hâlâ 85 saniye.
     const source = await probe(dir.path('audio/04-d.m4a'));
-    assert.ok(Math.abs(source.duration - 100) < 0.2, `kaynak ${source.duration}`);
+    assert.ok(Math.abs(source.duration - 85) < 0.2, `kaynak ${source.duration}`);
   });
 
   test('tracklist kırpılmış süreye göre damgalanır', async () => {
     const text = await readFile(config.output.tracklist, 'utf8');
-    assert.deepEqual(text.trim().split('\n').map((line) => line.split('  ')[0]), ['0:00', '1:40', '3:20', '5:00']);
+    assert.deepEqual(text.trim().split('\n').map((line) => line.split('  ')[0]), ['0:00', '1:25', '2:50', '4:15']);
   });
 
   test('timeline dosyası GET READY + STUDY/BREAK dökümünü verir', async () => {
@@ -123,20 +124,19 @@ describe('build — Pomodoro: kırpma, oturumlar ve işaret sesleri', () => {
       'GET READY', '00:00 - 02:00', '',
       'STUDY 01', '02:00 - 03:00', '',
       'BREAK 01', '03:00 - 04:00', '',
-      'STUDY 02', '04:00 - 05:00', '',
-      'BREAK 02', '05:00 - 06:00',
+      'STUDY 02', '04:00 - 05:00',
     ].join('\n'));
   });
 
-  test('Test 5 — her oturumun son 3 saniyesinde 3 bip (beep: false hariç): GET READY, mola ve videonun sonu', async () => {
+  test('Test 5 — her oturumun son 3 saniyesinde 3 bip (beep: false hariç): GET READY, çalışma ve videonun sonu', async () => {
     const { onsets } = await findOnsets(config.output.video, { dir, ...onsetOptions() });
 
-    // 5 oturum (GET READY 0-120, STUDY 120-180, BREAK 180-240, STUDY 240-300, BREAK 300-360).
-    // Başlangıç sesi YOK: yalnızca her oturumun bitişinden önceki 3 bip; STUDY'de beep kapalı.
+    // 4 oturum (GET READY 0-120, STUDY 120-180, BREAK 180-240, STUDY 240-300); son BREAK videoya girmez.
+    // Başlangıç sesi YOK: yalnızca her oturumun bitişinden önceki 3 bip; BREAK'te beep kapalı.
     const expected = [
       117, 118, 119,   // GET READY'nin 2. dakikasının son 3 sn'si
-      237, 238, 239,   // BREAK 01
-      357, 358, 359,   // BREAK 02 = videonun son 3 sn'si (ses kararması bipleri kısmaz)
+      177, 178, 179,   // STUDY 01
+      297, 298, 299,   // STUDY 02 = videonun son 3 sn'si (ses kararması bipleri kısmaz)
     ];
     assert.equal(onsets.length, expected.length, `bulunan işaretler: ${onsets.map((o) => o.toFixed(2))}`);
     for (const [i, at] of expected.entries()) {
@@ -159,14 +159,14 @@ describe('build — Pomodoro: kırpma, oturumlar ve işaret sesleri', () => {
   test('raporda plan, oturumlar ve işaret sayısı var', () => {
     assert.equal(report.pomodoro, 'applied');
     assert.equal(report.pomodoroPlan.rounds, 2);
-    assert.equal(report.pomodoroPlan.totalSeconds, 360);
+    assert.equal(report.pomodoroPlan.totalSeconds, 300);
     assert.deepEqual(report.pomodoroPlan.sessions.map((s) => s.label), [
-      'GET READY', 'STUDY 01', 'BREAK 01', 'STUDY 02', 'BREAK 02',
+      'GET READY', 'STUDY 01', 'BREAK 01', 'STUDY 02',
     ]);
     assert.deepEqual(report.pomodoroPlan.statuses, [
-      { name: 'STUDY', minutes: 1, beep: false }, { name: 'BREAK', minutes: 1, beep: true },
+      { name: 'STUDY', minutes: 1, beep: true }, { name: 'BREAK', minutes: 1, beep: false },
     ]);
-    // 3 bipli oturum (GET READY + 2 BREAK) × 3 bip
+    // 3 bipli oturum (GET READY + 2 STUDY) × 3 bip
     assert.equal(report.pomodoroPlan.cueEvents, 9);
   });
 });
@@ -180,9 +180,9 @@ describe('build — Pomodoro: iki setli program, bipler set sırasını izler', 
     dir = await tempDir('build-pomodoro-sets');
     await mkdir(dir.path('audio'));
     await makeDriftingClip(dir.path('clip.mp4'), { width: 320, height: 180 });
-    // 480 sn müzik = 480 sn timeline: kırpma yok.
-    await makeQuietTone(dir.path('audio/01-a.m4a'), { seconds: 240, frequency: 220 });
-    await makeQuietTone(dir.path('audio/02-b.m4a'), { seconds: 240, frequency: 330 });
+    // 420 sn müzik = 420 sn timeline (son LONG BREAK videoya girmez): kırpma yok.
+    await makeQuietTone(dir.path('audio/01-a.m4a'), { seconds: 210, frequency: 220 });
+    await makeQuietTone(dir.path('audio/02-b.m4a'), { seconds: 210, frequency: 330 });
 
     await writeFile(dir.path('project.json'), JSON.stringify({
       clip: './clip.mp4',
@@ -216,11 +216,10 @@ describe('build — Pomodoro: iki setli program, bipler set sırasını izler', 
       'BREAK 01', '03:00 - 04:00', '',
       'STUDY 02', '04:00 - 05:00', '',
       'BREAK 02', '05:00 - 06:00', '',
-      'STUDY 03', '06:00 - 07:00', '',
-      'LONG BREAK 01', '07:00 - 08:00',
+      'STUDY 03', '06:00 - 07:00',
     ].join('\n'));
     const out = await probe(config.output.video);
-    assert.ok(Math.abs(out.duration - 480) < 0.2, `süre ${out.duration}`);
+    assert.ok(Math.abs(out.duration - 420) < 0.2, `süre ${out.duration}`);
   });
 
   test('bipler videodan okunur: yalnızca bipi açık adımların son 3 saniyesinde', async () => {
@@ -233,7 +232,7 @@ describe('build — Pomodoro: iki setli program, bipler set sırasını izler', 
       117, 118, 119, // GET READY
       237, 238, 239, // BREAK 01
       357, 358, 359, // BREAK 02
-      417, 418, 419, // STUDY 03 (SET 2'de bip açık)
+      417, 418, 419, // STUDY 03 = videonun sonu (son LONG BREAK videoya girmez)
     ];
     assert.equal(onsets.length, expected.length, `bulunan işaretler: ${onsets.map((o) => o.toFixed(2))}`);
     for (const [i, at] of expected.entries()) {

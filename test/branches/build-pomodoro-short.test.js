@@ -1,9 +1,9 @@
 /**
  * Uçtan uca build: müzik Pomodoro timeline'ından KISA. Montaj durmaz; ses sessizlikle
- * timeline süresine tamamlanır, video tam süre (360 sn) sürer, kalan kısmı Ambiance
+ * timeline süresine tamamlanır, video tam süre (300 sn) sürer, kalan kısmı Ambiance
  * (seçiliyse) doldurur. Gerçek encode.
  *
- * 2 dk GET READY + 1/1 × 2 tur = 360 sn; müzik 2 × 100 = 200 sn (160 sn eksik).
+ * 2 dk GET READY + 1/1 × 2 tur − son BREAK (video molayla bitmez) = 300 sn; müzik 2 × 100 = 200 sn (100 sn eksik).
  */
 
 import assert from 'node:assert/strict';
@@ -55,15 +55,15 @@ describe('build — Pomodoro: müzik kısa, montaj durmaz', () => {
       assert.ok(report.warnings.some((w) => /kısa/.test(w.message) && /Ambiance/.test(w.message)));
     });
 
-    test('video tam timeline süresinde (360 sn), müziğin süresinde (200 sn) değil', async () => {
+    test('video tam timeline süresinde (300 sn), müziğin süresinde (200 sn) değil', async () => {
       const out = await probe(config.output.video);
-      assert.ok(Math.abs(out.duration - 360) < 0.3, `süre ${out.duration}`);
-      assert.ok(Math.abs(await countFrames(config.output.video) - 360 * 24) <= 2);
+      assert.ok(Math.abs(out.duration - 300) < 0.3, `süre ${out.duration}`);
+      assert.ok(Math.abs(await countFrames(config.output.video) - 300 * 24) <= 2);
     });
 
     test('müzik çalıyor, bittikten sonraki kısım sessiz', async () => {
       assert.equal(isSilent(await channelStats(config.output.video, { start: 20, duration: 60 })), false);
-      assert.equal(isSilent(await channelStats(config.output.video, { start: 230, duration: 100 })), true);
+      assert.equal(isSilent(await channelStats(config.output.video, { start: 220, duration: 60 })), true);
     });
 
     test('tracklist yalnızca gerçek parçaları damgalar', async () => {
@@ -87,8 +87,8 @@ describe('build — Pomodoro: müzik kısa, montaj durmaz', () => {
 
     test('müzik bittikten sonra kalan süreyi Ambiance doldurur (sessiz değil)', async () => {
       const out = await probe(config.output.video);
-      assert.ok(Math.abs(out.duration - 360) < 0.3, `süre ${out.duration}`);
-      assert.equal(isSilent(await channelStats(config.output.video, { start: 230, duration: 100 })), false);
+      assert.ok(Math.abs(out.duration - 300) < 0.3, `süre ${out.duration}`);
+      assert.equal(isSilent(await channelStats(config.output.video, { start: 220, duration: 60 })), false);
     });
   });
 });

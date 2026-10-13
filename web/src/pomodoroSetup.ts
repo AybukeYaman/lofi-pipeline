@@ -112,14 +112,21 @@ export function cycleMinutes(statuses: Array<{ minutes: number }>): number {
   return statuses.reduce((sum, status) => sum + status.minutes, 0);
 }
 
-/** Yalnızca turların süresi (dakika), GET READY hariç. */
-export function studyMinutes(statuses: Array<{ minutes: number }>, rounds: number): number {
-  return cycleMinutes(statuses) * rounds;
+/** Bir turun açılmış adım listesi (ad, süre, tür yeter): süre hesapları buna bakar. */
+type FlatStep = Pick<PomodoroStatus, 'name' | 'minutes' | 'kind'>;
+
+/**
+ * Toplam video süresi (dakika): GET READY dahil, sondaki molalar HARİÇ (video molayla
+ * bitmez). Müziğin doldurması gereken süre bu. Sunucunun `buildTimeline`'ından gelir.
+ */
+export function totalMinutes(statuses: FlatStep[], rounds: number): number {
+  const steps = statuses.map((step) => makeStep(step.name, step.minutes, { kind: step.kind }));
+  return buildTimeline({ sets: [makeSet(defaultSetName(0), 1, steps)], rounds, intro: { visual: null } }).totalMinutes;
 }
 
-/** Toplam video süresi (dakika): GET READY dahil. Müziğin doldurması gereken süre bu. */
-export function totalMinutes(statuses: Array<{ minutes: number }>, rounds: number): number {
-  return INTRO_MINUTES + studyMinutes(statuses, rounds);
+/** Yalnızca turların süresi (dakika): GET READY hariç, sondaki molalar hariç. */
+export function studyMinutes(statuses: FlatStep[], rounds: number): number {
+  return totalMinutes(statuses, rounds) - INTRO_MINUTES;
 }
 
 /** 40 → "40 dk", 60 → "1 saat", 80 → "1 saat 20 dk", 240 → "4 saat". */
@@ -148,7 +155,7 @@ export function roundChoicesFor(current: number): number[] {
 }
 
 /** "50/10/50/20 · 5 saat 22 dk · 2 tur" — başlık çipi ve özet satırları aynı cümleyi kullanır. */
-export function pomodoroSummary(statuses: Array<{ minutes: number }>, rounds: number): string {
+export function pomodoroSummary(statuses: FlatStep[], rounds: number): string {
   const cycle = statuses.map((status) => status.minutes).join('/');
   return `${cycle} · ${durationLabel(totalMinutes(statuses, rounds))} · ${rounds} tur`;
 }
@@ -347,9 +354,14 @@ export function setsFromProgram(program: PomodoroProgram, current: EditableSet[]
 
 // ------------------------------------------------------------ önizleme ve anlatım
 
-/** Programın gerçek oturumları — sunucunun `buildTimeline`'ı (GET READY dahil). */
+/** Programın gerçek oturumları — sunucunun `buildTimeline`'ı (GET READY dahil, sondaki molalar hariç). */
 export function programSessions(sets: EditableSet[], rounds: number): PomodoroSession[] {
   return buildTimeline({ sets, rounds, intro: { visual: null } }).sessions as PomodoroSession[];
+}
+
+/** Videoya girmeyen sondaki molalar (video molayla bitmez) — `buildTimeline`'dan. */
+export function droppedTail(sets: EditableSet[], rounds: number): Array<{ name: string; minutes: number }> {
+  return buildTimeline({ sets, rounds, intro: { visual: null } }).droppedTail;
 }
 
 /** Toplamlar: çalışma/mola adedi ve süreleri, GET READY, video süresi. */
@@ -408,6 +420,11 @@ export function describeProgram(sets: EditableSet[], rounds: number): string[] {
       : 'Bu set sırası bir kez uygulanacak.',
     `Program ${stats.workCount} çalışma adımından sonra sona erecek.`,
   );
+  const dropped = droppedTail(sets, rounds);
+  if (dropped.length > 0) {
+    const rest = dropped.map((step) => `${step.minutes} dk ${step.name}`).join(' + ');
+    lines.push(`Video çalışmayla biter: en sondaki ${rest} videoya girmez.`);
+  }
   return lines;
 }
 

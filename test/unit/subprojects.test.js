@@ -153,7 +153,7 @@ describe('alt proje ve müzik aktarımı (subprojects)', () => {
         rounds: 2,
         statuses: [{ name: 'STUDY', minutes: 50 }, { name: 'BREAK', minutes: 10 }],
       });
-      assert.equal(pomodoro.project.readiness.pomodoro.totalMinutes, 122);
+      assert.equal(pomodoro.project.readiness.pomodoro.totalMinutes, 112);
 
       const ambiance = await createProject({ name: 'ambiance-proj' }, { videosDir: tempDir });
       assert.equal(Object.hasOwn(ambiance.project.projectJson.data, 'pomodoro'), false);
@@ -173,7 +173,7 @@ describe('alt proje ve müzik aktarımı (subprojects)', () => {
       ];
       const created = await createProject({ name: 'custom-pomo', pomodoro: { statuses, rounds: 3 } }, { videosDir: tempDir });
       assert.deepEqual(created.project.projectJson.data.pomodoro, { enabled: true, rounds: 3, statuses });
-      assert.equal(created.project.readiness.pomodoro.totalMinutes, 2 + 3 * 40);
+      assert.equal(created.project.readiness.pomodoro.totalMinutes, 2 + 3 * 40 - 15);
 
       await assert.rejects(
         createProject({ name: 'bad-statuses', pomodoro: { statuses: [{ name: '', minutes: 5 }] } }, { videosDir: tempDir }),
@@ -188,7 +188,7 @@ describe('alt proje ve müzik aktarımı (subprojects)', () => {
       ];
       const multi = await createProject({ name: 'multi-set', pomodoro: { sets, rounds: 2 } }, { videosDir: tempDir });
       assert.deepEqual(multi.project.projectJson.data.pomodoro, { enabled: true, rounds: 2, sets });
-      assert.equal(multi.project.readiness.pomodoro.totalMinutes, 2 + 2 * 130);
+      assert.equal(multi.project.readiness.pomodoro.totalMinutes, 2 + 2 * 130 - 20);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
     }

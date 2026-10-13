@@ -3,8 +3,8 @@
  *
  * Her video 2 dk GET READY ile başlar; bip akışının tamamı "her oturumun son
  * 3 saniyesinde 3 bip" (başlangıç sesi yok). Senaryolar spec'teki sayıların
- * hazırlık süresi eklenmiş hâli: 50/10×4 ve 30/10×6 → 242 dk (240 + 2),
- * 255:00 fazla, 229:30 eksik.
+ * hazırlık süresi eklenmiş, sondaki mola düşmüş hâli: 50/10×4 ve 30/10×6 → 232 dk (240 + 2 − 10),
+ * 245:00 fazla, 219:30 eksik.
  */
 
 import assert from 'node:assert/strict';
@@ -115,16 +115,17 @@ describe('normalizePomodoroSelection', () => {
 });
 
 describe('buildTimeline', () => {
-  it('50/10 × 4 → 242 dakika: 2 dk GET READY + 8 oturum', () => {
+  it('50/10 × 4 → 232 dakika: 2 dk GET READY + 7 oturum (video molayla bitmez)', () => {
     const timeline = buildTimeline(planOf({ preset: '50/10', rounds: 4 }));
-    assert.equal(timeline.totalMinutes, 242);
-    assert.equal(timeline.sessions.length, 9);
+    assert.equal(timeline.totalMinutes, 232);
+    assert.equal(timeline.sessions.length, 8);
+    assert.deepEqual(timeline.droppedTail, [{ name: 'BREAK', minutes: 10 }]);
   });
 
-  it('30/10 × 6 → yine 242 dakika (spec Test 4)', () => {
+  it('30/10 × 6 → 232 dakika (son BREAK videoya girmez)', () => {
     const timeline = buildTimeline(planOf({ preset: '30/10', rounds: 6 }));
-    assert.equal(timeline.totalMinutes, 242);
-    assert.equal(timeline.sessions.length, 13);
+    assert.equal(timeline.totalMinutes, 232);
+    assert.equal(timeline.sessions.length, 12);
   });
 
   it('video her zaman 2 dk GET READY ile başlar, sonra STUDY/BREAK boşluksuz dizilir', () => {
@@ -134,22 +135,22 @@ describe('buildTimeline', () => {
       [
         ['ready', 'GET READY', 0, 2],
         ['status', 'STUDY 01', 2, 52], ['status', 'BREAK 01', 52, 62],
-        ['status', 'STUDY 02', 62, 112], ['status', 'BREAK 02', 112, 122],
+        ['status', 'STUDY 02', 62, 112],
       ],
     );
-    assert.deepEqual(timeline.sessions.map((s) => s.index), [0, 1, 2, 3, 4]);
+    assert.deepEqual(timeline.sessions.map((s) => s.index), [0, 1, 2, 3]);
   });
 
   it('tur sayısı değişince timeline kendiliğinden yeniden kurulur', () => {
     const timeline = buildTimeline(planOf({ preset: '50/10', rounds: 8 }));
-    assert.equal(timeline.totalMinutes, 482);
-    assert.equal(timeline.sessions.at(-1).label, 'BREAK 08');
+    assert.equal(timeline.totalMinutes, 472);
+    assert.equal(timeline.sessions.at(-1).label, 'STUDY 08');
   });
 
   it('describeTimeline GET READY ile başlayan dökümü verir', () => {
     const text = describeTimeline(buildTimeline(planOf({ preset: '50/10', rounds: 4 })));
     assert.ok(text.startsWith('GET READY\n00:00 - 02:00\n\nSTUDY 01\n02:00 - 52:00\n\nBREAK 01\n52:00 - 62:00'));
-    assert.ok(text.trimEnd().endsWith('BREAK 04\n232:00 - 242:00'));
+    assert.ok(text.trimEnd().endsWith('STUDY 04\n182:00 - 232:00'));
   });
 });
 
@@ -162,24 +163,27 @@ describe('özel durumlar (statuses)', () => {
 
   it('döngü sırayla tekrarlanır; her oturum adını, sırasını, görüntüsünü ve bipini taşır', () => {
     const timeline = buildTimeline(planOf({ statuses: stretch, rounds: 2, intro: { visual: './resimler/hazir.png' } }));
-    assert.equal(timeline.totalMinutes, 2 + 2 * 40);
+    // STRETCH ve LONG BREAK ikisi de mola: son turun sonundaki ikisi de videoya girmez.
+    assert.equal(timeline.totalMinutes, 2 + 2 * 40 - 15);
     assert.deepEqual(
       timeline.sessions.map((x) => [x.name, x.statusIndex, x.round, x.visual, x.beep]),
       [
         ['GET READY', -1, 0, './resimler/hazir.png', true],
         ['STUDY', 0, 1, null, true], ['STRETCH', 1, 1, './resimler/esneme.png', true], ['LONG BREAK', 2, 1, null, false],
-        ['STUDY', 0, 2, null, true], ['STRETCH', 1, 2, './resimler/esneme.png', true], ['LONG BREAK', 2, 2, null, false],
+        ['STUDY', 0, 2, null, true],
       ],
     );
+    assert.deepEqual(timeline.droppedTail, [{ name: 'STRETCH', minutes: 5 }, { name: 'LONG BREAK', minutes: 10 }]);
     assert.equal(timeline.sessions[2].label, 'STRETCH 01');
   });
 
   it('beep: false olan durumun bitişinde bip çalmaz, öbürleri çalar', () => {
-    const plan = planOf({ statuses: stretch, rounds: 1 });
+    const plan = planOf({ statuses: stretch, rounds: 2 });
     const { events } = buildCueEvents(plan, buildTimeline(plan));
     const sessions = new Set(events.map((e) => e.session));
-    assert.deepEqual([...sessions].sort(), [0, 1, 2]);
-    assert.equal(events.length, 9);
+    // 3 = LONG BREAK 01 (beep: false) atlanır; videonun son oturumu STUDY 02 (4).
+    assert.deepEqual([...sessions].sort(), [0, 1, 2, 4]);
+    assert.equal(events.length, 12);
   });
 
   it('eski şekil iki durumlu listeye çevrilir; breakClip BREAK görüntüsü olur', () => {
@@ -236,7 +240,9 @@ describe('buildCueEvents — bip akışının tamamı', () => {
   it('videonun son oturumunun sonunda da bip var', () => {
     const { events } = buildCueEvents(plan, timeline);
     const last = events.filter((e) => e.session === timeline.sessions.length - 1);
-    assert.deepEqual(last.map((e) => e.atSeconds), [122 * 60 - 3, 122 * 60 - 2, 122 * 60 - 1]);
+    // Video son STUDY ile biter (son BREAK videoya girmez): bip 112. dakikanın sonunda.
+    assert.equal(timeline.sessions.at(-1).label, 'STUDY 02');
+    assert.deepEqual(last.map((e) => e.atSeconds), [112 * 60 - 3, 112 * 60 - 2, 112 * 60 - 1]);
   });
 
   it('başka ses yok: yalnızca bip, oturum başına tam 3; toplam = oturum × 3', () => {
@@ -277,7 +283,7 @@ describe('compareMusic', () => {
   const timeline = buildTimeline(plan);
 
   it('Test 1 — müzik timeline\'a eşitse doğrulama geçer', () => {
-    const result = compareMusic({ musicSeconds: 242 * 60, timeline });
+    const result = compareMusic({ musicSeconds: 232 * 60, timeline });
     assert.equal(result.status, 'exact');
     assert.equal(result.ok, true);
     assert.equal(result.excessSeconds, 0);
@@ -285,11 +291,11 @@ describe('compareMusic', () => {
   });
 
   it('saniyenin altındaki toplama sapması eşit sayılır', () => {
-    assert.equal(compareMusic({ musicSeconds: 242 * 60 + 0.4, timeline }).status, 'exact');
+    assert.equal(compareMusic({ musicSeconds: 232 * 60 + 0.4, timeline }).status, 'exact');
   });
 
   it('Test 2 — 13 dakika fazla', () => {
-    const result = compareMusic({ musicSeconds: 255 * 60, timeline });
+    const result = compareMusic({ musicSeconds: 245 * 60, timeline });
     assert.equal(result.status, 'excess');
     assert.equal(result.ok, false);
     assert.equal(result.excessSeconds, 13 * 60);
@@ -297,15 +303,15 @@ describe('compareMusic', () => {
   });
 
   it('Test 3 — 12:30 eksik', () => {
-    const result = compareMusic({ musicSeconds: 229.5 * 60, timeline });
+    const result = compareMusic({ musicSeconds: 219.5 * 60, timeline });
     assert.equal(result.status, 'short');
     assert.equal(result.ok, false);
     assert.equal(result.shortSeconds, 12.5 * 60);
     const text = describeComparison(result, plan);
     assert.ok(text.includes('Eksik: 12:30'));
-    assert.ok(text.includes('Pomodoro timeline: 242:00'));
-    assert.ok(text.includes('2 dk hazırlık'));
-    assert.ok(text.includes('Müzik toplamı: 229:30'));
+    assert.ok(text.includes('Pomodoro timeline: 232:00'));
+    assert.ok(text.includes('2 dk hazırlık − sondaki BREAK 10 dk'));
+    assert.ok(text.includes('Müzik toplamı: 219:30'));
   });
 });
 
@@ -363,25 +369,25 @@ describe('validatePomodoro', () => {
   });
 
   it('Test 1 — müzik tam oturursa geçer, kırpma planı üretilmez', () => {
-    const result = validatePomodoro({ plan: planOf({ preset: '50/10', rounds: 4 }), tracks: tracksOf(242 * 60) });
+    const result = validatePomodoro({ plan: planOf({ preset: '50/10', rounds: 4 }), tracks: tracksOf(232 * 60) });
     assert.equal(result.ok, true);
     assert.equal(result.comparison.status, 'exact');
     assert.equal(result.trim, null);
-    assert.equal(result.timeline.totalMinutes, 242);
+    assert.equal(result.timeline.totalMinutes, 232);
   });
 
   it('Test 2 — fazla müzik montajı ENGELLEMEZ: soru sormaz, uyarır ve kırpma planını hazırlar', () => {
-    const result = validatePomodoro({ plan: planOf({ preset: '50/10', rounds: 4 }), tracks: tracksOf(255 * 60) });
+    const result = validatePomodoro({ plan: planOf({ preset: '50/10', rounds: 4 }), tracks: tracksOf(245 * 60) });
     assert.equal(result.ok, true);
     assert.deepEqual(result.problems, []);
     assert.equal(Object.hasOwn(result, 'needsTrimConfirmation'), false, 'onay kavramı kalmadı');
     assert.equal(result.trim.trimmedSeconds, 13 * 60);
-    assert.equal(result.trim.usedSeconds, 242 * 60);
+    assert.equal(result.trim.usedSeconds, 232 * 60);
     assert.ok(result.warnings.some((w) => w.includes('13:00') && w.includes('otomatik kırpılacak')));
   });
 
   it('fazla müzik uyarısı kullanılmayacak parçaları ve Geri Dönüşüm Kutusu\'nu söyler', () => {
-    // 10 parça × 30 dk = 300 dk, timeline 242 dk: 9. parça kısalır, 10. parça tamamen dışarıda kalır.
+    // 10 parça × 30 dk = 300 dk, timeline 232 dk: 9. parça kısalır, 10. parça tamamen dışarıda kalır.
     const result = validatePomodoro({ plan: planOf({ preset: '50/10', rounds: 4 }), tracks: tracksOf(300 * 60, 10) });
     const warning = result.warnings.find((w) => w.includes('otomatik kırpılacak'));
     assert.ok(result.trim.droppedCount >= 1, 'bu senaryoda en az bir parça tamamen dışarıda kalmalı');
@@ -398,7 +404,7 @@ describe('validatePomodoro', () => {
 
   it('Test 3 — eksik müzik engel DEĞİL: uyarır, kalan süreyi arka plan sesi doldurur', () => {
     const plan = planOf({ preset: '50/10', rounds: 4 });
-    const result = validatePomodoro({ plan, tracks: tracksOf(229.5 * 60) });
+    const result = validatePomodoro({ plan, tracks: tracksOf(219.5 * 60) });
     assert.equal(result.ok, true);
     assert.deepEqual(result.problems, []);
     assert.equal(result.comparison.status, 'short');
@@ -424,17 +430,17 @@ describe('validatePomodoro', () => {
   });
 
   it('bipler hiçbir uyarı üretmez: hepsi videonun içine düşer', () => {
-    const result = validatePomodoro({ plan: planOf({ preset: '50/10', rounds: 4 }), tracks: tracksOf(242 * 60) });
+    const result = validatePomodoro({ plan: planOf({ preset: '50/10', rounds: 4 }), tracks: tracksOf(232 * 60) });
     assert.equal(result.ok, true);
     assert.deepEqual(result.warnings, []);
-    assert.equal(result.cues.events.length, 9 * 3);
+    assert.equal(result.cues.events.length, 8 * 3);
   });
 
   it('PomodoroValidationError mesajı sayıları ve sorunları taşır', () => {
-    const result = validatePomodoro({ plan: planOf({ preset: '50/10', rounds: 4 }), tracks: tracksOf(229.5 * 60) });
+    const result = validatePomodoro({ plan: planOf({ preset: '50/10', rounds: 4 }), tracks: tracksOf(219.5 * 60) });
     const error = new PomodoroValidationError(result);
     assert.equal(error.name, 'PomodoroValidationError');
-    assert.ok(error.message.includes('Müzik toplamı: 229:30'));
+    assert.ok(error.message.includes('Müzik toplamı: 219:30'));
     assert.ok(error.message.includes('12:30'));
     assert.equal(error.validation, result);
   });
@@ -560,17 +566,18 @@ describe('adım → set → loop', () => {
     const { sessions, totalSeconds } = buildTimeline(plan);
     const steps = sessions.slice(1);
 
+    // Son LONG BREAK videoya girmez: video STUDY 04 ile biter.
     assert.deepEqual(sessions.map((s) => s.label), [
       'GET READY', 'STUDY 01', 'BREAK 01', 'STUDY 02', 'LONG BREAK 01',
-      'STUDY 03', 'BREAK 02', 'STUDY 04', 'LONG BREAK 02',
+      'STUDY 03', 'BREAK 02', 'STUDY 04',
     ]);
-    assert.deepEqual(steps.map((s) => s.durationSeconds / 60), [50, 10, 50, 20, 50, 10, 50, 20]);
-    assert.deepEqual(steps.map((s) => s.round), [1, 1, 1, 1, 2, 2, 2, 2]);
-    assert.deepEqual(steps.map((s) => s.setIndex), [0, 0, 1, 1, 0, 0, 1, 1]);
-    assert.deepEqual(steps.map((s) => s.statusIndex), [0, 1, 2, 3, 0, 1, 2, 3]);
-    assert.deepEqual(steps.map((s) => s.stepKind), ['work', 'break', 'work', 'break', 'work', 'break', 'work', 'break']);
+    assert.deepEqual(steps.map((s) => s.durationSeconds / 60), [50, 10, 50, 20, 50, 10, 50]);
+    assert.deepEqual(steps.map((s) => s.round), [1, 1, 1, 1, 2, 2, 2]);
+    assert.deepEqual(steps.map((s) => s.setIndex), [0, 0, 1, 1, 0, 0, 1]);
+    assert.deepEqual(steps.map((s) => s.statusIndex), [0, 1, 2, 3, 0, 1, 2]);
+    assert.deepEqual(steps.map((s) => s.stepKind), ['work', 'break', 'work', 'break', 'work', 'break', 'work']);
     assert.equal(sessions[0].stepKind, 'ready');
-    assert.equal(totalSeconds, 120 + 2 * 130 * 60);
+    assert.equal(totalSeconds, 120 + (2 * 130 - 20) * 60);
     for (let i = 1; i < sessions.length; i++) assert.equal(sessions[i].startSeconds, sessions[i - 1].endSeconds);
     assert.equal(plan.preset, '50/10/50/20');
   });
@@ -588,13 +595,35 @@ describe('adım → set → loop', () => {
 
     assert.deepEqual(steps.map((s) => [s.name, s.setName, s.repeat]), [
       ['STUDY', 'SET 1', 1], ['BREAK', 'SET 1', 1], ['STUDY', 'SET 1', 2], ['BREAK', 'SET 1', 2],
-      ['STUDY', 'SET 1', 3], ['BREAK', 'SET 1', 3], ['STUDY', 'SET 2', 1], ['LONG BREAK', 'SET 2', 1],
+      ['STUDY', 'SET 1', 3], ['BREAK', 'SET 1', 3], ['STUDY', 'SET 2', 1],
     ]);
-    assert.equal(steps.at(-2).label, 'STUDY 04');
-    assert.equal(steps.at(-1).label, 'LONG BREAK 01');
-    assert.equal(totalSeconds, 120 + (3 * 30 + 40) * 60);
+    assert.equal(steps.at(-1).label, 'STUDY 04');
+    assert.equal(totalSeconds, 120 + (3 * 30 + 25) * 60);
     assert.equal(plan.statuses.length, 8, 'statuses = bir turun açılmış listesi');
     assert.equal(plan.preset, 'Klasik 25/5');
+  });
+
+  it('video hiçbir zaman molayla bitmez: sondaki art arda molaların hepsi düşer, öncekiler kalır', () => {
+    const plan = planOf({
+      sets: [{ steps: [{ name: 'STUDY', minutes: 25 }, { name: 'BREAK', minutes: 5 }, { name: 'WALK', minutes: 10 }] }],
+      rounds: 2,
+    });
+    const timeline = buildTimeline(plan);
+    assert.deepEqual(timeline.sessions.map((s) => s.label), ['GET READY', 'STUDY 01', 'BREAK 01', 'WALK 01', 'STUDY 02']);
+    assert.deepEqual(timeline.droppedTail, [{ name: 'BREAK', minutes: 5 }, { name: 'WALK', minutes: 10 }]);
+    assert.equal(timeline.totalMinutes, 2 + 40 + 25);
+    // Bipler de düşen oturumları içermez; videonun son biti son çalışmanın sonunda.
+    const { events } = buildCueEvents(plan, timeline);
+    assert.equal(events.at(-1).atSeconds, timeline.totalSeconds - 1);
+  });
+
+  it('program çalışmayla bitiyorsa ya da hiç çalışma yoksa hiçbir şey düşmez', () => {
+    const endsWithWork = buildTimeline(planOf({ statuses: [{ name: 'BREAK', minutes: 5 }, { name: 'STUDY', minutes: 25 }], rounds: 2 }));
+    assert.deepEqual(endsWithWork.droppedTail, []);
+    assert.equal(endsWithWork.totalMinutes, 2 + 60);
+    const onlyBreaks = buildTimeline(planOf({ statuses: [{ name: 'BREAK', minutes: 5 }], rounds: 2 }));
+    assert.deepEqual(onlyBreaks.droppedTail, []);
+    assert.equal(onlyBreaks.totalMinutes, 2 + 10);
   });
 
   it('flattenSets görüntüyü ve bipi kopyalar; kopyalar birbirinden bağımsız', () => {
@@ -610,7 +639,8 @@ describe('adım → set → loop', () => {
       rounds: 1,
     });
     const timeline = buildTimeline(plan);
-    assert.deepEqual(timeline.sessions.map((s) => s.visual), [null, null, 'r.png', null, 'r.png']);
+    // Son REST videoya girmez; ilk turdaki REST görüntüsünü ve sessizliğini taşır.
+    assert.deepEqual(timeline.sessions.map((s) => s.visual), [null, null, 'r.png', null]);
     const { events } = buildCueEvents(plan, timeline);
     assert.deepEqual([...new Set(events.map((e) => e.session))], [0, 1, 3]);
   });

@@ -93,21 +93,21 @@ describe('GET /api/projects/:id/pomodoro', () => {
   test('Test 1 — müzik tam oturuyorsa doğrulama geçer', async () => {
     await writeProject('exact', {
       project: { pomodoro: { enabled: true, preset: '50/10', rounds: 4 } },
-      audio: tracksFor(242 * 60),
+      audio: tracksFor(232 * 60),
     });
     const res = await getPomodoro('exact', options());
 
     assert.equal(res.enabled, true);
     assert.equal(res.validation.ok, true);
     assert.equal(res.validation.comparison.status, 'exact');
-    assert.equal(res.validation.timeline.totalMinutes, 242);
-    assert.equal(res.music.totalSeconds, 242 * 60);
+    assert.equal(res.validation.timeline.totalMinutes, 232);
+    assert.equal(res.music.totalSeconds, 232 * 60);
   });
 
   test('Test 2 — fazla müzik sayılarla ve kırpma planıyla raporlanır', async () => {
     await writeProject('excess', {
       project: { pomodoro: { enabled: true, preset: '50/10', rounds: 4 } },
-      audio: tracksFor(255 * 60),
+      audio: tracksFor(245 * 60),
     });
     const res = await getPomodoro('excess', options());
 
@@ -116,8 +116,8 @@ describe('GET /api/projects/:id/pomodoro', () => {
     assert.equal(Object.hasOwn(res.validation, 'needsTrimConfirmation'), false);
     assert.ok(res.validation.warnings.some((w) => w.includes('otomatik kırpılacak')));
     assert.equal(res.validation.comparison.excessSeconds, 13 * 60);
-    assert.ok(res.validation.message.includes('Pomodoro timeline: 242:00'));
-    assert.ok(res.validation.message.includes('Müzik toplamı: 255:00'));
+    assert.ok(res.validation.message.includes('Pomodoro timeline: 232:00'));
+    assert.ok(res.validation.message.includes('Müzik toplamı: 245:00'));
     assert.ok(res.validation.message.includes('Fazla: 13:00'));
     // Kırpmanın ne yapacağı Başlat'tan ÖNCE görünür.
     assert.equal(res.validation.trim.trimmedSeconds, 13 * 60);
@@ -126,7 +126,7 @@ describe('GET /api/projects/:id/pomodoro', () => {
   test('Test 3 — eksik müzik engel değil, uyarıdır', async () => {
     await writeProject('short', {
       project: { pomodoro: { enabled: true, preset: '50/10', rounds: 4 } },
-      audio: tracksFor(229.5 * 60),
+      audio: tracksFor(219.5 * 60),
     });
     const res = await getPomodoro('short', options());
 
@@ -136,15 +136,15 @@ describe('GET /api/projects/:id/pomodoro', () => {
     assert.ok(res.validation.warnings.some((w) => w.includes('Ambiance')));
   });
 
-  test('Test 4 — 30/10 × 6 de 242 dakika timeline üretir (2 dk GET READY dahil)', async () => {
+  test('Test 4 — 30/10 × 6 de 232 dakika timeline üretir (2 dk GET READY dahil, son BREAK yok)', async () => {
     await writeProject('thirty', {
       project: { pomodoro: { enabled: true, preset: '30/10', rounds: 6 } },
-      audio: tracksFor(242 * 60),
+      audio: tracksFor(232 * 60),
     });
     const res = await getPomodoro('thirty', options());
 
-    assert.equal(res.validation.timeline.totalMinutes, 242);
-    assert.equal(res.validation.timeline.sessions.length, 13);
+    assert.equal(res.validation.timeline.totalMinutes, 232);
+    assert.equal(res.validation.timeline.sessions.length, 12);
     assert.equal(res.validation.ok, true);
   });
 
@@ -158,9 +158,9 @@ describe('GET /api/projects/:id/pomodoro', () => {
     });
     const res = await getPomodoro('ordered', options());
 
-    // 17 dk timeline (2 dk GET READY + 15 dk): önce 20 dk'lık "uzun" geliyor, 17 dk'ya
+    // 12 dk timeline (2 dk GET READY + 10 dk STUDY; son BREAK düşer): önce 20 dk'lık "uzun" geliyor, 12 dk'ya
     // kırpılıyor, "kisa" hiç kullanılmıyor. Sıra yanlış okunsaydı kırpma da yanlış olurdu.
-    assert.deepEqual(res.validation.trim.tracks.map((t) => t.usedDuration), [1020, 0]);
+    assert.deepEqual(res.validation.trim.tracks.map((t) => t.usedDuration), [720, 0]);
     assert.equal(res.validation.trim.droppedCount, 1);
   });
 
@@ -236,7 +236,7 @@ describe('PUT /api/projects/:id/pomodoro', () => {
 
     const get = await fetch(`${url}/api/projects/http/pomodoro`);
     assert.equal(get.status, 200);
-    assert.equal((await get.json()).validation.timeline.totalMinutes, 242);
+    assert.equal((await get.json()).validation.timeline.totalMinutes, 232);
   });
 });
 
@@ -321,7 +321,7 @@ describe('PUT /api/projects/:id/pomodoro — özel durumlar (statuses)', () => {
       enabled: true, rounds: 2, statuses: stretchCycle, intro: { visual: 'resimler/hazir.png' },
     }, options());
 
-    assert.equal(res.validation.timeline.totalMinutes, 2 + 2 * 40);
+    assert.equal(res.validation.timeline.totalMinutes, 2 + 2 * 40 - 15);
     assert.deepEqual(res.settings.statuses.map((s) => [s.name, s.minutes, s.beep]), [
       ['STUDY', 25, true], ['STRETCH', 5, false], ['BREAK', 10, true],
     ]);
@@ -396,7 +396,7 @@ describe('PUT /api/projects/:id/pomodoro — özel durumlar (statuses)', () => {
     ];
     const res = await updatePomodoro('sets-write', { enabled: true, rounds: 1, sets }, options());
 
-    assert.equal(res.validation.timeline.totalMinutes, 2 + 30 + 2 * 40);
+    assert.equal(res.validation.timeline.totalMinutes, 2 + 30 + 2 * 40 - 15);
     assert.deepEqual(res.settings.sets.map((set) => [set.name, set.repeat, set.steps.length]), [['SET 1', 1, 2], ['SET 2', 2, 2]]);
     assert.equal(res.settings.statuses.length, 6);
     assert.equal(res.settings.sets[1].steps[1].visual, './resimler/esneme.png');

@@ -84,7 +84,7 @@ describe('GET /api/projects/:id/labels', () => {
     const { plan } = normalizePomodoroSelection(pomodoro);
     assert.equal(res.pomodoro.enabled, true);
     assert.deepEqual(res.pomodoro.sessions, buildTimeline(plan).sessions);
-    assert.equal(res.pomodoro.totalSeconds, 242 * 60);
+    assert.equal(res.pomodoro.totalSeconds, 232 * 60);
   });
 
   test('bozuk kayıt gizlenmez: problems döner, geçerli etiketler kalır', async () => {
